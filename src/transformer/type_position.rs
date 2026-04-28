@@ -54,7 +54,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::registry::{MethodSignature, TypeDef};
+    use crate::registry::{MethodKind, MethodSignature, TypeDef};
 
     fn make_trait_registry() -> TypeRegistry {
         let mut reg = TypeRegistry::new();
@@ -66,6 +66,7 @@ mod tests {
                 return_type: None,
                 has_rest: false,
                 type_params: vec![],
+                kind: MethodKind::Method,
             }],
         );
         reg.register(

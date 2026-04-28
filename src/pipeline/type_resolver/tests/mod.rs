@@ -1,6 +1,6 @@
 use super::*;
 use crate::pipeline::{parse_files, SyntheticTypeRegistry};
-use crate::registry::{build_registry, MethodSignature, TypeDef, TypeRegistry};
+use crate::registry::{build_registry, MethodKind, MethodSignature, TypeDef, TypeRegistry};
 use std::path::PathBuf;
 
 mod basics;
@@ -136,5 +136,6 @@ pub(super) fn make_sig(param_types: Vec<RustType>, ret: Option<RustType>) -> Met
         return_type: ret,
         has_rest: false,
         type_params: vec![],
+        kind: MethodKind::Method,
     }
 }

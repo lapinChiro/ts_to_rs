@@ -210,6 +210,15 @@ pub struct TsMethodInfo {
     pub optional: bool,
     /// rest パラメータを含むか（`...args: T[]` パターン）
     pub has_rest: bool,
+    /// メソッド種別 (Method / Getter / Setter)。
+    ///
+    /// I-205: SWC `swc_ecma_ast::MethodKind` を propagate。foundational module
+    /// `crate::ir::MethodKind` を直接参照することで registry ↔ ts_type_info の module-level
+    /// circular dep を回避 (T1-T3 batch `/check_job` Layer 4 で発見の原因 1 = foundational
+    /// placement 不在の structural fix、I-205 self-applied integration)。`TsTypeLit` 内の
+    /// getter/setter signature (`{ get x(): T; set x(v: T): void }`) も Method/Getter/Setter
+    /// で区別する。
+    pub kind: crate::ir::MethodKind,
 }
 
 /// TS 関数シグネチャ情報（call/construct シグネチャ共通）。

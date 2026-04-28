@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 use crate::ir::RustType;
 use crate::pipeline::SyntheticTypeRegistry;
-use crate::registry::{FieldDef, MethodSignature, ParamDef, TypeDef, TypeRegistry};
+use crate::registry::{FieldDef, MethodKind, MethodSignature, ParamDef, TypeDef, TypeRegistry};
 
 /// JSON interchange format version. Must match the tsc extraction script's output.
 const FORMAT_VERSION: u64 = 2;
@@ -523,6 +523,7 @@ fn convert_external_signature(
         return_type,
         has_rest,
         type_params: converted_type_params,
+        kind: MethodKind::Method,
     }
 }
 

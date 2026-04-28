@@ -6,6 +6,7 @@ use anyhow::Result;
 use swc_ecma_ast as ast;
 
 use super::{FieldDef, MethodSignature, ParamDef};
+use crate::registry::MethodKind;
 use crate::ts_type_info::{convert_to_ts_type_info, TsTypeInfo};
 
 /// interface のフィールド名・型を収集する。
@@ -76,6 +77,7 @@ fn build_method_signature(
         return_type,
         has_rest,
         type_params,
+        kind: MethodKind::Method,
     }
 }
 

@@ -53,7 +53,7 @@ fn test_convert_call_expr_chained_call_does_not_error() {
 
 #[test]
 fn test_convert_opt_chain_method_call_propagates_param_types() {
-    use crate::registry::TypeDef;
+    use crate::registry::{MethodKind, TypeDef};
 
     let mut reg = TypeRegistry::new();
     let mut methods = std::collections::HashMap::new();
@@ -64,6 +64,7 @@ fn test_convert_opt_chain_method_call_propagates_param_types() {
             return_type: None,
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
     reg.register(

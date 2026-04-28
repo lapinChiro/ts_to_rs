@@ -207,18 +207,56 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
       `is_synthetic_union` flag や `is_always_truthy` 判定で dispatch 分岐するなら
       `Named (synthetic union)` / `Named (always-truthy)` / `Named (other)` の 3 cell に
       分割。
-      Verification (両方向の同期):
+      Verification (3 方向の同期):
       - (a) **Spec → Impl**: PRD 確定後、実装着手前に「実装 file の dispatch / match を
             全 enumerate し、matrix cell と 1-to-1 対応するか」を check
       - (b) **Impl → Spec**: 実装中に新しい dispatch arm を追加する必要を発見した場合、
             Spec stage に戻って matrix cell を分割する (`spec-first-prd.md` の
             「Spec への逆戻り」手順を発動)
+      - (c) **Field-addition symmetric conversion site audit** (framework v1.7 source、
+            I-205 T1-T3 batch `/check_job` 4-layer review 由来、確定 2026-04-28):
+            PRD task が **IR struct field 追加** (`MethodSignature.kind` / `TsMethodInfo.kind`
+            等) を含む場合、その field を **produce する全 site** (constructor / builder /
+            converter / external_types registration) と **consume する全 site** (reader /
+            dispatcher / serializer) を **Spec stage で proactive enumerate** し、各 site の
+            責務 (`hardcode default` 妥当 / `propagate from source` 必須 / `propagate from
+            m.X` 必須) を意識的判断 + matrix table に記載必須。
+            Verification mechanism:
+            - **(c-1) Pre-implementation symmetric audit**: 新 field 追加 PRD で、`grep
+              -rn "<TargetStruct> {" src/` で全 construction site を抽出、各 site に対して
+              新 field の責務 (3 strategy のいずれか) を spec-traceable に記録。`## Field
+              Addition Symmetric Audit` section を PRD doc に embed mandatory
+            - **(c-2) Audit script auto-verify**: `audit-prd-rule10-compliance.py` に
+              `verify_field_addition_symmetric_audit` function 追加候補 (新 field grep +
+              全 construction site enumerate verify、`## Field Addition Symmetric Audit`
+              section 不在時 audit fail)
+            - **(c-3) Post-implementation review trigger**: bulk-script による mass field
+              addition 後は **必ず symmetric review pass** を実施 (= bulk-script 終了 ≠
+              symmetric review 完了。compile pass + test pass のみでは latent symmetric
+              gap 検出不能)
+            **Recurring problem evidence (本 sub-rule の必要性)**:
+            - **I-383 T8'** (`MethodSignature.type_params` field 追加): bulk update + 51
+              site `type_params: vec![]` hardcode、symmetric review 不在で痕跡残存
+            - **I-205 T2** (`MethodSignature.kind` / `TsMethodInfo.kind` field 追加): 51
+              site bulk-script で `kind: MethodKind::Method,` 追加、symmetric review 漏れで
+              `convert_method_info_to_sig` (TsTypeLit 経路) と `resolve_method_sig` (Pass 2
+              変換) で hardcode latent kind drop。前者は test failure trigger なしで latent
+              のまま T1-T3 完了状態に持ち越され、`/check_job` Layer 4 で発見 → Fix 2 で
+              structural fix
+            - **= 2 度連続発生 = recurring problem signal**、3 度目発生前の structural
+              prevention が ideal-implementation-primacy 観点で必須
       実装の dispatch arms と PRD matrix cell が乖離する場合は **Spec gap signal**:
       PRD 起草時に問題空間を網羅していなかった証拠であり、現 PRD scope の rework または
       別 PRD 切り出しを判断する。
-      (Lesson: I-171 T5 SG-T5-FRESH1 — `Option<Named other>` を PRD で 1 cell とした
-      結果、実装側で synthetic union / 非 synthetic 2 dispatch arm の存在に気付かず、
+      (Lesson source (a)(b): I-171 T5 SG-T5-FRESH1 — `Option<Named other>` を PRD で 1 cell
+      とした結果、実装側で synthetic union / 非 synthetic 2 dispatch arm の存在に気付かず、
       4 度目 iteration で `always-truthy 全型対応漏れ` として defect 発覚。)
+      (Lesson source (c): I-205 T1-T3 batch `/check_job` 4-layer review (2026-04-28) で
+      `convert_method_info_to_sig` の latent kind drop を発見、root cause を I-383 T8' /
+      I-205 T2 の 2 度連続 recurring problem として分析 → framework v1.7 sub-rule (c) 化。
+      別 PRD I-213 (codebase-wide IR struct construction DRY refactor) と相補的に動作:
+      I-213 が **structural** な解決 (構築 site の集約 abstraction)、本 sub-rule (c) が
+      **process** な解決 (新 field 追加時の symmetric audit checklist)。)
 - [ ] **Cross-axis matrix completeness**: PRD の matrix は **「PRD の解決軸 single
       dimension」ではなく「機能 emission を決定する全 input dimension の直積
       (Cartesian product)」** で構築する。
@@ -418,6 +456,10 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
 
 ## Versioning
 
+- **v1.7** (2026-04-28): I-205 PRD T1-T3 Implementation batch の `/check_job` 4-layer review で発見された **本質的原因 3 (process / framework gap = "field 追加 PRD で symmetric conversion site review が checklist 不在")** に対する self-applied integration:
+  - **Rule 9 sub-rule (c) NEW**: "Field-addition symmetric conversion site audit" を新設、(c-1) Pre-implementation symmetric audit + (c-2) Audit script auto-verify (`verify_field_addition_symmetric_audit` function 追加候補) + (c-3) Post-implementation review trigger (bulk-script 後 mandatory)。
+  - Lesson source: I-205 T1-T3 batch `/check_job` Layer 4 Adversarial trade-off review (2026-04-28) で `convert_method_info_to_sig` (`type_literals.rs:98`) の latent kind drop を発見。Root cause を I-383 T8' (`type_params` field 追加) + I-205 T2 (`kind` field 追加) の **2 度連続 recurring problem** として分析、3 度目発生前の structural prevention が必須と判定。
+  - 別 PRD I-213 (codebase-wide IR struct construction DRY refactor) と本 sub-rule (c) は相補的: I-213 が **structural** な解決 (構築 site の集約 abstraction)、sub-rule (c) が **process** な解決 (新 field 追加 PRD での symmetric audit checklist)。短期は process (sub-rule (c)) で防御、長期は structural (I-213) で根本解消。
 - **v1.6** (2026-04-28): I-205 PRD deep deep review (iteration v7) で v1.5 framework 内 audit asymmetry を発見、framework symmetry restoration:
   - **Rule 8 (8-c) audit auto-verify NEW**: `verify_invariants_test_contracts` function in `audit-prd-rule10-compliance.py`、各 INV-N entry に `test_invariant_N_*` test fn name reference の structural detection (F-deep-deep-2 fix)
   - **Rule 11 (d-6) audit auto-verify NEW**: `verify_rule11_d6_relevance_compliance` function、Impact Area Audit Findings section の defer rows に対し (d-6-b-1) orthogonality declaration + (d-6-b-2) non-interference probe markers の structural detection (F-deep-deep-1 fix、Rule 1 (1-4) audit との symmetry 確立)

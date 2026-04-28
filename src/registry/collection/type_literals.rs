@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use crate::ir::TypeParam;
-use crate::registry::{FieldDef, MethodSignature, ParamDef, TypeDef};
+use crate::registry::{FieldDef, MethodKind, MethodSignature, ParamDef, TypeDef};
 use crate::ts_type_info::{TsFnSigInfo, TsMethodInfo, TsTypeInfo, TsTypeLiteralInfo};
 
 /// `TsTypeLiteralInfo` から `TypeDef<TsTypeInfo>::Struct` を構築する。
@@ -95,6 +95,13 @@ pub(super) fn convert_method_info_to_sig(m: &TsMethodInfo) -> MethodSignature<Ts
         return_type: m.return_type.clone(),
         has_rest: m.has_rest,
         type_params,
+        // I-205: input `TsMethodInfo` の kind を `MethodSignature<TsTypeInfo>` に lossless
+        // propagate (Method/Getter/Setter 区別を TsTypeLit → MethodSignature 変換で失わせ
+        // ない、`resolve_method_sig` の symmetric counterpart)。pre-fix では
+        // `MethodKind::Method` を hardcode していたため m.kind が silently drop されていた
+        // (T1-T3 batch `/check_job` Layer 4 で発見の latent silent semantic risk、Fix 2 で
+        // structural fix)。
+        kind: m.kind,
     }
 }
 
@@ -115,6 +122,7 @@ pub(super) fn convert_fn_sig_to_method_sig(sig: &TsFnSigInfo) -> MethodSignature
         return_type: sig.return_type.clone(),
         has_rest: sig.has_rest,
         type_params: vec![],
+        kind: MethodKind::Method,
     }
 }
 
@@ -199,6 +207,7 @@ mod build_struct_from_type_literal_tests {
                 type_params: vec![],
                 optional: false,
                 has_rest: false,
+                kind: MethodKind::Method,
             }],
             ..empty_lit()
         };
@@ -210,6 +219,122 @@ mod build_struct_from_type_literal_tests {
             assert_eq!(sigs[0].params[0].name, "x");
             assert_eq!(sigs[0].params[0].ty, TsTypeInfo::String);
             assert_eq!(sigs[0].return_type, Some(TsTypeInfo::Void));
+            // I-205 Fix 2: TsMethodInfo.kind が MethodSignature.kind に lossless propagate
+            assert_eq!(sigs[0].kind, MethodKind::Method);
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    // I-205 Fix 2 (T1-T3 batch `/check_job` Layer 4 由来): convert_method_info_to_sig が
+    // `m.kind` を `MethodSignature.kind` に lossless propagate することを verify。
+    // 旧実装は `MethodKind::Method` を hardcode していたため getter/setter が silently Method
+    // として消失していた (latent silent semantic drop)。本 test がその structural prevention。
+
+    #[test]
+    fn test_build_struct_from_type_literal_propagates_getter_kind() {
+        let lit = TsTypeLiteralInfo {
+            methods: vec![TsMethodInfo {
+                name: "value".to_string(),
+                params: vec![],
+                return_type: Some(TsTypeInfo::Number),
+                type_params: vec![],
+                optional: false,
+                has_rest: false,
+                kind: MethodKind::Getter,
+            }],
+            ..empty_lit()
+        };
+        let result = build_struct_from_type_literal(&lit, vec![]);
+        if let TypeDef::Struct { methods, .. } = result {
+            let sigs = methods.get("value").expect("value method");
+            assert_eq!(sigs.len(), 1);
+            assert_eq!(
+                sigs[0].kind,
+                MethodKind::Getter,
+                "TsMethodInfo Getter kind は MethodSignature.kind に lossless propagate \
+                 されなければならない (Fix 2: convert_method_info_to_sig の hardcode 排除)"
+            );
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_build_struct_from_type_literal_propagates_setter_kind() {
+        let lit = TsTypeLiteralInfo {
+            methods: vec![TsMethodInfo {
+                name: "value".to_string(),
+                params: vec![TsParamInfo {
+                    name: "v".to_string(),
+                    ty: TsTypeInfo::Number,
+                    optional: false,
+                }],
+                return_type: Some(TsTypeInfo::Void),
+                type_params: vec![],
+                optional: false,
+                has_rest: false,
+                kind: MethodKind::Setter,
+            }],
+            ..empty_lit()
+        };
+        let result = build_struct_from_type_literal(&lit, vec![]);
+        if let TypeDef::Struct { methods, .. } = result {
+            let sigs = methods.get("value").expect("value method");
+            assert_eq!(sigs.len(), 1);
+            assert_eq!(
+                sigs[0].kind,
+                MethodKind::Setter,
+                "TsMethodInfo Setter kind は MethodSignature.kind に lossless propagate \
+                 されなければならない"
+            );
+        } else {
+            panic!("expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_build_struct_from_type_literal_distinguishes_getter_setter_pair() {
+        let lit = TsTypeLiteralInfo {
+            methods: vec![
+                TsMethodInfo {
+                    name: "value".to_string(),
+                    params: vec![],
+                    return_type: Some(TsTypeInfo::Number),
+                    type_params: vec![],
+                    optional: false,
+                    has_rest: false,
+                    kind: MethodKind::Getter,
+                },
+                TsMethodInfo {
+                    name: "value".to_string(),
+                    params: vec![TsParamInfo {
+                        name: "v".to_string(),
+                        ty: TsTypeInfo::Number,
+                        optional: false,
+                    }],
+                    return_type: Some(TsTypeInfo::Void),
+                    type_params: vec![],
+                    optional: false,
+                    has_rest: false,
+                    kind: MethodKind::Setter,
+                },
+            ],
+            ..empty_lit()
+        };
+        let result = build_struct_from_type_literal(&lit, vec![]);
+        if let TypeDef::Struct { methods, .. } = result {
+            let sigs = methods.get("value").expect("value accessors");
+            assert_eq!(sigs.len(), 2, "getter + setter pair = 2 signatures");
+            let kinds: Vec<MethodKind> = sigs.iter().map(|s| s.kind).collect();
+            assert!(
+                kinds.contains(&MethodKind::Getter),
+                "Getter signature must be present, got {kinds:?}"
+            );
+            assert!(
+                kinds.contains(&MethodKind::Setter),
+                "Setter signature must be present, got {kinds:?}"
+            );
         } else {
             panic!("expected Struct");
         }
@@ -285,6 +410,7 @@ mod build_struct_from_type_literal_tests {
                 type_params: vec![],
                 optional: false,
                 has_rest: false,
+                kind: MethodKind::Method,
             }],
             ..empty_lit()
         };

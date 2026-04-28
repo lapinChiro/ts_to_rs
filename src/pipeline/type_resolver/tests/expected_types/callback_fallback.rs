@@ -1,6 +1,7 @@
 use super::*;
 
 // --- Arrow/Fn expected type propagation (I-267) ---
+use crate::registry::MethodKind;
 
 #[test]
 fn test_propagate_expected_callback_arrow_return_object_literal() {
@@ -321,6 +322,7 @@ fn test_callable_interface_return_type_propagated_to_arrow() {
                 }),
                 has_rest: false,
                 type_params: vec![],
+                kind: MethodKind::Method,
             }],
             extends: vec![],
             is_interface: true,
@@ -375,6 +377,7 @@ fn test_multi_overload_callable_interface_resolves_widest_params() {
                     return_type: Some(RustType::String),
                     has_rest: false,
                     type_params: vec![],
+                    kind: MethodKind::Method,
                 },
                 MethodSignature {
                     params: vec![
@@ -384,6 +387,7 @@ fn test_multi_overload_callable_interface_resolves_widest_params() {
                     return_type: Some(RustType::F64),
                     has_rest: false,
                     type_params: vec![],
+                    kind: MethodKind::Method,
                 },
             ],
             extends: vec![],

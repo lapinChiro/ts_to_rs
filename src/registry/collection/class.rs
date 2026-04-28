@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use swc_ecma_ast as ast;
 
-use crate::registry::{FieldDef, MethodSignature, ParamDef, TypeDef};
+use crate::registry::{FieldDef, MethodKind, MethodSignature, ParamDef, TypeDef};
 use crate::ts_type_info::{convert_to_ts_type_info, TsTypeInfo};
 
 use super::collect_type_params;
@@ -103,6 +103,7 @@ pub(super) fn collect_class_info(class: &ast::ClassDecl) -> TypeDef<TsTypeInfo> 
                     // 抽出する。現状の SWC AST の Constructor では type_params は直接持てないため
                     // 空 vec で OK。
                     type_params: vec![],
+                    kind: MethodKind::Method,
                 });
             }
             ast::ClassMember::Method(method) => {
@@ -140,9 +141,42 @@ pub(super) fn collect_class_info(class: &ast::ClassDecl) -> TypeDef<TsTypeInfo> 
                     return_type,
                     has_rest,
                     type_params: method_type_params,
+                    // I-205: SWC `ClassMethod.kind` (Method / Getter / Setter) を propagate。
+                    // call site (`resolve_member_access`) で getter/setter dispatch 判別に利用。
+                    kind: MethodKind::from(method.kind),
                 });
             }
-            _ => {}
+            // I-205 Rule 11 (d-1) compliance: 残 ClassMember variants を explicit enumerate
+            // (旧 `_ => {}` arm は silent drop の温床、新 variant 追加時 compile error で
+            // dispatch fix を強制する)。各 variant の payload は本 path で利用しないため
+            // pattern 自体を `_` に bind することで Rust idiom に従う (`let _ = X` 不要化、
+            // I-205 T1-T3 batch `/check_job` Layer 1 由来の Fix 3)。
+            ast::ClassMember::PrivateMethod(_) => {
+                // private method (`#name() {...}`)。本 PRD scope は public method の
+                // method kind tracking が中心、private method は registry に登録せず
+                // (TS の private 修飾は visibility 制限のみで Rust struct field-private と
+                // semantic 一致、call site dispatch 不要)。Tier 1 emission は
+                // `src/transformer/classes/members.rs` 側で行う。
+            }
+            ast::ClassMember::StaticBlock(_) => {
+                // static initialization block (`static {...}`)。registry には method として
+                // 登録せず、Transformer 側 (PRD 2.7 で TypeResolver visit、I-204 で
+                // Transformer emission strategy) で扱う。
+            }
+            ast::ClassMember::AutoAccessor(_) => {
+                // TS 5.0+ `accessor x: T = init`。本 PRD I-205 scope では Tier 2 honest
+                // error 経路のため registry 登録なし (Transformer 側 `classes/mod.rs:165-171`
+                // で `UnsupportedSyntaxError` 経由 honest error)。完全 Tier 1 化は別 PRD
+                // I-201-A で本 framework の MethodKind tracking を leverage して
+                // Getter+Setter pair として登録予定。
+            }
+            ast::ClassMember::TsIndexSignature(_) => {
+                // index signature (`[k: string]: T`)。Tier 2 filter out (型 only、
+                // runtime effect なし、ast-variants.md ClassMember section 参照)。
+            }
+            ast::ClassMember::Empty(_) => {
+                // 空メンバー (no-op、ast-variants.md ClassMember section 参照)。
+            }
         }
     }
 

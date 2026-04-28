@@ -18,6 +18,7 @@
 
 pub mod expr;
 pub mod item;
+pub mod method_kind;
 pub mod naming;
 pub mod stmt;
 pub mod types;
@@ -33,6 +34,7 @@ pub use expr::{
     UserTypeRef,
 };
 pub use item::{AssocConst, EnumValue, EnumVariant, Item, Method, Param, StructField};
+pub use method_kind::MethodKind;
 pub use naming::{
     camel_to_snake, sanitize_field_name, sanitize_rust_type_name, string_to_pascal_case,
 };

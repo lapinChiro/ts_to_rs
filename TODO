@@ -876,6 +876,266 @@ block しない** latent imprecision として TODO 化する。
    - **Resolution target**: 独立 PRD として起票、PRD 6 (I-048 closure ownership 推論) close 後の next-priority 候補 (Hono bench で static block 使用 reachability audit 実施で priority 確定)。matrix-driven 設計 (StaticBlock × narrow trigger × body shape × outer mutation 軸の直積)。
    - 🔗 PRD 2.7 (T8 で TypeResolver layer fix 済、本 entry は Transformer layer の続編)、I-194 (typeof if-block elision、similar Transformer IR emission gap)、I-203 (codebase-wide AST match exhaustiveness、I-204 改修中の同 file 改修可能性)
 
+- **[I-206]** **Class inheritance dispatch — B7 inherited accessor の Tier 1 化 (PRD I-205 scope 外、user 確定 2026-04-28 PRD I-205 Spec stage Discovery 由来)** [**L3** (compile error visible、Hono の class inheritance reachability 確認後に L1 promote 余地)] — PRD I-205 (Class member access dispatch with getter/setter methodology framework) Spec stage で **B7 (inherited accessor、parent class accessor) を本 PRD scope では Tier 2 honest error reclassify 化**、Tier 1 化は別 architectural concern (= "Class inheritance dispatch") として split 確定。SWC accept、tsx で正常 runtime semantic 動作するが、Rust struct には直接 inheritance mechanism なし、trait による interface 継承 / composition pattern / wrapper struct + delegate 等の strategy 候補の確立が独立 PRD 単位の課題。
+   - **Architectural concern**: "Class inheritance dispatch" (= TS class inheritance (`class B extends A`) の Rust 等価表現確立、parent class member への direct access (`super.x`) / inherited accessor dispatch / inherited method override / virtual dispatch + abstract class interaction 全体を 1 architectural concern として cohesive 解決)。PRD I-205 = "Class member access dispatch with getter/setter methodology" とは別 concern (1 PRD = 1 architectural concern 厳格適用)。**関連既存 PRD**: I-013 (abstract class の子クラスで super() が未書換、`generate_child_of_abstract()` 拡張)、I-014 (RC-5 abstract class 変換パス欠陥)。本 entry I-206 と I-013/I-014 は cohesive batch 化候補 (両者 inheritance / super dispatch の architectural concern を共有)。
+   - **Priority (L3 暫定、reachability audit で reclassify 余地)**: 本 entry は I-205 で Tier 2 honest error reclassify (`UnsupportedSyntaxError::new("inherited accessor access", span)`) され silent semantic change ではないため L3 暫定。Hono のような production codebase で B7 (inherited accessor) 使用 reachability 確認後に L1 promote 余地 (silent semantic change ではないが reachability 高で expansion rate 大なら L2 候補)。
+   - **Empirical reproduction**:
+     ```ts
+     // 入力 TS:
+     class Animal {
+       _name: string = "default";
+       get name(): string { return this._name; }
+       set name(v: string) { this._name = v; }
+     }
+     class Dog extends Animal {
+       bark(): void { console.log(`${this.name} says woof`); }
+     }
+     const d = new Dog();
+     console.log(d.name);  // ← B7 inherited accessor read (cell 8)
+     d.name = "Rex";       // ← B7 inherited accessor write (cell 17)
+     d.name += "!";        // ← B7 compound assign (cell 26)
+     ```
+     現状 (post-I-205): `UnsupportedSyntaxError::new("inherited accessor access", span)` で Tier 2 honest error。Tier 1 (TS-equivalent runtime semantic) は本 PRD scope。
+   - **Affected cells in I-205 matrix** (本 entry で Tier 1 化候補): cell 8 (A1 Read × B7)、cell 17 (A2 Write simple × B7)、cell 26 (A3 compound `+=` × B7)、cell 29-e-c (A3 `-=`/`*=`/`/=`/`%=`/`**=` × B7)、cell 35-c (A4 bitwise compound × B7)、cell 41-c (A5 logical compound × B7)、cell 45-dc (A6 decrement × B7)。
+   - **修正方針 (Spec stage で詳細確定)**:
+     1. **Rust inheritance strategy 確定 (3 案 spec stage 検討)**:
+        - **(a) trait + impl pattern**: 親 class accessor を trait method として定義、子 class が `impl Trait for Dog` で継承。`_name` field は子側 struct に再定義 or `Animal` field を `dog: Animal` として hold (composition)
+        - **(b) composition pattern**: `struct Dog { animal: Animal, ... }` で `Animal` を field として hold、`Dog::name()` を `self.animal.name()` に delegate (`Deref` impl で `d.name` direct access も可能、ただし `name` が getter なので caller side dispatch 統一が課題)
+        - **(c) macro-generated delegation**: `#[derive(Inherits<Animal>)]` 風 macro で getter/setter delegation を auto-generate
+     2. **lookup_method_kind_with_parent_traversal helper の Tier 1 拡張**: I-205 で partial implementation (Tier 2 reclassify mechanism) されている helper を、parent class の MethodSignature を resolve して dispatch arm を Tier 1 emit に extend
+     3. **`super.x` / `super.x = v` access の dispatch path**: TS `super.x` は parent class の field/getter を直接参照 (`this` ではなく) — Rust の Deref / explicit parent ref の strategy 選択
+     4. **Abstract class interaction**: I-013/I-014 の abstract class 変換パス (`generate_child_of_abstract()`) と integrate
+   - **影響範囲**: `src/registry/collection/class.rs` (parent class lookup)、`src/transformer/expressions/member_access.rs::resolve_member_access` (B7 dispatch arm の Tier 1 emission)、`src/transformer/expressions/assignments.rs::dispatch_member_write` (B7 setter dispatch)、`src/transformer/classes/inheritance.rs` (既存 abstract class path との integrate)、`tests/e2e/scripts/i-206-*.ts` (新規 fixture)、`doc/grammar/ast-variants.md` ClassMember section (inheritance lookup 言及 update)。
+   - **発見経緯**: PRD I-205 Spec stage Discovery (2026-04-27) で B7 inherited accessor を初版 matrix に含めた状態で Spec gap detection。SWC parser empirical observation (`## SWC Parser Empirical Lock-ins` section、cell 8) で **SWC accept、tsx で runtime preserved** (TS class inheritance は標準 prototype chain) を確認、Rust 等価表現は orthogonal architectural concern と判明。1 PRD = 1 architectural concern 原則 (user 承認 2026-04-27 PRD 2.7 (d) 構造分離 pattern) に従い、本 PRD I-205 では Tier 2 honest error reclassify (cells 8/17/26/29-e-c/35-c/41-c/45-dc 全て `UnsupportedSyntaxError` 経由) で silent drop 排除、Tier 1 化は本 entry I-206 で別 PRD 化。
+   - **Resolution target**: PRD I-205 close 後、I-013/I-014 (abstract class 変換パス) との cohesive batch 候補。matrix-driven 設計 (parent class member shape × access kind × inheritance depth × Rust strategy 軸の直積)。reachability audit (Hono の class inheritance 使用箇所列挙) で priority 確定。
+   - 🔗 PRD I-205 (本 entry で Tier 2 reclassify 済、本 entry は Tier 1 化の続編)、I-013 (abstract class super() 未書換、本 entry と cohesive batch 候補)、I-014 (RC-5 abstract class 変換パス欠陥、cohesive batch 候補)、I-201-A (PRD 2.8 AutoAccessor、inheritance との interaction 候補)、I-201-B (PRD 7 Decorator framework、AutoAccessor + decorator + inheritance triple interaction 候補)
+
+- **[I-207]** **Destructure pattern dispatch — class instance / getter destructure (`const {x} = obj`) の Tier 1 化 (PRD I-205 scope 外、user 確定 2026-04-28 PRD I-205 Spec stage Discovery 由来)** [**L3** (compile error visible、silent ではない)] — PRD I-205 で **A7 (Destructure read、`const {x} = obj`) を Tier 2 honest error reclassify 化**、Tier 1 化は別 architectural concern (= "Destructure pattern dispatch") として split 確定。TS object destructure は own enumerable property 列挙 + getter trigger semantic、Rust の `let Foo { x, .. } = obj` は struct field 直接 binding (move semantic)、両 semantic を Rust で TS-equivalent に reproduce する strategy (= temporary binding 経由 getter 呼出 + field rename 等) は Object pattern (nested / default / rest / `: alias` rename / array pattern interaction) を broader scope に持つ。
+   - **Architectural concern**: "Destructure pattern dispatch" (= TS destructure pattern (object / array / nested / default / rest / `: alias` rename) の Rust 等価表現確立、class instance / object literal / array / iterator / Map.entries() 等 broader source kind 全体を cohesive 解決)。PRD I-205 = "Class member access dispatch with getter/setter methodology" とは別 concern。
+   - **Priority (L3)**: I-205 で Tier 2 honest error reclassify (`UnsupportedSyntaxError::new("destructure read of class instance", span)` / `UnsupportedSyntaxError::new("destructure read with getter", span)`) され silent ではない。reachability audit で promote 余地。
+   - **Empirical reproduction**:
+     ```ts
+     class Foo {
+       _x: number = 1;
+       get x(): number { return this._x; }
+     }
+     const obj = new Foo();
+     const { x } = obj;  // ← A7 destructure read with getter (cell 47)
+     // expected: x = 1 (getter trigger)
+     ```
+     現状 (post-I-205): `UnsupportedSyntaxError::new("destructure read of class instance", span)` (cell 46 = B1 field) / `UnsupportedSyntaxError::new("destructure read with getter", span)` (cell 47 = B2/B4 getter) で Tier 2 honest error。
+   - **Affected cells in I-205 matrix** (本 entry で Tier 1 化候補): cell 46 (A7 × B1 field)、cell 47 (A7 × B2/B4 getter)。Object literal destructure / array destructure / nested destructure は本 entry の broader scope 内 (I-205 では class instance のみ enumerate)。
+   - **修正方針 (Spec stage で詳細確定)**:
+     1. **Destructure desugar strategy**: TS `const {x, y: alias, z = default, ...rest} = obj` を Rust の sequential let-binding に desugar (`let x = obj.x(); let alias = obj.y(); let z = obj.z().unwrap_or(default); let rest = obj.rest_props();`)。getter dispatch は I-205 framework を leverage
+     2. **Pattern matrix construction**: object pattern × source kind (class instance / object literal / `Map.entries()` / array pattern) × element shape (simple binding / `: alias` rename / `= default` / `...rest`) × nested pattern × default-with-getter-side-effect の Cartesian product
+     3. **Side effect ordering**: TS では destructure pattern の evaluation order は object key 順 (left-to-right)、getter trigger 順序を Rust let-binding 順序で preserve
+     4. **`...rest` semantic**: TS `...rest` は own enumerable property 全列挙 → Rust 等価表現は struct → struct 部分 copy or HashMap collect の strategy 選択 (Tier 2 honest error reclassify 可能性あり、Spec stage で確定)
+   - **影響範囲**: `src/transformer/statements/decl.rs` (var decl with destructure pattern)、`src/transformer/expressions/destructure.rs` (新規 file 候補)、`src/registry/collection/class.rs` (getter MethodSignature lookup、I-205 leverage)、`tests/e2e/scripts/i-207-*.ts` (新規 fixture matrix-cell 単位)、`doc/grammar/ast-variants.md` ObjectPat / ArrayPat / RestPat section sync。
+   - **発見経緯**: PRD I-205 Spec stage で A7 (Destructure read) を corner case として matrix 内 enumerate (cells 46-47)、Tier 1 化が destructure pattern dispatch という broader scope の architectural concern であると確定 (1 PRD = 1 architectural concern 厳格適用)。本 PRD I-205 では Tier 2 honest error reclassify で silent drop 排除、Tier 1 化は本 entry I-207 で別 PRD 化。
+   - **Resolution target**: PRD I-205 close 後、Object literal destructure (PRD 2.9 / I-202) と cohesive batch 候補 (両者 destructure 系統)。matrix-driven 設計 (object/array pattern × element shape × source kind × default/rest interaction 軸)。
+   - 🔗 PRD I-205 (本 entry で Tier 2 reclassify 済、本 entry は Tier 1 化の続編)、I-202 (PRD 2.9 Object literal Tier 1 化、本 entry の object literal source kind と cohesive)、I-201-A (PRD 2.8 AutoAccessor、destructure × AutoAccessor interaction 候補)、I-051 (TODO 内 destructure 関連 entry あれば cross-reference 可能性)
+
+- **[I-208]** **Class Method body T-aware comprehensive `.clone()` insertion (C2 pattern) — complex getter body の non-Copy T return 完全 Tier 1 化 (PRD I-205 scope 外、user 確定 2026-04-28 PRD I-205 Spec stage Discovery 由来)** [**L3** (compile error E0507 visible、user manual `.clone()` で fix 可能)] — PRD I-205 では **C1 limited pattern (`return self.field;` literal field access return + cell 78 last-expr `self.field` 拡張) のみ** で `.clone()` 自動挿入を達成。C2 = computed expression / conditional return / let-binding intermediate / multi-return early exit / nested closure body 等の **複雑な getter body shape** での non-Copy T move-out (E0507) は本 PRD I-205 scope 外 = user manual `.clone()` で fix 可能だが ideal でない。本 entry は C2 = Class Method body 全体に対する T-aware `.clone()` 自動挿入 (= return statement / let-binding / closure capture 全位置で T が non-Copy なら `.clone()` insert) を独立 architectural concern として完全変換する PRD。
+   - **Architectural concern**: "Class Method body T-aware clone insertion comprehensive" (= return type が non-Copy T の Class Method body 内、`self.field` access 全位置で AST shape (return / let-binding / conditional / closure body / nested expression) を超えた `.clone()` 自動挿入の cohesive 達成)。PRD I-205 = C1 limited pattern とは別 architectural concern (broader scope = body shape × T variant 直積)。
+   - **Priority (L3)**: E0507 compile error visible (silent ではない)、user manual `.clone()` で fix 可能だが ideal-implementation-primacy 観点で ts_to_rs 自動挿入が ideal。production code で reachability 高なら L2 promote 余地。
+   - **Empirical reproduction**:
+     ```ts
+     class Foo {
+       _items: string[] = [];
+       get items(): string[] {
+         if (this._items.length === 0) {
+           return [];  // C2 cell 76 conditional return
+         }
+         return this._items;  // E0507 (String[] = non-Copy)
+       }
+       get firstName(): string {
+         const v = this._items[0] ?? "default";  // C2 cell 77 let-binding intermediate
+         return v;
+       }
+       processAll(): string[] {
+         return this._items.map(x => x.toUpperCase());  // C2 cell 80 nested closure body
+       }
+     }
+     ```
+     現状 (post-I-205): cell 76/77/79/80 は user manual `.clone()` (`return self._items.clone();` 等) を user が明示的に書く必要、ts_to_rs は自動 `.clone()` insert なし。compile error E0507 残存。
+   - **Affected cells in I-205 matrix** (本 entry で Tier 1 化候補): cell 75 (computed expression return)、cell 76 (`if cond { return X; } return Y;` conditional return)、cell 77 (`let v = self.field; return v;` let-binding intermediate)、cell 79 (multi-return early exit)、cell 80 (nested closure body `return arr.map(x => this.field)`)。本 PRD I-205 で C1 として cover 済の cell 70/72/74 (`return self.field;` literal、non-Copy T D4-D15)、cell 78 (last-expr `self.field`、本 PRD で C1 拡張) は除外。
+   - **修正方針 (Spec stage で詳細確定)**:
+     1. **AST shape × T variant 直積 matrix**: body shape (return literal / return computed / conditional return / let-binding return / multi-return / closure body) × T variant (D1-D3 Copy / D4-D15 non-Copy / Option<T> / Vec<T> / nested generic) の Cartesian product 構築
+     2. **`.clone()` insertion site detection**: AST 走査で `self.field` access を全列挙、各 access site の outer context (return / let-binding / closure body / function arg) と T が non-Copy か判定、必要なら `.clone()` insert
+     3. **closure capture interaction (I-048 と orthogonal)**: cell 80 nested closure body は **I-048 (closure ownership 推論)** と integrate (closure capture mode = move/Fn/FnMut の判定後に `.clone()` insert)。本 entry は I-048 完了後に再評価 or cohesive batch 化候補
+     4. **T-aware Copy/Clone trait detection**: TypeRegistry の T 変換時に `derive(Clone)` 必須 marking、user-defined struct で Clone derive 不在なら Tier 2 honest error reclassify
+   - **影響範囲**: `src/transformer/classes/members.rs::build_method_inner` (Class Method body の `.clone()` insertion 拡張、現 C1 limited pattern を C2 comprehensive 化)、`src/registry/mod.rs` (T Copy/Clone trait detection)、`src/transformer/expressions/closures.rs` (closure capture interaction、I-048 leverage)、`tests/e2e/scripts/i-208-*.ts` (matrix-cell 単位 fixture)、`doc/grammar/rust-type-variants.md` Copy/Clone trait section sync。
+   - **発見経緯**: PRD I-205 Spec stage で Class Method Getter body shape を Rule 7 (Control-flow exit sub-case completeness) に従い cells 70-81 として enumerate、cell 78 last-expr `self.field` のみ本 PRD で C1 拡張として scope-in、cell 75/76/77/79/80 (computed expression / conditional / let-binding / multi-return / closure body) は **C2 pattern として broader scope の architectural concern** であると確定 (1 PRD = 1 architectural concern 厳格適用)。本 PRD I-205 では C1 limited 限定で C2 cells を `Tier 2 user manual .clone()` (本 PRD scope 外 = compile error E0507 残存) で record、Tier 1 化は本 entry I-208 で別 PRD 化。
+   - **Resolution target**: PRD I-205 close 後、I-048 (closure ownership 推論) 完了後の next-priority 候補 (cell 80 nested closure body は I-048 と integrate 必須)。matrix-driven 設計 (body shape × T variant × closure interaction × outer context 軸)。
+   - 🔗 PRD I-205 (C1 limited pattern を本 PRD で達成、本 entry は C2 comprehensive 化の続編)、I-048 (closure ownership 推論、cell 80 nested closure body と integrate 必須)、PRD 6 (I-048、本 entry の prerequisite)、I-201-A (PRD 2.8 AutoAccessor、AutoAccessor body shape interaction 候補)
+
+- **[I-209]** **Function reference semantic — class regular method `obj.x` no-paren reference (method-as-fn-reference) の Tier 1 化 (PRD I-205 scope 外、user 確定 2026-04-28 PRD I-205 Spec stage Discovery 由来)** [**L3** (compile error E0609 visible、silent ではない)] — PRD I-205 では **B6 (regular method) を `obj.x` no-paren で referencing する pattern (= bound method として first-class function value 取得) を Tier 2 honest error reclassify 化**、Tier 1 化は別 architectural concern (= "Function reference semantic") として split 確定。TS `obj.method` は first-class function value (bound method、`this` capture 済の closure 等価)、Rust では `Type::method` path (associated function、unbound) or closure wrap (`|args| obj.method(args)` 等) で表現可能だが両者 semantic 等価ではなく、選択は usage context (`Array.prototype.map(callback)` 等の callback context / event handler / variable assign) に依存。
+   - **Architectural concern**: "Function reference semantic" (= TS first-class function value (function reference / bound method / `this` capture / arrow function reference) の Rust 等価表現確立、broader scope として `obj.method` だけでなく `func` (top-level fn reference)、`new.target`、`this.method.bind(this)` 等 全 function-as-value pattern を cohesive 解決)。PRD I-205 = "Class member access dispatch with getter/setter methodology" とは別 concern。
+   - **Priority (L3)**: I-205 で Tier 2 honest error reclassify (`UnsupportedSyntaxError::new("method-as-fn-reference", span)`) され silent ではない。callback context (`arr.map(this.callback)` 等) は production code で reachability 高、L2 promote 余地。
+   - **Empirical reproduction**:
+     ```ts
+     class Handler {
+       process(x: number): number { return x * 2; }
+     }
+     const h = new Handler();
+     const fn = h.process;       // ← B6 method-as-fn-reference (cell 7 read)
+     [1, 2, 3].map(h.process);   // ← callback context、bound method として渡す
+     ```
+     現状 (post-I-205): `UnsupportedSyntaxError::new("method-as-fn-reference", span)` で Tier 2 honest error。Tier 1 (TS-equivalent runtime semantic) は本 PRD scope。
+   - **Affected cells in I-205 matrix** (本 entry で Tier 1 化候補): cell 7 (A1 Read × B6 regular method no-paren)。**関連 cells (本 PRD I-205 で Tier 2 reclassify 済)**: cell 16 (A2 Write to method)、cell 25 (A3 compound `+=` to method)、cell 29-e-b (A3 `-=`/`*=` 等 to method)、cell 35-b (A4 bitwise compound)、cell 41-b (A5 logical compound)、cell 45-db (A6 decrement to method) — これらは write attempts であり Tier 1 化対象外 (TS でも runtime error)。
+   - **修正方針 (Spec stage で詳細確定)**:
+     1. **Function reference Rust 等価表現 (3 案 spec stage 検討)**:
+        - **(a) closure wrap**: `let fn = move |args| h.process(args);` (`this` capture を closure move で reproduce、ただし `h` ownership transfer)
+        - **(b) `Type::method` path**: `let fn = Handler::process;` (associated function reference、`this` 不要だが unbound = caller side で `(handler, args)` 形式、TS bound method と semantic divergent)
+        - **(c) trait object + Box<dyn Fn>**: `let fn: Box<dyn Fn(i64) -> i64> = Box::new(move |x| h.process(x));` (callback context 等の generic fn passing で使用可能、ownership transfer 必要)
+     2. **Usage context 軸 enumerate**: variable assign / callback (`map`/`filter`/`forEach`) / event handler / function arg / return value / array element 等の context 別 strategy 選択
+     3. **`this` capture mode**: TS bound method = `this` reference capture、Rust では move/borrow の選択 (closure capture mode 推論 = I-048 と integrate)
+     4. **Top-level fn reference (`func` direct reference)**: TS `func` direct reference は Rust では `func` path で同 semantic、本 entry で同 architectural concern として cover (I-205 は class instance method 限定だが本 entry は broader)
+   - **影響範囲**: `src/transformer/expressions/member_access.rs::resolve_member_access` (B6 method-as-fn-reference dispatch arm の Tier 1 emission)、`src/transformer/expressions/closures.rs` (closure wrap strategy)、`src/transformer/expressions/calls.rs` (callback context での function reference handling)、`tests/e2e/scripts/i-209-*.ts` (matrix-cell 単位 fixture、usage context 別)、`doc/grammar/ast-variants.md` MemberExpr / Ident section sync。
+   - **発見経緯**: PRD I-205 Spec stage で B6 (regular method) を matrix 内 enumerate、cell 7 (Read no-paren) で TS first-class function value semantic を発見、Rust 等価表現の strategy 確立が **closure capture mode (I-048) / this binding semantic / usage context** broader な architectural concern と判明。1 PRD = 1 architectural concern 原則に従い、本 PRD I-205 では Tier 2 honest error reclassify (cell 7 `UnsupportedSyntaxError`) で silent drop 排除、Tier 1 化は本 entry I-209 で別 PRD 化。
+   - **Resolution target**: PRD I-205 close 後、I-048 (closure ownership 推論) 完了後の next-priority 候補 (closure wrap strategy = (a) 案は I-048 capture mode 推論を leverage)。matrix-driven 設計 (function source kind × usage context × `this` capture mode × T variant 軸)。
+   - 🔗 PRD I-205 (本 entry で Tier 2 reclassify 済、本 entry は Tier 1 化の続編)、I-048 (closure ownership 推論、closure wrap strategy で leverage)、PRD 6 (I-048、本 entry の prerequisite 候補)、I-201-A (PRD 2.8 AutoAccessor、AutoAccessor reference 候補)、I-201-B (PRD 7 Decorator framework、decorator 内 method reference との interaction 候補)
+
+- **[I-210]** **typeof of class instance member の Tier 1 化 — `typeof obj.x` runtime string return semantic (PRD I-205 scope 外、user 確定 2026-04-28 PRD I-205 Spec stage Discovery 由来)** [**L3** (compile error visible、silent ではない)] — PRD I-205 では **A10 (`typeof obj.x`) 全 B variant cells を Tier 2 honest error reclassify 化**、Tier 1 化は別 architectural concern (= "typeof of class instance member" / broader = "typeof generic string return") として split 確定。TS `typeof obj.x` は string return ("number" / "string" / "object" / "boolean" / "undefined" / "function" / "symbol" / "bigint" の 8 種、Rust は static type system で run-time string 表現なし。既存 ts_to_rs typeof emission は specific narrow context (typeof guard、I-194 関連) のみ覆うが、generic typeof string return (variable assign / function arg / return value 等) は本 PRD I-205 scope 外。
+   - **Architectural concern**: "typeof of class instance member" (= TS `typeof` operator の generic string return semantic を Rust 等価表現で完全変換、broader scope として class instance member だけでなく `typeof variable` / `typeof literal` / `typeof undefined` / `typeof obj.method()` 等 全 typeof usage を cohesive 解決)。PRD I-205 = "Class member access dispatch with getter/setter methodology" とは別 concern。**関連既存 PRD**: I-194 (typeof if-block elision、Transformer IR emission gap) は narrow context 限定で本 entry とは orthogonal (I-194 = guard context elision、本 entry = generic string return)。
+   - **Priority (L3)**: I-205 で Tier 2 honest error reclassify (`UnsupportedSyntaxError::new("typeof of class field expression", span)` 等) され silent ではない。reachability audit (Hono の typeof 使用箇所) で promote 余地。
+   - **Empirical reproduction**:
+     ```ts
+     class Foo {
+       x: number = 1;
+       get y(): string { return "hello"; }
+     }
+     const obj = new Foo();
+     const t1 = typeof obj.x;        // ← cell 50 (B1 field) → "number" string
+     const t2 = typeof obj.y;        // ← cell 51-a (B2 getter only) → "string"
+     console.log(typeof obj.x);      // function arg context
+     ```
+     現状 (post-I-205): `UnsupportedSyntaxError::new("typeof of class field expression", span)` (cell 50) / `UnsupportedSyntaxError::new("typeof of getter", span)` (cell 51-a/51-b) で Tier 2 honest error。Tier 1 (TS-equivalent runtime string return) は本 PRD scope。
+   - **Affected cells in I-205 matrix** (本 entry で Tier 1 化候補): cell 50 (A10 typeof × B1 field)、cell 51-a (A10 typeof × B2 getter only)、cell 51-b (A10 typeof × B3/B4 setter / both)。**Broader scope cells (I-205 外)**: `typeof variable` / `typeof literal` / `typeof undefined` / `typeof obj.method()` 等の全 typeof usage 形式 (本 entry I-210 で broader matrix 構築候補)。
+   - **修正方針 (Spec stage で詳細確定)**:
+     1. **Rust runtime type info strategy (3 案 spec stage 検討)**:
+        - **(a) compile-time static dispatch**: 静的型解析で typeof 結果を compile-time 確定、`&'static str` literal emit (T が known concrete 型なら可能、`any` / Union 型では不能)
+        - **(b) `std::any::TypeId` + match arm**: runtime TypeId に対する match で TS typeof string mapping 生成 (`TypeId::of::<i64>() => "number"` 等)、unknown 型 fallback あり
+        - **(c) macro-generated typeof trait**: `trait TsTypeof { fn ts_typeof(&self) -> &'static str; }` を auto-derive、each user struct + builtin 型 全て impl 自動生成
+     2. **8 typeof string mapping 完全 enumerate**: TS spec の typeof return (number / string / boolean / object / undefined / function / symbol / bigint) を Rust primitive / 標準ライブラリ / user-defined に mapping、edge case (`typeof null === "object"` / `typeof NaN === "number"`) も完全 reproduce
+     3. **Union 型 / Any 型 handling**: union 型変数の typeof は runtime dispatch 必須 = (b) (c) strategy 採用、any 型は ts_to_rs の `RustType::Any` mapping (= `serde_json::Value`) との integrate
+     4. **typeof guard との interaction**: 既存 typeof guard (narrow context) の emission は I-194 で扱う、本 entry は generic typeof return scope (両者 orthogonal だが、guard context を本 entry の compile-time static dispatch (a) で同時 cover 可能性)
+   - **影響範囲**: `src/transformer/expressions/typeof_expr.rs` (新規 file 候補)、`src/transformer/expressions/member_access.rs::resolve_member_access` (typeof dispatch arm の Tier 1 emission)、`src/registry/mod.rs` (T → typeof string mapping table)、`tests/e2e/scripts/i-210-*.ts` (matrix-cell 単位 fixture)、`doc/grammar/ast-variants.md` UnaryExpr (typeof) section sync。
+   - **発見経緯**: PRD I-205 Spec stage で A10 (typeof) を corner case として matrix 内 enumerate (cells 50-51-b)、Tier 1 化が **Rust runtime type info strategy** という broader scope の architectural concern と判明。1 PRD = 1 architectural concern 原則に従い、本 PRD I-205 では Tier 2 honest error reclassify (silent drop 排除) で record、Tier 1 化は本 entry I-210 で別 PRD 化。
+   - **Resolution target**: PRD I-205 close 後、Hono bench reachability audit で priority 確定。matrix-driven 設計 (operand kind × T variant × usage context × union/any interaction 軸)。
+   - 🔗 PRD I-205 (本 entry で Tier 2 reclassify 済、本 entry は Tier 1 化の続編)、I-194 (typeof if-block elision、orthogonal な narrow context での Transformer IR emission gap)、I-050 umbrella (Any coercion、any 型 typeof と integrate 候補)、I-143 (`??` 演算子、Synthetic union typeof との interaction 候補)
+
+- **[I-211]** **`in` operator on class instance の Tier 1 化 — `"x" in obj` property reflection semantic (PRD I-205 scope 外、user 確定 2026-04-28 PRD I-205 Spec stage Discovery 由来)** [**L3** (compile error visible、silent ではない、Hono bench reachability 低想定)] — PRD I-205 では **A11 (`"x" in obj`) 全 B variant cells を Tier 2 honest error reclassify 化**、Tier 1 化は別 architectural concern (= "in operator on class instance" / broader = "Property reflection mechanism") として split 確定。TS `"x" in obj` は own/inherited property の存在判定 (boolean return)、Rust に property reflection 機構なし。compile-time evaluation (field 名と型情報から判定) or runtime macro-based reflection trait の strategy 確立が独立 PRD 単位の課題。
+   - **Architectural concern**: "in operator on class instance" (= TS `in` operator の property existence check semantic を Rust 等価表現で完全変換、broader scope として class instance だけでなく object literal / array index / Map / Record 等 全 in operator usage を cohesive 解決)。PRD I-205 = "Class member access dispatch with getter/setter methodology" とは別 concern。**注**: `in` operator は TS では type narrowing context でも使われる (`if ("x" in obj) { obj.x.use() }`)、本 entry で narrow context との interaction も cover 候補。
+   - **Priority (L3)**: I-205 で Tier 2 honest error reclassify (`UnsupportedSyntaxError::new("in operator on class instance, even with field", span)`) され silent ではない。Hono bench reachability 低想定 (in operator 使用は narrow context 限定で広域では珍しい、要 reachability audit)、production code で reachability 高なら L2 promote 余地。`conversion-correctness-priority.md` 既存 entry [I-128] (`==` 抽象等価) と類似性質 (TS spec 上特殊 operator、Rust 直接対応なし)。
+   - **Empirical reproduction**:
+     ```ts
+     class Foo {
+       x: number = 1;
+       get y(): string { return "hello"; }
+     }
+     const obj = new Foo();
+     const has_x = "x" in obj;       // ← cell 52-a (B1 field) → compile-time true
+     const has_y = "y" in obj;       // ← cell 52-b (B2 getter) → true (own enumerable)
+     const has_z = "z" in obj;       // ← compile-time false
+     if ("x" in obj) {                // ← narrow context (本 entry の interaction scope)
+       obj.x.toFixed(2);
+     }
+     ```
+     現状 (post-I-205): `UnsupportedSyntaxError::new("in operator on class instance, even with field", span)` (cell 52-a) / `UnsupportedSyntaxError::new("in operator on class instance with accessor / method / static", span)` (cell 52-b) で Tier 2 honest error。Tier 1 (TS-equivalent boolean return) は本 PRD scope。
+   - **Affected cells in I-205 matrix** (本 entry で Tier 1 化候補): cell 52-a (A11 in × B1 field)、cell 52-b (A11 in × B2-B9 any class member shape)。**Broader scope cells (I-205 外)**: object literal in operator / array index in operator (`0 in arr`) / Map.has() との interaction / narrow context 等 (本 entry I-211 で broader matrix 構築候補)。
+   - **修正方針 (Spec stage で詳細確定)**:
+     1. **Rust property reflection strategy (3 案 spec stage 検討)**:
+        - **(a) compile-time static evaluation**: field 名と struct 定義から compile-time 確定、`bool` literal emit (`true` / `false`) — 静的解析で完全確定可能、optional / inherited field では複雑性増加
+        - **(b) runtime macro-based reflection trait**: `trait TsHasProperty { fn ts_has_property(&self, name: &str) -> bool; }` を auto-derive、each user struct + builtin 型 全て impl 自動生成、runtime string 比較
+        - **(c) PhantomData + const fn**: `const fn has_x() -> bool { true }` 風 const fn 群を struct 毎 auto-generate、compile-time evaluation 強制
+     2. **narrow context との interaction**: `if ("x" in obj)` narrow は既存 narrow framework (typeof / instanceof / OptChain) と同 architectural pattern、`InOperatorNarrow` event を追加して narrowed type 確立
+     3. **own vs inherited property 区別**: TS `in` operator は inherited property も含む (prototype chain walk)、Rust struct has no inheritance だが I-206 (Class inheritance dispatch) 完了後に integrate (parent class field を inherit と判定)
+     4. **`Object.prototype` member との interaction**: TS で `"toString" in obj` 等は inherited として true、本 entry で Object built-in member の有無を Rust 表現で reproduce する strategy 確立
+   - **影響範囲**: `src/transformer/expressions/binary.rs` (BinExpr `in` operator arm)、`src/registry/mod.rs` (struct field name list lookup)、`src/pipeline/type_resolver/narrow.rs` (narrow context での `in` operator 対応)、`tests/e2e/scripts/i-211-*.ts` (matrix-cell 単位 fixture)、`doc/grammar/ast-variants.md` BinExpr section (`in` operator) sync、`doc/grammar/emission-contexts.md` narrow context section update。
+   - **発見経緯**: PRD I-205 Spec stage で A11 (in) を corner case として matrix 内 enumerate (cells 52-a/52-b)、Tier 1 化が **Rust property reflection strategy** という broader scope の architectural concern と判明。本 PRD I-205 では Tier 2 honest error reclassify (silent drop 排除) で record、Tier 1 化は本 entry I-211 で別 PRD 化。**注**: matrix cell 52-a の ideal output 記述 ("Compile-time `true` (field exists at compile time = 静的判定可能、本来は const literal emission)") から (a) compile-time static evaluation strategy が有力候補と判明済。
+   - **Resolution target**: PRD I-205 close 後、I-206 (Class inheritance dispatch) 完了後の inherited property 対応で priority 確定。matrix-driven 設計 (operand kind × member shape × narrow interaction × inheritance interaction 軸)。reachability 低なら L4 deferred 候補。
+   - 🔗 PRD I-205 (本 entry で Tier 2 reclassify 済、本 entry は Tier 1 化の続編)、I-206 (Class inheritance dispatch、inherited property 対応で integrate)、I-128 (`==` 抽象等価、類似 TS-spec-specific operator scope-out 判定パターン)、narrow framework 関連 (typeof / instanceof / OptChain narrow と symmetric な `in` narrow event 追加候補)
+
+- **[I-212]** **Framework convergence metric framework PRD — rule self-evolution 収束判定 + audit script complete coverage 構造化 (PRD I-205 iteration v7 Phase 3 deferred polish 由来、user 確定 2026-04-28)** [**L4** (framework infra、production conversion correctness に直接影響しない)] — PRD I-205 framework v1.3 → v1.4 → v1.5 → v1.6 連続 revision (4 度 framework rule 改修) + PRD 2.7 framework 改修 + I-178 framework 改修 で **「framework が convergence したか」を測る metric が conceptual record のみ** (= I-205 iteration v7 F-deep-deep-8、`spec-stage-adversarial-checklist.md` v1.6 versioning entry に記録のみ、実 metric 導入は別 framework PRD 候補)。本 entry は framework 改善の収束判定 (rule 追加 rate / spec gap 検出 rate / audit script complete coverage 等) を構造化、framework rule self-evolution の終着点を定義する meta-PRD。
+   - **Architectural concern**: "Framework rule self-evolution convergence measurement" (= matrix-driven PRD framework (`spec-stage-adversarial-checklist.md` 13-rule + `check-job-review-layers.md` 4-layer + `post-implementation-defect-classification.md` 5-category + `problem-space-analysis.md` Cartesian product) の self-applied integration による rule 改修の収束を構造的に判定、無限 revision を防ぐ stop criterion 確立)。PRD 2.7 / I-205 / I-178 で framework 改修 self-applied integration pattern が確立済 (= rule 不足発見 → rule 拡張 → audit script 拡張 → 自己 verify pass) だが、収束判定 mechanism は未確立。
+   - **Priority (L4 framework infra)**: production conversion correctness に直接影響しない (TS → Rust 変換 quality は本 entry 不在でも達成可能)、ただし framework 改修の終着点が不在 = future PRD 全てで rule 改修 risk 残存 = framework integrity 観点で長期的に重要。L3 promote 余地は framework rule 改修頻度 audit (4 PRD 連続 revision 等の signal) で発生。
+   - **Empirical reproduction (framework revision history、I-205 由来)**:
+     - `spec-stage-adversarial-checklist.md` v1.0 (2026-04-25 I-178、5-rule → 10-rule)
+     - v1.1 (2026-04-27 PRD 2.7 Q4/Q5/Q6、Rule 4 拡張 + Rule 10 axis (i) + Rule 11/12 新規)
+     - v1.2 (2026-04-27 PRD 2.7 Implementation Revision 2、Rule 3 SWC empirical)
+     - v1.3 (2026-04-27 I-205 v2、Rule 1/2/5/6/8/11 sub-rule 拡張 + Rule 13 新規)
+     - v1.4 (2026-04-28 I-205 v5、Rule 1 (1-4) + Rule 11 (d-6) 新規)
+     - v1.5 (2026-04-28 I-205 v6、Rule 1 (1-4-b)(1-4-c) Spec stage structural verify revise + Rule 11 (d-6) architectural-concern-relevance revise)
+     - v1.6 (2026-04-28 I-205 v7、Rule 8 (8-c) + Rule 11 (d-6) audit auto-verify 新規 + Rule 3 (3-2) inheritance justification + Rule 9 (a) helper test contracts)
+     **= 7 revision in 3 days、収束判定 mechanism 不在 = 8th, 9th revision risk 残存**。
+   - **修正方針 (Spec stage で詳細確定)**:
+     1. **Convergence criterion 候補 enumerate (Spec stage で確定)**:
+        - **(a) Empirical zero spec gap criterion**: N 連続 PRD で Spec gap = 0 (`post-implementation-defect-classification.md` の Spec gap category) を達成したら framework convergence と判定 (例: N = 3)
+        - **(b) Audit script complete coverage**: 全 13 rule に対応する audit verify function (= `audit-prd-rule10-compliance.py` の verify_* function) が存在し、auto verify で human review 不要状態。**candidate functions として `verify_field_addition_symmetric_audit` (Rule 9 sub-rule (c-2)、I-205 Fix 4 由来) を含む** — Fix 4 で sub-rule (c-2) を "Audit script auto-verify candidate" 状態で導入、本 entry で実装 priority 確定
+        - **(c) Rule revision rate decay**: rule 追加/拡張の月次 rate が threshold 以下 (例: 0 revision in 30 days) を達成したら convergence
+        - **(d) PRD self-applied integration ratio**: 直近 N PRD のうち M 個以上が rule 改修 self-applied integration なし (= rule が stable) で convergence
+        - **(e) Recursive review convergence (Z5 由来、PRD I-205 light review 2026-04-28 escalation)**: `/check_job` を fix 適用後に再実施した際の発見 finding 数が **N 連続 iteration で 0 件** に到達したら本 PRD の review 完了と判定。本 criterion は I-205 batch で観測された **3-iteration `/check_job` recursive defect pattern** (initial 4 件 → deep 5 件 → deep deep 5 件 → light 5 件 = 4 iteration で各 4-5 件発見、convergence 未達) の structural prevention。`check-job-review-layers.md` に "Recursive review trigger" section 新設、Fix commit 後に必ず 4-layer re-review を実施、N 連続 0 finding で本 PRD の Implementation stage 完了 verification とする mechanism
+     2. **Convergence metric tracking infrastructure**: framework rule revision history を machine-parseable file (e.g., `framework-revisions.jsonl`) で track、PRD close 時に metric auto-update、`spec-stage-adversarial-checklist.md` versioning entry を auto-populate。Recursive review iteration history も同 file に記録 (criterion (e) tracking)
+     3. **Rule deprecation mechanism**: framework convergence 達成後、未使用 rule (audit script で fire しない rule) を deprecation 候補として flag、簡素化方向への self-evolution
+     4. **Self-applied integration pattern formalization**: PRD 2.7 / I-205 で確立した「first-class adopter として self-applied verify」pattern を skill として形式化 (= `prd-template` skill Step 4.5 の generalization)
+     5. **Recursive review trigger formalization (Z5 由来、新 mechanism)**: Fix commit 後の 4-layer re-review を `check-job-review-layers.md` に formal trigger として追加。manual mode (= user が `/check_job` を 2 度目以降 invoke) と auto mode (= audit script が fix commit を detect して trigger) の両 mode を spec stage で確定
+   - **影響範囲**: `.claude/rules/spec-stage-adversarial-checklist.md` (versioning entry + convergence criterion 追加)、`.claude/rules/check-job-review-layers.md` (Stage Dispatch + convergence判定 integrate + **Recursive review trigger section 新設**)、`.claude/rules/post-implementation-defect-classification.md` (Spec gap zero criterion で convergence trigger)、`scripts/audit-prd-rule10-compliance.py` (convergence metric collection 追加 + `verify_field_addition_symmetric_audit` 実装)、`scripts/audit-framework-convergence.py` (新規候補)、`framework-revisions.jsonl` (新規 tracking file、recursive review iteration history も含む)、`.claude/skills/prd-template.md` (Step 4.5 self-applied integration pattern formalization)。
+   - **発見経緯**: PRD I-205 iteration v7 (2026-04-28) で `/check_job` deep deep review で 8 findings → 3 RC clusters (RC-Θ verification deferral / RC-Ι documentation inconsistency / RC-Κ structural growth) を発見、RC-Κ (= F-deep-deep-7 PRD bloat + F-deep-deep-8 framework convergence metric) を Phase 3 deferred polish と判定。framework convergence metric は概念的に重要だが本 PRD I-205 内 self-applied integration 対象 architectural concern (= getter/setter dispatch) と orthogonal、別 framework PRD として split (1 PRD = 1 architectural concern 厳格適用、user 承認 2026-04-28)。**追加発見 (Z5、2026-04-28 PRD I-205 light review)**: 本 batch で `/check_job` を 3 iteration (initial → deep → deep deep) + `/check_problem` light = 4 iteration 適用、各 iteration で fix 自体が新 defect を induce する pattern (= initial Fix 1 → deep D1、deep D1 → deep deep F-dd-2 等) を観測。各 iteration で発見 finding は減らず (4 → 5 → 5 → 5)、現 framework に "Recursive review trigger" 不在 = manual user 指示でしか実行されない gap を発見。本 entry の criterion (e) + Recursive review trigger formalization で structural 解決。
+   - **Resolution target**: 直近 framework rule 改修頻度を audit (e.g., 月次 0 revision を 3 ヶ月 maintain) で priority 確定。L3 promote 条件 = 8th revision 発生 (= 6 revision in 1 month threshold 超過) or 新 PRD で framework rule 改修要求発生 or **recursive review pattern が頻発 (= 直近 N PRD で 3 iteration 以上の `/check_job` を要する)** で confirm。matrix-driven 設計対象外 (= meta-framework PRD、convergence criterion 軸)。
+   - 🔗 PRD I-205 (iteration v7 F-deep-deep-8 + light review Z5 由来)、PRD 2.7 (framework Rule 改修 self-applied integration pattern 確立)、I-178 (matrix-driven framework 整備 origin)、`spec-stage-adversarial-checklist.md` versioning section (本 entry の primary tracking surface)、`post-implementation-defect-classification.md` Spec gap category (convergence criterion (a) source)、`check-job-review-layers.md` (Recursive review trigger 追加先、Z5 fix の primary surface)
+
+- **[I-213]** **IR struct construction boundary DRY refactor — `MethodSignature` / `TypeDef` / `FieldDef` / `ParamDef` / `TsMethodInfo` / `TsParamInfo` / `TsFieldInfo` 等 全 IR struct の builder pattern or `..Default::default()` 統一 (codebase-wide、user 確定 2026-04-28 PRD I-205 T1-T3 batch `/check_job` 4-layer review 由来)** [**L4** (architectural、production correctness 影響なし、ただし future field 追加コスト reduce + symmetric review burden reduce)] — PRD I-205 T1-T3 batch の `/check_job` review (2026-04-28) で発見された **本質的原因 2 (broader scope)**。直接症状は `convert_method_info_to_sig` (`src/registry/collection/type_literals.rs:98`) で `MethodKind::Method` を hardcode、`m.kind` を silently 無視する latent silent semantic risk。本症状を生む root cause は **IR struct 構築 site が codebase 全体で 8+ 箇所に独立散在、共通 abstraction (`MethodSignature::new()` builder / `..Default::default()` 統一 / 共通 helper 関数) が不在**。新 field 追加時に bulk update + 全 site symmetric review が必要、symmetric review が漏れると latent silent semantic drop が site 単位で発生する **codebase-wide architectural concern**。
+   - **Architectural concern**: "IR struct construction boundary DRY refactor" — registry / ts_type_info / external_types / transformer / test fixture 全層の `MethodSignature` / `TypeDef` / `FieldDef` / `ParamDef` / `TsMethodInfo` / `TsParamInfo` / `TsFieldInfo` 等 全 IR struct 構築 site を共通 abstraction で集約、新 field 追加時に bulk update + symmetric review 不要にする structural fix。**I-205 = "Class member access dispatch with getter/setter methodology" architectural concern とは別** (1 PRD = 1 architectural concern 厳格適用、PRD 2.7 / I-205 で confirmed)。
+   - **Priority (L4 暫定、reachability audit で reclassify 余地)**: production correctness に影響しない (= 既存 site は backward compat 維持で動作正常)、future field 追加コスト reduce + symmetric review burden reduce + latent silent semantic drop pattern の構造的予防が主便益。reachability audit (= 直近 N PRD で IR struct field 追加が頻発するか) で priority 確定、頻発なら L3 promote 余地。本 entry は I-205 close 時点で priority 暫定 L4、I-202 (PRD 2.9 Object literal Tier 1 化) や I-201-A (PRD 2.8 AutoAccessor) で MethodSignature 拡張が予見されるなら pre-implementation で promote。
+   - **Recurring problem evidence (重要 — L2 Design Foundation candidate)**:
+     - **I-383 T8'** (`MethodSignature.type_params` field 追加、過去): bulk update + 51 site `type_params: vec![]` hardcode が現在 codebase 中に痕跡 (`src/registry/mod.rs:148-162` Default impl、`src/registry/tests/basics.rs` 等の test fixture 多数)
+     - **I-205 T2** (`MethodSignature.kind` / `TsMethodInfo.kind` field 追加、現 PRD): bulk-script で 51 site に `kind: MethodKind::Method,` 追加、symmetric review 漏れで `convert_method_info_to_sig` (`type_literals.rs:98`) と `resolve_method_sig` (`typedef.rs:608`) で hardcode (latent kind drop)。`resolve_method_sig` は test failure trigger で発見し T3 で fix、`convert_method_info_to_sig` は test に hit せず latent (TsTypeLit getter/setter が Tier 2 unsupported = 現 reachability なし)
+     - **= 2 度連続発生**: 同一 root cause が 2 PRD で再発、3 度目の field 追加 PRD で再発 risk 高 = **recurring problem signal、L2 (Design Foundation) candidate**。reachability audit で頻発確認なら L1 候補
+   - **Empirical reproduction**: 全 IR struct 構築 site を grep で列挙すると以下 (= 8+ 箇所、共通 abstraction 不在の証拠):
+     ```
+     production sites (`MethodSignature {`):
+       - src/registry/collection/class.rs:97 (Constructor, T3 batch で kind: MethodKind::Method 追加)
+       - src/registry/collection/class.rs:139 (Method, T3 batch で kind: MethodKind::from(method.kind) 追加)
+       - src/registry/collection/type_literals.rs:93 (convert_method_info_to_sig、Fix 2 で kind: m.kind に修正予定)
+       - src/registry/collection/type_literals.rs:114 (convert_fn_sig_to_method_sig、kind: MethodKind::Method 妥当)
+       - src/registry/interfaces.rs:74 (build_method_signature_from_method_decl、kind: MethodKind::Method 妥当)
+       - src/external_types/mod.rs:492 (register_external_methods、kind: MethodKind::Method 妥当)
+       - src/transformer/return_wrap.rs:431 (test helper)
+       - src/transformer/type_position.rs:64 (test helper)
+       - src/pipeline/type_converter/overloaded_callable.rs:262, 281 (..Default::default() 既採用、参考 pattern)
+       - src/registry/mod.rs:189 (substitute、kind: self.kind 既 propagate)
+       - src/ts_type_info/resolve/typedef.rs:603 (resolve_method_sig、T3 で kind: sig.kind に修正済)
+
+     test fixture sites (約 40 site):
+       - src/registry/tests/basics.rs (12 site)
+       - src/registry/tests/build_registry/{trait_detection.rs,class.rs} (5+ site)
+       - src/registry/tests/{generics.rs,type_lookup.rs} (10+ site)
+       - src/pipeline/type_resolver/tests/expected_types/* (10+ site)
+       - src/transformer/expressions/tests/calls/{rest_params_tests.rs,type_ref_tests.rs} (3 site)
+       - src/transformer/{functions/tests/params.rs,statements/tests/variables.rs} (2 site)
+       - src/ts_type_info/resolve/{intersection_tests.rs,mod_tests_errors.rs} (5+ site)
+     ```
+     **= production 11 site + test 40+ site = 51 site の MethodSignature 構築、共通 abstraction 不在**。`TypeDef::Struct {...}` 構築 site も同 pattern で 30+ site。`FieldDef`/`ParamDef`/`TsMethodInfo`/`TsParamInfo`/`TsFieldInfo` も同 pattern。
+   - **修正方針 (Spec stage で詳細確定、3 案検討)**:
+     1. **(a) Builder pattern 採用**: `MethodSignature::new(params, return_type)` + `.with_has_rest()` / `.with_kind()` / `.with_type_params()` chain。`TypeDef::struct_builder()` 等も同 pattern。
+        - **Pros**: 必須 field と optional field を method signature で区別、新 field 追加時に既存 chain は不変、各 site の責務が explicit
+        - **Cons**: 既存 51 site の rewrite 必要、test fixture 簡潔さ低下の可能性
+     2. **(b) `..Default::default()` 統一**: 既存 51 site を `MethodSignature { params, return_type, ..Default::default() }` 形式に refactor。
+        - **Pros**: 最小変更で既存 pattern を共通化、`..Default::default()` 既採用 site (overloaded_callable.rs) との consistency 達成
+        - **Cons**: 必須 field と optional field の区別が build 時に表現されない (= 全 field が default 可能と暗示)
+     3. **(c) 共通 helper 関数**: `make_method_sig(...)` / `make_constructor_sig(...)` / `make_test_method_sig(...)` 等を共通 module (`src/ir/method_sig_builder.rs` 等) に集約。
+        - **Pros**: 既採用 pattern (overloaded_callable.rs::make_sig) の generalize、test fixture 簡潔
+        - **Cons**: helper の variant 数が爆発する可能性、(a) の Builder pattern と統合可能性
+   - **対象 IR struct 拡張 (Spec stage で確定)**:
+     - **必須**: `MethodSignature` (本 entry origin)、`TypeDef::Struct` (constructor / methods / fields の集約)、`FieldDef` (field 単位)、`ParamDef` (param 単位)
+     - **対象拡大候補**: `TsMethodInfo` / `TsParamInfo` / `TsFieldInfo` / `TsTypeInfo` / `TsTypeLiteralInfo` (ts_type_info layer の symmetric concern)、`Item::*` (transformer 出力 IR)、`Expr::*` (transformer 出力 IR)
+     - matrix-driven 設計: IR struct × construction context (production / test fixture / converter / external) × 抽象 strategy ((a)(b)(c)) の直積
+   - **影響範囲**: codebase-wide、概算 80-100 site (MethodSignature 51 + TypeDef 30+ + FieldDef/ParamDef/TsXxxInfo 多数)。`src/ir/` foundational 配置を新設 + re-export pattern で backward compat 維持。production code 影響なし (= compile pass + 既存 test pass 全件)、test fixture 簡潔化 + future field 追加 cost 削減が主成果。
+   - **発見経緯**: PRD I-205 T1-T3 batch `/check_job` 4-layer review (2026-04-28) Layer 4 (Adversarial trade-off) で発見、本質的原因 2 (構築 site DRY violation) の broader scope 切り出し。直接症状 `type_literals.rs:98` kind drop は I-205 PRD scope 内で fix (= Fix 2)、broader DRY refactor は本 entry I-213 で別 PRD 化 (1 PRD = 1 architectural concern 厳格適用)。**Recurring evidence**: I-383 T8' (`type_params` field 追加) + I-205 T2 (`kind` field 追加) で 2 度連続発生確認、3 度目発生前の structural prevention が ideal。
+   - **Resolution target**: I-205 close 後、I-202 (PRD 2.9 Object literal Tier 1 化) / I-201-A (PRD 2.8 AutoAccessor Tier 1 化) で MethodSignature 拡張が予見される場合に pre-implementation で promote、未予見なら audit-driven (直近 N PRD field 追加頻度) で priority 確定。matrix-driven 設計 (IR struct × construction context × abstraction strategy 軸の直積)。
+   - 🔗 PRD I-205 (T2 kind field 追加で本 problem 顕在化、本 entry の origin)、I-383 T8' (`type_params` field 追加で同 pattern、recurring problem evidence)、I-203 (codebase-wide refactor の symmetric architectural concern、両 entry が "codebase-wide structural compliance" pattern PRD)、I-201-A / I-202 (`MethodSignature` 拡張予見の pre-implementation promote candidate trigger)、`bulk-edit-safety.md` (本 problem 防止の process rule、本 entry close 時に rule 強化検討)、`design-integrity.md` (DRY 観点での architectural concern review base)
+
 ---
 
 ## 保留

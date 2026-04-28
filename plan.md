@@ -39,9 +39,11 @@ PRD 2.8 (I-201-A) Spec stage 検討中に **既存 class Method Getter/Setter ca
 - framework 改修: `spec-stage-adversarial-checklist.md` v1.6 (Rule 1 (1-4) Orthogonality merge legitimacy + Rule 11 (d-6) Architectural concern relevance + Rule 8 (8-c) audit + Rule 11 (d-6) audit) + `prd-completion.md` Tier-transition compliance + `prd-template` skill (Step 3-pre/3-pre-2/4-template/4.5)
 - audit script extensions: `audit-prd-rule10-compliance.py` に 9 new verify functions (Rule 1/2/5/6/8/11/13 + orthogonality consistency + Rule 11 (d-6) + Invariants test contracts) + `audit-ast-variant-coverage.py` に `--files` flag
 
-**次着手: I-205 Implementation Stage Tasks T1〜T15 (新規 session で実装着手、`/start` で seamless 続行可能)**。
+**進行中: I-205 Implementation Stage Tasks T4〜T15 (T1-T3 完了 2026-04-28、3 task ずつ batch で commit)**。
 
-T1 (doc update) → T2 (MethodSignature/TsMethodInfo kind field) → T3 (collect_class_info propagate + Rule 11 d-1 fix) → T4 (TsTypeLit kind propagate) → T5 (Read context dispatch + B7 traversal helper) → T6 (Write context dispatch) → T7 (UpdateExpr setter desugar) → T8 (compound assign desugar) → T9 (logical compound integration) → T10 (this.x dispatch) → T11 (static accessor dispatch) → T12 (Getter body .clone() insertion) → T13 (B6/B7 corner cells Tier 2 reclassify) → T14 (E2E fixtures green-ify、34 #[ignore] 解除) → T15 (`/check_job` 4-layer review + 13-rule self-applied verify)。
+~~T1 (doc update)~~ ✓ → ~~T2 (MethodSignature/TsMethodInfo kind field)~~ ✓ → ~~T3 (collect_class_info propagate + Rule 11 d-1 fix)~~ ✓ → **T4 (TsTypeLit kind propagate)** ← 次着手 → T5 (Read context dispatch + B7 traversal helper) → T6 (Write context dispatch) → T7 (UpdateExpr setter desugar) → T8 (compound assign desugar) → T9 (logical compound integration) → T10 (this.x dispatch) → T11 (static accessor dispatch) → T12 (Getter body .clone() insertion) → T13 (B6/B7 corner cells Tier 2 reclassify) → T14 (E2E fixtures green-ify、34 #[ignore] 解除) → T15 (`/check_job` 4-layer review + 13-rule self-applied verify)。
+
+**T1-T3 batch 完了 (2026-04-28、`/check_job` 4-layer review + Fix 1-4 適用後 final state)**: `MethodKind { Method, Getter, Setter }` enum (foundational `src/ir/method_kind.rs` 配置、registry re-export で 51 site backward compat) + `MethodSignature.kind` / `TsMethodInfo.kind` field 追加 + `collect_class_info` の `_ => {}` 排除 + class.rs:145 Rule 11 (d-1) violation fix + Pass 2 `resolve_method_sig` の kind hardcode latent bug fix + Fix 2 で `convert_method_info_to_sig` の symmetric kind drop (T4 work piece) を前倒し完了 + Fix 3 で `let _ = X` Rust idiom refactor + Fix 4 で framework Rule 9 sub-rule (c) "Field-addition symmetric conversion site audit" 追加 (v1.6 → v1.7 self-applied integration) + getter/setter propagation unit test 12 件 (4 class T3 + 5 method_kind Fix 1 + 3 type_literals Fix 2)。**新 PRD I-213 起票** (codebase-wide IR struct construction DRY refactor、L4、recurring problem evidence: I-383 T8' + I-205 T2 で 2 度連続)、Fix 4 と相補的 (process vs structural)。**Final quality (post-3-iteration `/check_job` review + light review)**: cargo test --lib 3176 pass / e2e 159 pass + 70 ignored / 122 integration pass / 3 compile_test pass / clippy 0 warning / fmt 0 diff / audit PASS / Pipeline integrity (`src/ir/` SWC indep) 維持。
 
 PRD 2.8 (I-201-A) は I-205 完了後に再開、I-205 framework foundation を leverage。
 
@@ -216,6 +218,14 @@ I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 - **I-202 (Object literal Prop::Method/Getter/Setter Tier 1 化)** — **PRD 2.9 として next-priority 2 (L3、user 承認 2026-04-27)**。本 deferred section から next-priority へ昇格。
 - **I-201-B (Decorator framework 完全変換、TC39 Stage 3)** — **PRD 7 として post-PRD 6 next-priority (L1 silent semantic change、user 承認 2026-04-27)**。audit 2026-04-27 で decorator framework 未実装 = silent drop 状態が判明、L1 priority。本 deferred section から PRD chain へ昇格。
 - **I-203 (Codebase-wide AST match exhaustiveness compliance — 既存 `_` arm 全 audit + explicit enumerate fix)** — **PRD 2.7 完了後の早期 audit 実施 (audit driven priority、L1 候補 = silent drop 含む / L3 = silent drop 不在)、user 承認 2026-04-27**。Rule 10(d) 真の ideal の codebase-wide application、(d) 構造分離 pattern で本 entry に分離。audit 結果次第で PRD chain 内挿入位置確定 (L1 確定なら PRD 3 / I-201-B と reachability 軸比較、L3 確定なら PRD 7 後 deferred)。
+- **I-206 〜 I-211 batch (PRD I-205 Spec stage Discovery 由来 6 件、user 確定 2026-04-28)** — PRD I-205 Spec stage で発見、本 PRD I-205 では Tier 2 honest error reclassify 化、Tier 1 化は別 architectural concern として split 確定:
+  - **I-206** (L3、Class inheritance dispatch — B7 inherited accessor の Tier 1 化) — I-013 + I-014 (abstract class 変換パス) と cohesive batch 候補
+  - **I-207** (L3、Destructure pattern dispatch — class instance / getter destructure) — I-202 (Object literal) と cohesive 候補
+  - **I-208** (L3、Class Method body T-aware comprehensive `.clone()` insertion C2 pattern) — I-048 closure ownership 推論完了後 next 候補 (cell 80 nested closure body は I-048 と integrate 必須)
+  - **I-209** (L3、Function reference semantic — class regular method `obj.x` no-paren reference の Tier 1 化) — I-048 完了後 closure wrap strategy で leverage
+  - **I-210** (L3、typeof of class instance member の Tier 1 化 — runtime string return semantic) — Hono bench reachability audit で priority 確定
+  - **I-211** (L3、`in` operator on class instance の Tier 1 化 — property reflection semantic) — Hono reachability 低想定、I-206 完了後 inherited property 対応で integrate
+- **I-212 (Framework convergence metric framework PRD)** — L4 framework infra、PRD I-205 iteration v7 F-deep-deep-8 由来 (`spec-stage-adversarial-checklist.md` v1.3 → v1.6 連続 revision の収束判定 mechanism 不在)、user 確定 2026-04-28。framework rule 改修頻度 audit (e.g., 6 revision in 1 month threshold 超過) で L3 promote 余地。
 
 ### Batching 検討
 

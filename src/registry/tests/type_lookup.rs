@@ -1,6 +1,7 @@
 use super::*;
 
 // ── TypeRegistry::lookup_method_sigs / lookup_field_type / resolve_type_def ──
+use crate::registry::MethodKind;
 
 #[test]
 fn test_lookup_method_sigs_named_type() {
@@ -13,6 +14,7 @@ fn test_lookup_method_sigs_named_type() {
             return_type: None,
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
     reg.register(
@@ -42,6 +44,7 @@ fn test_lookup_method_sigs_string_type() {
             return_type: Some(RustType::String),
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
     reg.register(
@@ -82,6 +85,7 @@ fn test_lookup_method_sigs_vec_type() {
             return_type: Some(RustType::F64),
             has_rest: true,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
     reg.register(

@@ -11,6 +11,7 @@ pub(crate) mod collection;
 mod enums;
 mod functions;
 pub(crate) mod interfaces;
+mod swc_method_kind;
 mod unions;
 
 pub(crate) use enums::register_extra_enums;
@@ -111,7 +112,15 @@ impl From<(String, RustType)> for ParamDef {
     }
 }
 
-/// メソッドシグネチャ（パラメータ + 戻り値型 + rest パラメータ情報 + メソッド固有の generic 型パラメータ）。
+/// `MethodKind` の re-export (foundational module は `crate::ir::MethodKind`)。
+///
+/// I-205 T1-T3 batch `/check_job` 4-layer review (2026-04-28) で原因 1 (foundational
+/// placement 不在 → module circular dep registry ↔ ts_type_info) を発見、`MethodKind` を
+/// `src/ir/method_kind.rs` に move。本 re-export は既存 51 site (`crate::registry::MethodKind`
+/// 参照) の backward compat を維持する目的。新規参照は `crate::ir::MethodKind` を推奨。
+pub use crate::ir::MethodKind;
+
+/// メソッドシグネチャ（パラメータ + 戻り値型 + rest パラメータ情報 + メソッド固有の generic 型パラメータ + method kind）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MethodSignature<T = RustType> {
     /// パラメータ定義
@@ -126,6 +135,13 @@ pub struct MethodSignature<T = RustType> {
     /// generic メソッドで `<M>` を保持する。`resolve_method_sig` が scope に push し、
     /// メソッド本体の `M | M[]` 等の anonymous union が generic 化される。
     pub type_params: Vec<TypeParam<T>>,
+    /// メソッド種別 (Method / Getter / Setter)。
+    ///
+    /// I-205: SWC `ClassMethod.kind` を propagate、`resolve_member_access` /
+    /// `dispatch_member_write` での getter/setter dispatch 判別に利用。default は
+    /// `MethodKind::Method` で既存 test fixture / constructor signature の backward
+    /// compat を維持する。
+    pub kind: MethodKind,
 }
 
 /// `MethodSignature<T>` の Default 実装。
@@ -141,6 +157,7 @@ impl<T> Default for MethodSignature<T> {
             return_type: None,
             has_rest: false,
             type_params: Vec::new(),
+            kind: MethodKind::Method,
         }
     }
 }
@@ -155,6 +172,7 @@ impl MethodSignature {
             params: self.params.iter().map(|p| p.substitute(bindings)).collect(),
             return_type: self.return_type.as_ref().map(|ty| ty.substitute(bindings)),
             has_rest: self.has_rest,
+            kind: self.kind,
             // メソッド自身の type_params は substitute 対象外 (上位 scope の binding と
             // 衝突する場合は scope shadowing で別変数として扱う設計)
             type_params: self.type_params.clone(),

@@ -1,4 +1,5 @@
 use super::*;
+use crate::registry::MethodKind;
 
 #[test]
 fn test_convert_fn_decl_default_number_param_wraps_in_option() {
@@ -460,6 +461,7 @@ fn reg_with_trait(name: &str) -> TypeRegistry {
             return_type: None,
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
     reg.register(

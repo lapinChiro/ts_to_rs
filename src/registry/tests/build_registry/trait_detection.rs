@@ -7,6 +7,7 @@
 //!   return type and class methods (3 cases)
 
 use super::*;
+use crate::registry::MethodKind;
 
 // --- is_trait_type ---
 
@@ -21,6 +22,7 @@ fn test_is_trait_type_methods_only_returns_true() {
             return_type: None,
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
     reg.register(
@@ -56,6 +58,7 @@ fn test_is_trait_type_mixed_returns_true() {
             return_type: None,
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
     reg.register(

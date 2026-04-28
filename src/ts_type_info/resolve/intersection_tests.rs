@@ -568,6 +568,7 @@ fn resolve_method_info_basic() {
         type_params: vec![],
         optional: false,
         has_rest: false,
+        kind: crate::registry::MethodKind::Method,
     };
     let result = resolve_method_info(&method, &reg, &mut syn).unwrap();
     assert_eq!(result.name, "greet");
@@ -604,6 +605,7 @@ fn resolve_method_info_optional_param_wraps_in_option() {
         type_params: vec![],
         optional: false,
         has_rest: false,
+        kind: crate::registry::MethodKind::Method,
     };
     let result = resolve_method_info(&method, &reg, &mut syn).unwrap();
     assert_eq!(result.params.len(), 2);
@@ -625,6 +627,7 @@ fn resolve_method_info_no_return_type() {
         type_params: vec![],
         optional: false,
         has_rest: false,
+        kind: crate::registry::MethodKind::Method,
     };
     let result = resolve_method_info(&method, &reg, &mut syn).unwrap();
     assert_eq!(result.name, "doSomething");
@@ -713,6 +716,7 @@ fn cross_origin_dedup_preserves_methods() {
             type_params: vec![],
             optional: false,
             has_rest: false,
+            kind: crate::registry::MethodKind::Method,
         }],
         call_signatures: vec![],
         construct_signatures: vec![],
@@ -744,6 +748,7 @@ fn cross_origin_dedup_preserves_methods() {
             type_params: vec![],
             optional: false,
             has_rest: false,
+            kind: crate::registry::MethodKind::Method,
         }],
         call_signatures: vec![],
         construct_signatures: vec![],

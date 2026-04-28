@@ -1,5 +1,6 @@
 use super::*;
 use crate::ir::CallTarget;
+use crate::registry::MethodKind;
 
 #[test]
 fn test_convert_stmt_return_expr() {
@@ -420,6 +421,7 @@ fn test_convert_var_decl_trait_type_generates_box_dyn() {
             return_type: None,
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
     reg.register(

@@ -390,8 +390,8 @@ NA / Tier 2 variant なし (= 2 variant trivial enum、両方 Tier 1 Handled)。
 |---------|------|
 | `ClassProp` | instance / static プロパティ |
 | `Constructor` | constructor (param property 抽出含む) |
-| `Method` | instance メソッド |
-| `PrivateMethod` | private メソッド |
+| `Method` | instance メソッド (method kind = Method / Getter / Setter を `MethodSignature.kind` で tracking、I-205 で導入) |
+| `PrivateMethod` | private メソッド (method kind tracking 同上、I-205) |
 | `PrivateProp` | private プロパティ |
 | `StaticBlock` | static 初期化ブロック |
 
@@ -402,6 +402,31 @@ NA / Tier 2 variant なし (= 2 variant trivial enum、両方 Tier 1 Handled)。
 | `TsIndexSignature` | index signature (filter out) |
 | `Empty` | 空メンバー (no-op) |
 | `AutoAccessor` | TS 5.0+ stable AutoAccessor (`accessor x: T = init`)。**Tier 2 honest error reported via `UnsupportedSyntaxError::new("AutoAccessor", aa.span)`** (`src/transformer/classes/mod.rs:165-171` 既実装)。完全 Tier 1 化は **I-201-A** (decorator なし subset、`accessor x: T = init` → `struct field + fn x() -> &T + fn set_x(&mut self, v: T)` strategy、L3) + **I-201-B** (decorator framework、`@dec accessor x` の hook 統合、L1 silent semantic change) で別 PRD 達成予定 |
+
+### Method kind tracking (I-205 で導入)
+
+SWC AST `ClassMethod.kind: ast::MethodKind` (variant: `Method` / `Getter` / `Setter`) を ts_to_rs IR
+側でも保持するため、**foundational module `src/ir/method_kind.rs`** に独立 enum
+`MethodKind { Method, Getter, Setter }` を新設 (SWC `MethodKind` mirror、`Default = Method`)。
+`crate::ir::MethodKind` を canonical source、`crate::registry::MethodKind` を re-export として
+両 path 利用可能 (51 既存 site backward compat)。`MethodSignature.kind` / `TsMethodInfo.kind`
+field に propagate し、call site (`src/transformer/expressions/member_access.rs::resolve_member_access`、
+`src/transformer/expressions/assignments.rs::dispatch_member_write`) で getter/setter dispatch
+判別に利用する。
+
+- **Foundational placement (I-205 D1 fix、`pipeline-integrity.md` `src/ir/` SWC independence
+  convention compliance)**: `MethodKind` enum は `src/ir/method_kind.rs` (= `src/ir/` 配下、
+  abstract IR layer)。`src/ir/` の SWC independence 維持のため、`From<swc_ecma_ast::MethodKind>`
+  boundary impl は `src/registry/swc_method_kind.rs` (= registry layer の boundary module、SWC
+  既 import 済) に分離配置 (= IR enum と SWC↔IR conversion を layer 別に置く分離設計)
+- **Source of truth**: SWC `swc_ecma_ast::MethodKind` を 1-to-1 mirror、`registry::swc_method_kind`
+  module の `From` impl で IR 側 enum に変換 (= IR layer は SWC 知らない independence pattern)
+- **Tier 2 honest error reclassify trigger**: B7 inherited accessor / B6 method-as-fn-reference /
+  B2 read of write-only / B2 write to read-only 等は本 framework で `UnsupportedSyntaxError`
+  経由で honest error 化 (silent drop 排除、I-205 matrix cells 7/8/12/16/17/26/41-c 等)
+- **Future leverage**: I-201-A (AutoAccessor Tier 1 化) は本 framework の MethodKind tracking +
+  dispatch logic を leverage、AutoAccessor を Getter+Setter pair として登録する infrastructure を
+  既に持つ状態に到達。I-202 (Object literal Prop::Getter/Setter Tier 1 化) も同 framework leverage
 
 ---
 

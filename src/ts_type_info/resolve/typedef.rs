@@ -605,6 +605,9 @@ pub(crate) fn resolve_method_sig(
             return_type,
             has_rest: sig.has_rest,
             type_params: resolved_type_params,
+            // I-205: input `MethodSignature<TsTypeInfo>` の kind を `MethodSignature<RustType>`
+            // に lossless propagate (Method/Getter/Setter 区別を Pass 2 で失わせない)。
+            kind: sig.kind,
         })
     })();
 

@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::registry::MethodKind;
 
 #[test]
 fn test_call_with_missing_default_arg_appends_none() {
@@ -329,6 +330,7 @@ fn test_convert_method_call_string_arg_gets_to_string_with_registry() {
             return_type: None,
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
     reg.register(

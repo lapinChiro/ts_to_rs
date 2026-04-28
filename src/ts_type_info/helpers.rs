@@ -74,6 +74,7 @@ pub(super) fn convert_type_lit_members(
                     type_params,
                     optional: sig.optional,
                     has_rest,
+                    kind: crate::registry::MethodKind::Method,
                 });
             }
             ast::TsTypeElement::TsCallSignatureDecl(decl) => {

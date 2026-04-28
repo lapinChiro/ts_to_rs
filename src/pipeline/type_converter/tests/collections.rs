@@ -450,7 +450,7 @@ fn test_convert_ts_type_typeof_unknown_returns_error() {
 #[test]
 fn test_convert_ts_type_typeof_struct_with_constructor_returns_fn_type() {
     // typeof MyClass where MyClass is a Struct with constructor → Fn type
-    use crate::registry::{MethodSignature, TypeDef};
+    use crate::registry::{MethodKind, MethodSignature, TypeDef};
     let mut reg = TypeRegistry::new();
     reg.register(
         "MyClass".to_string(),
@@ -470,6 +470,7 @@ fn test_convert_ts_type_typeof_struct_with_constructor_returns_fn_type() {
                 return_type: None,
                 has_rest: false,
                 type_params: vec![],
+                kind: MethodKind::Method,
             }]),
             call_signatures: vec![],
             extends: vec![],

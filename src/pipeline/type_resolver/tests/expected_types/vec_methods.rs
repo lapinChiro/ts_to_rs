@@ -3,6 +3,7 @@ use super::*;
 // I-286: Vec→Array method mapping tests
 
 /// Helper to create a RustType representing a type parameter (e.g., T, U).
+use crate::registry::MethodKind;
 fn type_param(name: &str) -> RustType {
     RustType::TypeVar {
         name: name.to_string(),
@@ -28,6 +29,7 @@ fn create_registry_with_array_methods() -> TypeRegistry {
             return_type: Some(RustType::F64),
             has_rest: true,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
 
@@ -50,6 +52,7 @@ fn create_registry_with_array_methods() -> TypeRegistry {
             return_type: Some(RustType::Vec(Box::new(type_param("U")))),
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
     );
 
@@ -309,12 +312,14 @@ fn test_member_callee_args_resolved_before_overload_selection() {
                 return_type: Some(RustType::String),
                 has_rest: false,
                 type_params: vec![],
+                kind: MethodKind::Method,
             },
             MethodSignature {
                 params: vec![("x".to_string(), RustType::F64).into()],
                 return_type: Some(RustType::F64),
                 has_rest: false,
                 type_params: vec![],
+                kind: MethodKind::Method,
             },
         ],
     );

@@ -2,6 +2,7 @@ use super::*;
 use crate::ir::TypeParam;
 
 // --- I-100: Generics Foundation ---
+use crate::registry::MethodKind;
 
 #[test]
 fn test_generic_interface_type_params_stored_in_registry() {
@@ -368,6 +369,7 @@ fn test_method_signature_substitute_replaces_params_and_return() {
         }),
         has_rest: false,
         type_params: vec![],
+        kind: MethodKind::Method,
     };
     let bindings = HashMap::from([("T".to_string(), RustType::String)]);
     let result = sig.substitute(&bindings);
@@ -388,6 +390,7 @@ fn test_method_signature_substitute_none_return_type_preserved() {
         return_type: None,
         has_rest: true,
         type_params: vec![],
+        kind: MethodKind::Method,
     };
     let bindings = HashMap::from([("T".to_string(), RustType::F64)]);
     let result = sig.substitute(&bindings);
@@ -487,6 +490,7 @@ fn test_substitute_types_struct_methods() {
                 }),
                 has_rest: false,
                 type_params: vec![],
+                kind: MethodKind::Method,
             }],
         )]),
         constructor: None,
@@ -529,6 +533,7 @@ fn test_substitute_types_struct_constructor() {
             return_type: None,
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }]),
         call_signatures: vec![],
         extends: vec![],
@@ -572,6 +577,7 @@ fn test_substitute_types_struct_call_signatures() {
             }),
             has_rest: false,
             type_params: vec![],
+            kind: MethodKind::Method,
         }],
         extends: vec![],
         is_interface: true,
