@@ -1,16 +1,21 @@
 //! Member access expression conversion (property access, optional chaining, discriminated unions).
+//!
+//! Class member dispatch logic (Static / Instance / Fallback receiver classification +
+//! Read/Write context dispatch arms) lives in the sibling [`super::member_dispatch`] module
+//! to centralize the cross-cutting receiver-detection knowledge shared by Read context
+//! ([`Transformer::resolve_member_access`]) and Write context
+//! ([`Transformer::dispatch_member_write`]) (and subsequent T7-T9 compound dispatch).
 
 use anyhow::{anyhow, Result};
-use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
-use crate::ir::{
-    CallTarget, ClosureBody, Expr, MatchArm, MethodKind, Param, Pattern, RustType, Stmt,
-};
+use crate::ir::{ClosureBody, Expr, MatchArm, Param, Pattern, RustType, Stmt};
 use crate::pipeline::type_resolution::Span;
-use crate::registry::{FieldDef, MethodSignature, TypeDef};
-use crate::transformer::UnsupportedSyntaxError;
+use crate::registry::{FieldDef, TypeDef};
 
+use super::member_dispatch::{
+    dispatch_instance_member_read, dispatch_static_member_read, MemberReceiverClassification,
+};
 use super::methods::map_method_call;
 use crate::transformer::Transformer;
 
@@ -68,6 +73,32 @@ pub(crate) fn build_safe_index_expr_unwrapped(object: Expr, index: Expr) -> Expr
     }
 }
 
+/// Extracts the Rust-side field name from a non-computed [`ast::MemberProp`].
+///
+/// Returns the field name string used to look up class members in `TypeRegistry` and to
+/// emit Rust identifiers in IR (`Expr::FieldAccess { field }`、`Expr::MethodCall { method }`、
+/// etc.):
+///
+/// - [`ast::MemberProp::Ident`]`("foo")` → `"foo"` (TS regular identifier)
+/// - [`ast::MemberProp::PrivateName`]`("foo")` → `"_foo"` (`#foo` ECMA private name → `_foo`
+///   Rust convention、collect_class_info で `_` prefix-strip された field 名と同期)
+/// - [`ast::MemberProp::Computed`]`(_)` → `None` (= runtime-evaluated key、class member
+///   dispatch / static field name resolution の対象外、caller side で context-specific
+///   handling が必要)
+///
+/// I-205 T6 Iteration v10 third-review (DRY refactor、`design-integrity.md` "DRY"): pre-extract
+/// は `convert_member_expr_inner` (Read path、Computed 早期 return 後の `match` block) と
+/// `dispatch_member_write` (Write path、`unreachable!()` macro 経由) で同 logic が重複していた
+/// ため共通 helper に集約。Caller は `Option::ok_or_else` (Read = Err return) / `unwrap_or_else`
+/// (Write = `unreachable!()` macro) で context-specific fallback を実行。
+pub(super) fn extract_non_computed_field_name(prop: &ast::MemberProp) -> Option<String> {
+    match prop {
+        ast::MemberProp::Ident(ident) => Some(ident.sym.to_string()),
+        ast::MemberProp::PrivateName(private) => Some(format!("_{}", private.name)),
+        ast::MemberProp::Computed(_) => None,
+    }
+}
+
 impl<'a> Transformer<'a> {
     /// Resolves a member access expression, applying special conversions for known fields.
     ///
@@ -122,180 +153,35 @@ impl<'a> Transformer<'a> {
             });
         }
 
-        // 4. Class member dispatch (I-205 T5)
-        //
-        // Static (B8) dispatch: receiver = `Ident(ClassName)` で class TypeDef 登録あり、かつ
-        // 該当 class の `methods` に field 登録あり。Instance variable shadowing 抑止のため
-        // `get_expr_type(ts_obj).is_none()` (= TypeResolver が instance type を resolve して
-        // いない、= class TypeName context) で gate する。
-        if let ast::Expr::Ident(ident) = ts_obj {
-            let name = ident.sym.as_ref();
-            if self.get_expr_type(ts_obj).is_none() {
-                if let Some(TypeDef::Struct {
-                    is_interface: false,
-                    ..
-                }) = self.reg().get(name)
-                {
-                    if let Some((sigs, is_inherited)) = self
-                        .reg()
-                        .lookup_method_sigs_in_inheritance_chain(name, field)
-                    {
-                        return Self::dispatch_static_member_read(
-                            name,
-                            field,
-                            &sigs,
-                            is_inherited,
-                            ts_obj,
-                        );
-                    }
-                }
-            }
-        }
-
-        // Instance dispatch (B1-B4, B6, B7, B9): receiver の型が RustType::Named { name, .. }
-        // なら inheritance chain lookup で method kind を判定。`Option<RustType::Named>`
-        // (= `T | undefined`) の場合は inner Named を unwrap (= TS の `obj?.x` not、TS の
-        // narrowing で nullable 除去された field access に該当)。
-        let receiver_type_name = match self.get_expr_type(ts_obj) {
-            Some(RustType::Named { name, .. }) => Some(name.as_str()),
-            Some(RustType::Option(inner)) => match inner.as_ref() {
-                RustType::Named { name, .. } => Some(name.as_str()),
-                _ => None,
-            },
-            _ => None,
-        };
-        if let Some(type_name) = receiver_type_name {
-            if let Some((sigs, is_inherited)) = self
-                .reg()
-                .lookup_method_sigs_in_inheritance_chain(type_name, field)
-            {
-                return Self::dispatch_instance_member_read(
-                    object,
+        // 4. Class member dispatch (I-205 T5、Iteration v10 で `classify_member_receiver`
+        //    shared helper 経由に refactor、T6 dispatch_member_write と DRY 解消、
+        //    Iteration v10 third-review で member_dispatch.rs に file split)
+        match self.classify_member_receiver(ts_obj, field) {
+            MemberReceiverClassification::Static {
+                class_name,
+                sigs,
+                is_inherited,
+            } => {
+                return dispatch_static_member_read(
+                    &class_name,
                     field,
                     &sigs,
                     is_inherited,
                     ts_obj,
                 );
             }
+            MemberReceiverClassification::Instance { sigs, is_inherited } => {
+                return dispatch_instance_member_read(object, field, &sigs, is_inherited, ts_obj);
+            }
+            MemberReceiverClassification::Fallback => {
+                // 5. Fallback: direct field access (B1 / B9 / non-class receiver / static field)
+            }
         }
 
-        // 5. Fallback: direct field access (B1 / B9 / non-class receiver)
         Ok(Expr::FieldAccess {
             object: Box::new(object.clone()),
             field: field.to_string(),
         })
-    }
-
-    /// Read context dispatch helper for instance access (`obj.x`).
-    ///
-    /// I-205 T5: B2 / B3 / B4 / B6 / B7 dispatch arms。`is_inherited = true` (B7) の場合、
-    /// architectural concern が "Class inheritance dispatch" (別 PRD I-206) と orthogonal
-    /// のため Tier 2 honest error reclassify。
-    fn dispatch_instance_member_read(
-        object: &Expr,
-        field: &str,
-        sigs: &[MethodSignature],
-        is_inherited: bool,
-        ts_obj: &ast::Expr,
-    ) -> Result<Expr> {
-        if is_inherited {
-            return Err(UnsupportedSyntaxError::new(
-                "inherited accessor access (Rust struct inheritance not directly supported)",
-                ts_obj.span(),
-            )
-            .into());
-        }
-        let has_getter = sigs.iter().any(|s| s.kind == MethodKind::Getter);
-        let has_setter = sigs.iter().any(|s| s.kind == MethodKind::Setter);
-        if has_getter {
-            return Ok(Expr::MethodCall {
-                object: Box::new(object.clone()),
-                method: field.to_string(),
-                args: vec![],
-            });
-        }
-        if has_setter {
-            return Err(
-                UnsupportedSyntaxError::new("read of write-only property", ts_obj.span()).into(),
-            );
-        }
-        if sigs.iter().any(|s| s.kind == MethodKind::Method) {
-            return Err(UnsupportedSyntaxError::new(
-                "method-as-fn-reference (no-paren)",
-                ts_obj.span(),
-            )
-            .into());
-        }
-        Ok(Expr::FieldAccess {
-            object: Box::new(object.clone()),
-            field: field.to_string(),
-        })
-    }
-
-    /// Read context dispatch helper for static access (`Class.x`).
-    ///
-    /// I-205 T5: B8 cell。`Class::field()` を associated fn call として emit (Getter)。
-    /// Class の static method は parent class からの inheritance を持たない (TS の static
-    /// member は prototype chain inheritance するが Rust associated fn は構造的に inherited
-    /// dispatch を持たない、本 PRD scope は class direct のみ = B7 inherited は別 PRD I-206)。
-    fn dispatch_static_member_read(
-        class_name: &str,
-        field: &str,
-        sigs: &[MethodSignature],
-        is_inherited: bool,
-        ts_obj: &ast::Expr,
-    ) -> Result<Expr> {
-        if is_inherited {
-            return Err(UnsupportedSyntaxError::new(
-                "inherited static accessor access (Rust associated fn does not chain inheritance)",
-                ts_obj.span(),
-            )
-            .into());
-        }
-        let has_getter = sigs.iter().any(|s| s.kind == MethodKind::Getter);
-        let has_setter = sigs.iter().any(|s| s.kind == MethodKind::Setter);
-        if has_getter {
-            return Ok(Expr::FnCall {
-                target: CallTarget::UserAssocFn {
-                    ty: crate::ir::UserTypeRef::new(class_name),
-                    method: field.to_string(),
-                },
-                args: vec![],
-            });
-        }
-        if has_setter {
-            return Err(UnsupportedSyntaxError::new(
-                "read of write-only static property",
-                ts_obj.span(),
-            )
-            .into());
-        }
-        if sigs.iter().any(|s| s.kind == MethodKind::Method) {
-            return Err(UnsupportedSyntaxError::new(
-                "static-method-as-fn-reference (no-paren)",
-                ts_obj.span(),
-            )
-            .into());
-        }
-        // I-205 T5 Iteration v9 deep deep review fix: 本 arm は構造的に unreachable
-        // (= dead code)。`lookup_method_sigs_in_inheritance_chain` は entry あれば
-        // non-empty `Vec<MethodSignature>` を return、entry なければ None を return する
-        // (registry/mod.rs の `methods.get(field)` semantics)。本 helper は `Some(sigs, ...)`
-        // を caller (`resolve_member_access`) で unwrap した後に呼ばれるため、`sigs` は必ず
-        // non-empty。`MethodKind` enum は Method/Getter/Setter の 3 variant 完全列挙、
-        // よって `has_getter`/`has_setter`/`Method` 3 if-block のいずれかが必ず fire。
-        // 旧 fallback `Expr::FnCall { UserAssocFn, args: [] }` emit は spec → impl mapping
-        // table の誤記 (Rule 6 Matrix/Design integrity 違反、Iteration v9 deep deep review
-        // で発覚) を引きずった defective fallback で、本 fix で `unreachable!()` macro に
-        // 置換し structural invariant として enforce。Static field access (`Class.staticField`、
-        // matrix cell 化なし) は本 dispatch を経由せず `resolve_member_access` の最終
-        // fallback (5. FieldAccess) 経由、subsequent T11 で Static field emission strategy
-        // 確定 (= associated const path access)。
-        unreachable!(
-            "dispatch_static_member_read: sigs is non-empty (lookup_method_sigs_in_inheritance_chain \
-             never returns Some(empty vec)) and MethodKind is exhaustive (Method/Getter/Setter), \
-             so one of the 3 if-blocks above must fire. class={class_name}, field={field}"
-        );
     }
 
     /// Converts an optional chaining expression (`x?.y`) to `x.as_ref().map(|_v| _v.y)`.
@@ -552,11 +438,20 @@ impl<'a> Transformer<'a> {
             return Ok(build_safe_index_expr_unwrapped(object, safe_index));
         }
 
-        let field = match &member.prop {
-            ast::MemberProp::Ident(ident) => ident.sym.to_string(),
-            ast::MemberProp::PrivateName(private) => format!("_{}", private.name),
-            _ => return Err(anyhow!("unsupported member property (only identifiers)")),
-        };
+        // Iteration v10 third-review (DRY refactor): pre-refactor の `match member.prop` で
+        // `Ident → sym / PrivateName → _{name}` を local extract していた logic を
+        // `extract_non_computed_field_name` shared helper 経由に統合
+        // (= `dispatch_member_write` と同 logic 共有、`design-integrity.md` "DRY")。
+        // 本 path に到達する時点で `MemberProp::Computed` は冒頭の早期 return (line 87 +)
+        // で handle 済 = `extract_non_computed_field_name` の `None` return は構造的 unreachable、
+        // `unreachable!()` macro で structural invariant codify。
+        let field = extract_non_computed_field_name(&member.prop).unwrap_or_else(|| {
+            unreachable!(
+                "convert_member_expr_inner: MemberProp::Computed is handled by the early \
+                 `if let MemberProp::Computed` block (Vec index / tuple field access / Range / \
+                 safe-bounds check), so this match's None arm is structurally unreachable"
+            )
+        });
 
         // process.env.VAR → std::env::var("VAR").unwrap()
         if let ast::Expr::Member(inner) = member.obj.as_ref() {

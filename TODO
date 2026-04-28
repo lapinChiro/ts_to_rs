@@ -72,6 +72,34 @@ OBJECT_LITERAL_NO_TYPE 全体で 28件（2026-04-21 T6-6 後 bench 実測、I-14
 
 ## Tier 2: L3 残り + L4（修正コスト小）
 
+### RC-Refactor: 構造的 DRY violation (refactor 派生)
+
+- **[I-393]** **`expected_types.insert(span, ty.clone()) + propagate_expected(expr, ty)` pattern が 10+ call site に散在 (DRY violation、L3、2026-04-29 file-line refactor 派生)** — 「expr の span に expected type を set し、配下 sub-expr に再帰 propagate する」という cohesive な knowledge が以下の call site に inline 重複している:
+  - **TypeResolver 内 (refactor 後 site)**: `src/pipeline/type_resolver/expressions/conditional.rs:23-25` (Cond arm)、`assertions.rs:50-52` (resolve_type_assertion_inner、TsAs/TsTypeAssertion 共有)、`assignments.rs:43-46` (Assign plain)、`assignments.rs:101-104` (Assign compound Ident)、`assignments.rs:140-143` (Assign compound Member)、`binary.rs:75-78` (LogicalOr fallback object literal)、`binary.rs:97-104` (NullishCoalescing LHS)、`binary.rs:115-117` (NullishCoalescing RHS)
+  - **TypeResolver 外 (pre-existing)**: `src/pipeline/type_resolver/fn_exprs.rs:211` (return type propagation)、`src/pipeline/type_resolver/expected_types.rs:330-331` / `:344-346` / `:408-410` / `:417-419` / `:492-494` / `:508-510` (propagate_expected 内部の再帰呼び出し、6 箇所)、`src/pipeline/type_resolver/visitors.rs:619` / `:656` (variable decl + return propagation)
+  - 計 17+ 箇所。各 site で 2 行 (`insert + propagate_expected`) が機械的反復、`Span::from_swc(expr.span())` の boilerplate も含むケース多数。
+  - **修正方針 (structural)**: `propagate_expected` を refactor:
+    - 案 A (signature 拡張): `propagate_expected(expr, ty)` の責務を「outer span の insert + 再帰 propagate」に拡張。caller は `insert` を caller 側で書かず単に `propagate_expected(expr, ty)` を呼ぶだけ。propagate_expected 内部の再帰呼び出しは self-recursion なので自然に統一される。
+    - 案 B (新 helper): 既存 `propagate_expected` を recursion-only として保持し、新 `set_expected_recursive(&mut self, expr, ty)` を追加 (insert + propagate_expected を 1 call に集約)。caller は新 helper を使用、propagate_expected の振る舞いは変えない (regression risk minimal)。
+  - **Trade-off**: 案 A は call site 全箇所更新が必要だが API が cleaner、内部再帰も統一。案 B は新 helper 追加のみで既存 propagate_expected は不変、後方互換性◎だが新旧 API の混在期間あり。
+  - **本 refactor (file-line) で deferred 理由**: 17+ 箇所変更は scope creep (file-line refactor の対称性回復に集中)、`propagate_expected` は critical type resolution path で regression risk あり。Spec stage で各 call site の semantic equivalence verification + Hono bench Tier-transition compliance 必須。
+  - **Resolution target**: 別 PRD (refactor cohesion 改善) として discrete 起票。Phase B (Type Resolution Layer cohesion) candidate。
+  - 🔗 I-394 (return_wrap SWC walker DRY、本 entry と同じ refactor session 派生)、I-216 (post-refactor cohesion check)
+  - **発見経緯**: 2026-04-29 file-line refactor `/check_job` Layer 4 (Adversarial trade-off) で発見。本 refactor 自体は file 分割が責務のため deferred、構造的 DRY 解消は scope 外と判定。
+
+- **[I-394]** **`collect_stmt_return_leaf_types` (SWC AST walk) と `wrap_body_returns` (IR walk) が同型 control-flow walker を 2 重実装 (positional invariant DRY violation、L3、2026-04-29 file-line refactor 派生)** — `src/transformer/return_wrap/collection.rs:74-129` (`collect_stmt_return_leaf_types`) と `src/transformer/functions/arrow_fns.rs:766-825` (`wrap_body_returns`) が以下の control flow を **同じ depth-first 順序で walk** することを **暗黙的に契約** している:
+  - if/else (cons + alt 順)、Block、Switch (case 順)、For/ForIn/ForOf、While/DoWhile、Try (block + catch.body 順、finally は両方とも skip)、Labeled
+  - **Positional invariant**: `collect_*` が出力する `Vec<ReturnLeafType>` の順序が `wrap_body_returns` の return leaf 訪問順と一致する前提で、IR 側 walker が pre-collected type を index で取り出す。両 walker のいずれかが新 stmt variant を追加 / 順序変更すると **silent positional misalignment** で wrong type が wrong return に bind される silent semantic change リスク。
+  - **修正方針 (structural)**:
+    - 案 A (Walker trait): `trait ReturnLeafWalker { type Output; fn visit_return_leaf(&mut self, ...); fn visit_*_stmt(...) }` を抽象化、SWC 版 / IR 版両方が同 trait を implement (ジェネリック / マクロ)。control flow walk logic を共有、leaf 処理だけ各 implementer で分離。
+    - 案 B (Positional witness): `Vec<ReturnLeafType>` を `HashMap<Span, ReturnLeafType>` に変更し、IR 側 walker が span 経由で対応 type を lookup。positional invariant を構造的に消去 (Span は SWC ↔ IR pipeline boundary を跨いで preserve されている前提が必要、要検証)。
+    - 案 C (Code generation): walker logic を proc macro / build.rs で生成、SWC 版 / IR 版両方を single source から派生。
+  - **本 refactor (file-line) で deferred 理由**: walker abstraction は深層 architectural refactor、10+ stmt variant の handling logic を統一する必要があり、span-based lookup への切り替えは pipeline-integrity 検証必須。file-line constraint 解消 (本 refactor の責務) と独立。
+  - **Resolution target**: 別 PRD (Return wrap walker abstraction、Phase C 候補)。**前提**: 案 B が feasible なら案 A/C より低コストで positional invariant 消去可能、要 spec investigation。
+  - **影響範囲**: `src/transformer/return_wrap/collection.rs:74-129` (~55 LOC) + `src/transformer/functions/arrow_fns.rs:766-825` (~60 LOC) + 案 B なら `Vec → HashMap` への consumer 全更新 (~5 site)、案 A なら trait + 2 implementer + tests (~150 LOC)。
+  - 🔗 I-393 (refactor session 派生 DRY、本 entry と peer)、I-216 (post-refactor cohesion check)
+  - **発見経緯**: 2026-04-29 file-line refactor の事前 Explore agent 分析 (`return_wrap.rs` analysis report) で identify、`/check_job` Layer 4 (Adversarial trade-off) で本 refactor scope 外と判定 → TODO 起票。
+
 ### compile_test skip 原因（plan.md Phase A Step 2〜7）
 
 - **[I-020]** **クロージャ返却 Box::new wrap 漏れ (残 let-init 経路)** — return/tail は解消済 (Step 3 で `wrap_closures_in_box` 導入)。**残存**: (1) let-init 経路 (`let f: Box<dyn Fn> = || ...`) は `convert_var_decl` → `convert_expr` で expected propagate されず Box wrap 未発動。(2) `Option<Box<dyn Fn>>` return の `Some(closure)` 内部 closure の Box wrap 欠落 (I-147)
@@ -1135,6 +1163,81 @@ block しない** latent imprecision として TODO 化する。
    - **発見経緯**: PRD I-205 T1-T3 batch `/check_job` 4-layer review (2026-04-28) Layer 4 (Adversarial trade-off) で発見、本質的原因 2 (構築 site DRY violation) の broader scope 切り出し。直接症状 `type_literals.rs:98` kind drop は I-205 PRD scope 内で fix (= Fix 2)、broader DRY refactor は本 entry I-213 で別 PRD 化 (1 PRD = 1 architectural concern 厳格適用)。**Recurring evidence**: I-383 T8' (`type_params` field 追加) + I-205 T2 (`kind` field 追加) で 2 度連続発生確認、3 度目発生前の structural prevention が ideal。
    - **Resolution target**: I-205 close 後、I-202 (PRD 2.9 Object literal Tier 1 化) / I-201-A (PRD 2.8 AutoAccessor Tier 1 化) で MethodSignature 拡張が予見される場合に pre-implementation で promote、未予見なら audit-driven (直近 N PRD field 追加頻度) で priority 確定。matrix-driven 設計 (IR struct × construction context × abstraction strategy 軸の直積)。
    - 🔗 PRD I-205 (T2 kind field 追加で本 problem 顕在化、本 entry の origin)、I-383 T8' (`type_params` field 追加で同 pattern、recurring problem evidence)、I-203 (codebase-wide refactor の symmetric architectural concern、両 entry が "codebase-wide structural compliance" pattern PRD)、I-201-A / I-202 (`MethodSignature` 拡張予見の pre-implementation promote candidate trigger)、`bulk-edit-safety.md` (本 problem 防止の process rule、本 entry close 時に rule 強化検討)、`design-integrity.md` (DRY 観点での architectural concern review base)
+
+- **[I-214]** **`convert_call_expr` static method call dispatch DRY violation + 3 latent gaps (PRD I-205 T6 Iteration v10 second-review `/check_problem` 由来、user 確定 2026-04-28)** [**L3** (latent silent / Tier 2 emit risk あり、ただし Hono reachability 要 audit、L1 promote 余地あり)] — PRD I-205 T6 Iteration v10 で導入された `classify_member_receiver` shared helper (`src/transformer/expressions/member_access.rs`) が Read context (`resolve_member_access`) + Write context (`dispatch_member_write`) + subsequent T7-T9 (Compound dispatch) で receiver type detection 知識を集約した結果、`src/transformer/expressions/calls.rs:213-225` (I-378 T9 由来 = Static method call dispatch、`Counter.greet(args)` → `Counter::greet(args)` emit) との **DRY violation が顕在化**。
+
+  **共通する knowledge (DRY 観点)**: 両者とも **「receiver Ident が registered class TypeName か」** を判定する同一 knowledge。
+  - calls.rs `convert_call_expr` の Member callee branch (line 213-225): `if matches!(self.reg().get(obj_name), Some(TypeDef::Struct { .. } | TypeDef::Enum { .. })) → Expr::FnCall { CallTarget::UserAssocFn { ty, method }, args }`
+  - member_access.rs `classify_member_receiver` Static gate: `if let Ident && get_expr_type None && Some(TypeDef::Struct { is_interface: false, .. }) && lookup_method_sigs_in_inheritance_chain hit → MemberReceiverClassification::Static`
+
+  **3 latent gaps (calls.rs 側の defensive check 不足)**:
+  - **(a) `is_interface: false` filter なし** (calls.rs:214 `Some(TypeDef::Struct { .. } | TypeDef::Enum { .. })` で interface も match)。`interface MyInterface { method(): void; } MyInterface.method(args)` で誤動作 risk (interface は value-side 存在せずTSで static error だが、SWC parser が accept する場合 `MyInterface::method(args)` Rust emit で latent silent semantic divergence)。member_access.rs 側は Iteration v9 deep deep review で `is_interface: false` filter 導入済 = symmetric expected。
+  - **(b) `get_expr_type` None gate なし** (= instance variable shadowing 抑止不在)。例: `class Counter { static greet(): void {} } const Counter = { x: 5 }; Counter.method()` で local `Counter` が class TypeName を shadow、calls.rs は registry lookup のみで判定するため `Counter` Ident を class TypeName として誤認 → `Counter::method(args)` emit、Rust では shadow された `Counter` (object literal) に method 不在 compile error。member_access.rs 側は `get_expr_type(receiver).is_none()` gate で TypeResolver が instance type を resolve していない (= true な class TypeName context) のみ static dispatch fire = symmetric expected。
+  - **(c) `lookup_method_sigs_in_inheritance_chain` 不使用 (= inherited static method call 不対応)**。例: `class Base { static greet(): void {} } class Sub extends Base {} Sub.greet()` で calls.rs は `Sub` を Struct match で hit、`Sub::greet(args)` emit するが Rust 側 `impl Sub` には `greet` 不在 (Base にしか定義なし)、Rust compile error。本来 `Base::greet(args)` (= inheritance chain で resolve した parent class) emit が ideal、または **Tier 2 honest error reclassify ("inherited static method call")** で B7 inherited dispatch arm と symmetric な扱いが必要。member_access.rs 側は `lookup_method_sigs_in_inheritance_chain` で is_inherited 検出済 = symmetric expected。
+
+  **修正方針 (structural)**: calls.rs `convert_call_expr` の Member callee branch (line 213-225) を `classify_member_receiver` 経由に refactor。具体的に:
+  - Static method call (= Static dispatch arm に method kind が含まれる場合) で `Expr::FnCall { UserAssocFn { ty: class_name, method: <method name> }, args }` emit。
+  - is_inherited = true の場合 Tier 2 honest error reclassify (= "inherited static method call" wording、B7 read/write arm と symmetric)。
+  - is_interface: true の場合は static gate skip (= instance shadowing 防止)。
+  - Enum constructor call (`MyEnum.Variant(args)`) は member access の class member dispatch と semantic 異なる (Enum は variant constructor、Struct は static method call) ため classify_member_receiver の Static dispatch arm に Enum を含めず、calls.rs 側で Enum-specific dispatch を独立保持。
+
+  **Problem Space (要 Spec stage enumerate)**: callee shape (Member { obj: Ident vs other }) × obj resolution kind (Struct registered / Enum registered / not registered / Function) × is_inherited (direct / parent class) × is_interface (true/false) × method kind (Method/Getter/Setter、ただし Static method call では Method only が主、Getter/Setter call は別 cell) × Mixed class context (instance + static method 同名 collision)。matrix cells ~30+ 想定。
+
+  **影響範囲**: `src/transformer/expressions/calls.rs:213-225` (~13 LOC delete + ~30-50 LOC refactor with classify_member_receiver integration) + `member_access.rs::MemberReceiverClassification` (Static variant の `sigs` consumer 拡張、call context での dispatch logic 追加 = ~20-50 LOC `dispatch_static_member_call(class_name, sigs, is_inherited, args)` 新規 helper)。matrix cells driven test ~10-20 件 + Hono reachability audit (= inherited static method call が Hono で reachable か empirical 確認、L3 / L1 priority 確定 driver)。
+
+  **Resolution target**: PRD I-205 close 後の T11 (11-b/c/d/f Static dispatch matrix expansion) と cohesive batch 検討候補 (= "Static dispatch full coverage" PRD として 1 architectural concern 統合)、または T11 完了後の独立 PRD として起票。`design-integrity.md` "DRY (knowledge duplication)" + "Coupling (両 helper の同 knowledge propagation)" 観点で structural fix priority 高、Hono reachability 確認後に L1 promote 検討。
+
+  **発見経緯**: PRD I-205 T6 Iteration v10 second-review (`/check_problem` 2026-04-28) で classify_member_receiver shared helper 抽出 (Fix A) 後、calls.rs 側の static method call dispatch が同知識を持つことを発見。本 T6 scope 内 fix の判断 (= 1 PRD = 1 architectural concern と T6 scope 「Class member ACCESS dispatch」 vs 本 entry scope 「Static method CALL dispatch」 の split 判断) で別 PRD 化 user 確定。
+
+  - 🔗 PRD I-205 (T6 Iteration v10 で classify_member_receiver helper 抽出、本 entry の origin)、T11 (11-b/c/d/f Static dispatch matrix expansion、cohesive batch 候補)、I-378 T9 (`convert_call_expr` static method call dispatch 導入の origin、本 entry で refactor 対象)、I-206 (B7 inherited accessor の Tier 1 化、本 entry の inherited static method call と symmetric architectural concern)、I-203 (codebase-wide AST match exhaustiveness、symmetric "codebase-wide structural compliance" pattern PRD)
+
+- **[I-215]** **`arr.length = v` write Tier 2 silent gap — TS truncate semantic vs Rust compile error E0609 (PRD I-205 T6 Iteration v10 second-review `/check_problem` 由来、user 確定 2026-04-28)** [**L4** (Localized、Vec/Array specific syntax のみ、Hono reachability 低想定)] — TS は `arr.length = n` で配列長を変更する mutation semantic を持つ (n が現長より短い場合 truncate / 長い場合 pad with `undefined`)、現 transformer は `convert_assign_expr` の plain `=` × Member target × Ident("length") で `Expr::Assign { FieldAccess { arr, "length" }, value }` emit、Rust 出力 = `arr.length = n;` (Vec / Array に `length` field 不在で **compile error E0609**)。
+
+  **Read 側 (T5 既存) との asymmetry**: 既存 `resolve_member_access` (line 113-122) は `field == "length"` で `Expr::Cast { MethodCall { arr, "len", [] }, F64 }` Tier 1 dispatch。Read = Tier 1、Write = Tier 2 で **ideal output asymmetric** が結果として無対応 (= 同 syntax `.length` で Read / Write context で対応度乖離)。
+
+  **修正方針 (structural)**:
+  - **オプション A (Tier 1 truncate emission)**: `convert_assign_expr` で receiver type が `RustType::Vec(_)` (or Array) かつ field = "length" を detect、value が `0.0` (literal) なら `Expr::MethodCall { arr, "clear", [] }`、value が其他 numeric literal `n` なら `Expr::MethodCall { arr, "truncate", [Cast(n, usize)] }`、value が runtime expr なら `arr.truncate(<expr> as usize)` emit。**`pad with undefined`** semantic (n が現長より大) は Rust では `arr.resize(n as usize, default)` 必要だが default value が non-trivial (Element type T が `Default` impl 持つか、`Option<T>` なら `None`、それ以外は manual default)、加えて TS の `undefined` semantic は Rust の `T::default()` と divergent。
+  - **オプション B (Tier 2 honest error reclassify)**: `convert_assign_expr` で同 detect、`UnsupportedSyntaxError::new("write to arr.length (TS truncate / pad-with-undefined semantic、Rust 直接対応なし)", span)` Tier 2 honest error。silent semantic loss なし、user に明示通知。
+  - **判断基準**: TS 実用パターンとして `arr.length = 0` (clear) は頻出だが `arr.length = n` (truncate to specific length) は rare。`arr.length = bigger_n` (pad with undefined) は anti-pattern (initialize with `Array.from`/`new Array(n)` が ideal)。Hono reachability audit で **どの subset が reachable か empirical 確定**、頻出 pattern (`arr.length = 0`) のみ オプション A、其他 オプション B が pragmatic ideal。
+  - **TS spec で明確に reject される subset**: `(arr as readonly T[]).length = 0` (TS 4.0+ で readonly array に対する length write は TS error)、`(<const arr>).length = 0` (const literal 配列) — これらは Tier 2 honest error が ideal。
+
+  **Problem Space (要 Spec stage enumerate)**: receiver type = {Vec<T>, Array<T>, ReadonlyArray<T>, tuple, string (length not assignable)} × value shape = {literal 0 / literal n / runtime expr / negative number / non-integer / `Infinity` / `NaN`} × outer context = {stmt / expr (=ない、TS spec で statement context only?) / compound `+= -=` (= length 増減)} × ideal output = {`.clear()` / `.truncate(n)` / `.resize(n, default)` / Tier 2 honest error}。matrix cells ~15-20 想定。
+
+  **影響範囲**: `src/transformer/expressions/assignments.rs::convert_assign_expr` (~5-10 LOC gate 追加)、新規 helper `dispatch_array_length_write` 追加候補 (~30-50 LOC)、unit test ~10 件 + E2E fixture 5-7 件 (= each behaviors)。
+
+  **Resolution target**: Hono reachability audit で priority 確定 (L4 → L3 promote 余地)、I-205 close 後の low priority 独立 PRD として起票。matrix-driven 設計、tsc oracle observation 必須 (`arr.length = -1` / `arr.length = 0.5` / etc. の TS engine behavior + tsx runtime 観測)。
+
+  **発見経緯**: PRD I-205 T6 Iteration v10 second-review (`/check_problem` 2026-04-28) で T6 dispatch_member_write の dispatch arm 検討中、Read context `.length` Tier 1 dispatch (T5 既存) と Write context の asymmetry を発見。本 T6 architectural concern (Class member access dispatch) と orthogonal な Vec/Array specific syntax 軸のため別 PRD 化 user 確定。
+
+  - 🔗 PRD I-205 (T6 second-review 由来)、I-319 (Vec index move 関連 PRD、Vec semantic の broader concern)、I-022 (`??` 完全仕様化 + `Vec<T>/Vec<Option<T>>` silent drop fix の precedent、Vec 関連の Tier classification methodology)、I-071 (builtin 型 impl 生成、Array trait method emission の base architectural concern)
+
+- **[I-216]** **`!(b.x = 5)` (bang on B4 setter assignment) Tier 2 behavioral change の structural enforcement (PRD I-205 T6 Iteration v10 second-review `/check_problem` 由来、user 確定 2026-04-28)** [**L4** (Localized、`!(assign-expr)` syntax は anti-pattern で Hono reachability 極低想定)] — PRD I-205 T6 Iteration v10 で `convert_assign_expr` が plain `Assign` × Member × class B4 (getter+setter pair) で `Expr::MethodCall { method: "set_x", args: [value] }` emit するように改修した結果、`convert_bang_assign` (`src/transformer/expressions/binary.rs:509`) の destructure pattern `let Expr::Assign { target, value } = assign_ir else { return Ok(None); }` が **fail する**。
+
+  **Pre/post T6 比較**:
+  - **Pre-T6**: `!(b.x = 5)` で `b.x = 5` の IR = `Expr::Assign { FieldAccess { b, "x" }, NumberLit(5.0) }`、`convert_bang_assign` 経路 fire、`{ let __ts_tmp: T = 5.0; b.x = __ts_tmp; falsy_predicate(__ts_tmp) }` emit。LHS (`b.x = __ts_tmp`) が Rust に struct field "x" 不在で **compile error E0609** (Tier 2)。
+  - **Post-T6**: `b.x = 5` の IR = `Expr::MethodCall { b, "set_x", [NumberLit(5.0)] }`、`convert_bang_assign` の destructure fail で None return、Layer 4 fall-through で operand_ir = MethodCall に対し falsy_predicate dispatch、`!b.set_x(5.0)` emit。Rust の `!` operator on `()` (unit return type of setter) で **compile error E0277 / type mismatch** (Tier 2)。
+
+  **両者とも Tier 2 compile error**、silent semantic change なし。post-T6 の error は **より honest** (= setter dispatch が functional に正しく fire、`!void` という意味のない構造に対する明示 error)。
+
+  **Tier classification reassessment**:
+  - **silent semantic change の risk なし**: 両 case で compile error 発生、user は必ず気付く。
+  - **TS 実用 pattern としての reachability**: `!(assign-expr)` syntax は anti-pattern (= assignment に bang する semantic 必要性が極低、稀に condition 内 short-circuit で使われるが ideal でない)。Hono codebase で reachability **極低想定**、bench 上 0 reachability の可能性高。
+  - **本質問題**: post-T6 の `!b.set_x(5.0)` は意味的に `!<setter return value>` だが setter return = `()` で compile error、TS の `!(b.x = 5)` は意味的に `!5` (= assignment expression value = 代入値) で `!5 = false` (Truthy of 5)。**TS と Rust で根本的に divergent な expression value semantic** (TS assignment = value、Rust assignment = unit)。これを Rust で TS-equivalent emit するには `{ b.set_x(5.0); !5.0 }` 形式 (= setter call + assigned value で falsy check) が必要、現 convert_bang_assign の tmp binding pattern を setter dispatch 用に拡張する必要あり。
+
+  **修正方針 (structural)**:
+  - **オプション A (convert_bang_assign を MethodCall setter dispatch に拡張)**: `convert_bang_assign` で `assign_ir` の destructure pattern を拡張、`Expr::MethodCall { object, method, args: [value] } if method.starts_with("set_") && args.len() == 1` を accept して `{ object.set_x(value); falsy_predicate(value, value_type) }` emit。setter の return value `()` は無視、assigned value (= TS expression value) で falsy check。INV-3 (compound assign desugar の receiver evaluation 1 回) と整合 (= setter call で receiver evaluation 1 回 + falsy check で value re-use)。
+  - **オプション B (Tier 2 honest error reclassify)**: `convert_bang_assign` で同 detect、`UnsupportedSyntaxError::new("bang on setter assignment (!(obj.x = v) syntax、TS expression-value vs Rust unit return divergent)", span)` Tier 2 honest error。silent semantic loss なし、user に明示通知。
+  - **判断基準**: Hono reachability audit で `!(assign-expr)` 全 subset が reachable か empirical 確定、reachable なら オプション A (structural fix で Tier 1)、unreachable or 極稀なら オプション B (honest error で簡潔)。`!(obj.x = v)` syntax 自体が稀、加えて class B4 (getter+setter pair) との combination は更に稀想定 = オプション B が pragmatic default。
+
+  **Problem Space (要 Spec stage enumerate)**: bang operand shape = {Ident assign / Member assign × {B1 field / B2 getter only / B3 setter only / B4 both / B6 method / B7 inherited / B8 static / B9 unknown}} × outer context = {stmt / expr / call arg / ternary branch / return / etc.}。class member dispatch (B2-B8) との product で matrix cells ~15-20 想定。compound assign (`+=`/`??=`/`&&=`/`||=`/`++/--`) との bang interaction も symmetric 軸。
+
+  **影響範囲**: `src/transformer/expressions/binary.rs::convert_bang_assign` (~10-30 LOC dispatch arm 拡張、または Tier 2 honest error 1 行追加)、unit test ~5-10 件 + E2E fixture (Hono reachability 確認後判断、reachability ゼロなら fixture 不要)。
+
+  **Resolution target**: Hono reachability audit (low priority、I-205 close 後)、reachable なら独立 PRD として起票、unreachable なら scope 外決定 + 永続 ignore (= TS anti-pattern syntax の本質的 unsupportable case)。
+
+  **発見経緯**: PRD I-205 T6 Iteration v10 second-review (`/check_problem` 2026-04-28) で T6 dispatch_member_write の `Expr::MethodCall { method: "set_x", args: [value] }` emit が `convert_bang_assign` の destructure pattern と incompatible になることを発見。本 T6 scope (= class member access dispatch) と orthogonal な bang operator interaction 軸のため別 PRD 化 user 確定。pre-existing pattern (= I-171 T4 で導入された convert_bang_assign の Layer 3c 経路、bang × compound assign 軸) との整合性確保が ideal。
+
+  - 🔗 PRD I-205 (T6 second-review 由来)、I-171 T4 Layer 3c (`convert_bang_assign` 導入の precedent、本 entry の compound × bang 軸 base)、I-161 T7-1/T7-2 (narrow F64 &&=/||= from-inside-narrow return form の compound × narrow 軸)、I-177 (mutation propagation 本体、F1/F3 mutation の broader architectural concern)、I-209 (Function reference semantic、`obj.method` no-paren reference の bang interaction が同様の divergent expression value semantic)
 
 ---
 

@@ -11,6 +11,32 @@ use crate::transformer::{Transformer, UnsupportedSyntaxError};
 impl<'a> Transformer<'a> {
     /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
     pub(crate) fn convert_assign_expr(&mut self, assign: &ast::AssignExpr) -> Result<Expr> {
+        // I-205 T6: plain `obj.x = v` (or `Class.x = v`) Member target は class member
+        // dispatch (Write context) を経由する。setter dispatch (B3 / B4 / B8 setter) は
+        // `Expr::MethodCall set_x` / `Expr::FnCall UserAssocFn set_x`、Tier 2 honest error
+        // (B2 read-only / B6 method / B7 inherited) は `UnsupportedSyntaxError`、B1 field /
+        // B9 unknown / static field は既存 FieldAccess Assign emission を `dispatch_member_write`
+        // helper 内 fallback で統合実装。`AssignOp::Assign` (= `=`) で `MemberProp::Ident |
+        // PrivateName` のみ gate (Computed `obj[i] = v` は既存 `convert_member_expr_for_write`
+        // の `Expr::Index` 経路で handle、本 dispatch では unreachable)。Compound (+=, -=, etc.)
+        // / nullish (??=) / logical (&&=, ||=) は subsequent T7-T9 で別途 setter dispatch 実装、
+        // 本 T6 では plain `=` のみ gate。本 fix なしだと B3/B4/B8 instance/static setter で
+        // existing `convert_member_expr_for_write` の FieldAccess Assign 経路に流れ、
+        // `obj.x = v;` (struct field assign for non-existent field) Rust syntax で Tier 2
+        // compile error を emit する状態 (= 既存 Tier 2 broken framework)。
+        if assign.op == ast::AssignOp::Assign {
+            if let ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(member)) = &assign.left
+            {
+                if matches!(
+                    &member.prop,
+                    ast::MemberProp::Ident(_) | ast::MemberProp::PrivateName(_)
+                ) {
+                    let value = self.convert_expr(&assign.right)?;
+                    return self.dispatch_member_write(member, value);
+                }
+            }
+        }
+
         let target = match &assign.left {
             ast::AssignTarget::Simple(simple) => match simple {
                 ast::SimpleAssignTarget::Member(member) => {

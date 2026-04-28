@@ -1,21 +1,31 @@
-//! I-205 Iteration v9 (T5 Read context dispatch + B7 traversal helper) lock-in tests.
+//! I-205 T5 (Read context dispatch + B7 traversal helper) lock-in tests + Iteration v10
+//! second-review C1 coverage 補完 (Read defensive dispatch arms)。
 //!
-//! Spec stage Problem Space matrix の Read context (A1) cells に対し、
-//! `resolve_member_access` の dispatch arm が ideal output を emit することを verify する。
+//! Spec stage Problem Space matrix の Read context (A1) cells に対し、`resolve_member_access`
+//! の dispatch arm が ideal output を emit することを verify する。
 //!
-//! Cells 1, 10 は B1 field / B9 unknown の fallback regression (FieldAccess preserve)、
-//! Cells 2-5/9 は Tier 1 dispatch arm (MethodCall / FnCall::UserAssocFn)、
-//! Cells 4/7/8 は Tier 2 honest error reclassify (UnsupportedSyntaxError)。
+//! ## 対象 cells / 機能
 //!
-//! 各 test は cell 単位の matrix mapping を test name に明示。`Transformer::for_module(...)
-//! .convert_expr(&swc_expr)` で direct invoke、IR Expr を assert_eq! で token-level verify。
-//! Tier 2 path は `convert_expr` の Err を `downcast::<UnsupportedSyntaxError>` で kind verify。
+//! - **Cells 1, 10** (B1 field / B9 unknown): fallback FieldAccess preserve regression。
+//! - **Cells 2, 3, 5, 9** (B2 getter / B4 getter+setter / B8 static getter): Tier 1 dispatch arm
+//!   (MethodCall / FnCall::UserAssocFn)。
+//! - **Cells 4, 7, 8** (B3 setter only / B6 method-as-fn-ref / B7 inherited): Tier 2 honest
+//!   error reclassify (UnsupportedSyntaxError)。
+//! - **B7 traversal helper tests** (cycle / direct hit / single-step / multi-step inheritance):
+//!   `lookup_method_sigs_in_inheritance_chain` の cycle-safety + boundary value (N=1 / N>=2 step)。
+//! - **Read defensive dispatch arms** (matrix cell 化なし、Iteration v10 second-review C1 補完):
+//!   static B3 setter only Read / static B6 method Read / static B7 inherited Read で
+//!   `dispatch_static_member_read` の defensive arm error message lock-in。
 
-use super::*;
+use super::super::*;
 
 use crate::ir::{CallTarget, Expr, MethodKind, RustType, UserTypeRef};
 use crate::registry::{MethodSignature, ParamDef, TypeDef, TypeRegistry};
 use crate::transformer::UnsupportedSyntaxError;
+
+// =============================================================================
+// T5 Read context cells (1-10)
+// =============================================================================
 
 // -----------------------------------------------------------------------------
 // Cell 1: A1 Read × B1 (regular field) → fallback FieldAccess (regression)
@@ -272,54 +282,9 @@ fn test_cell_10_b9_unknown_receiver_field_read_emits_field_access() {
     );
 }
 
-// -----------------------------------------------------------------------------
-// Write context regression: Read dispatch logic must NOT leak into LHS conversion
-// (Iteration v9 deep deep review で発覚した silent regression の structural lock-in)
-// -----------------------------------------------------------------------------
-
-#[test]
-fn test_write_context_lhs_does_not_leak_read_dispatch() {
-    // Iteration v9 deep deep review で発覚した critical bug の regression lock-in:
-    // 本 T5 で導入した Read context dispatch logic (`resolve_member_access` の
-    // class member dispatch) が `convert_member_expr_for_write` (= assignment LHS
-    // conversion) にも leak すると、`f.x = 5;` の LHS が `f.x()` (MethodCall) に
-    // 変換され `f.x() = 5.0;` (invalid Rust LHS、compile error) を emit する silent
-    // regression が発生する。本 fix で `convert_member_expr_inner` の Ident path で
-    // `for_write=true` 時 Read dispatch を skip、既存 FieldAccess fallback を維持。
-    // setter dispatch (`f.set_x(5.0)`) は subsequent T6 で別途実装。
-    //
-    // 本 test は B4 (getter+setter pair) class の `f.x = 5;` で **LHS は FieldAccess**
-    // を維持することを direct verify。
-    let src = "class Foo { _v: number = 0; \
-               get x(): number { return this._v; } \
-               set x(v: number) { this._v = v; } }\n\
-               function probe(): void { const f = new Foo(); f.x = 5; }";
-    let fx = TctxFixture::from_source(src);
-    let module = fx.module();
-    // probe fn body の 2 番目 stmt = `f.x = 5;` ExprStmt (AssignExpr)
-    let assign_stmt = extract_fn_body_expr_stmt(module, 1, 1);
-    let assign_expr = match &assign_stmt {
-        ast::Expr::Assign(a) => a,
-        other => panic!("expected AssignExpr, got: {other:?}"),
-    };
-    // AssignTarget::Simple(SimpleAssignTarget::Member(...)) の inner MemberExpr を抽出
-    let target_member = match &assign_expr.left {
-        ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(m)) => m,
-        other => panic!("expected SimpleAssignTarget::Member, got: {other:?}"),
-    };
-    let result = Transformer::for_module(&fx.tctx(), &mut SyntheticTypeRegistry::new())
-        .convert_member_expr_for_write(target_member)
-        .expect("Write context conversion must succeed");
-    assert_eq!(
-        result,
-        Expr::FieldAccess {
-            object: Box::new(Expr::Ident("f".to_string())),
-            field: "x".to_string(),
-        },
-        "Write context LHS must emit FieldAccess (NOT MethodCall — Read dispatch \
-         leak regression check)、setter dispatch は subsequent T6 で実装"
-    );
-}
+// =============================================================================
+// B7 traversal helper tests (cycle-safety + boundary value N=1/N>=2 step)
+// =============================================================================
 
 // -----------------------------------------------------------------------------
 // B7 traversal helper cycle-safety regression (degenerate case)
@@ -534,4 +499,85 @@ fn test_b7_traversal_direct_hit_returns_not_inherited() {
         .lookup_method_sigs_in_inheritance_chain("A", "z")
         .expect("expected direct hit");
     assert!(!is_inherited, "direct hit must mark as not inherited");
+}
+
+// =============================================================================
+// Read defensive dispatch arms (matrix cell 化なし、Iteration v10 second-review C1 補完)
+// =============================================================================
+//
+// `dispatch_static_member_read` の defensive Tier 2 honest error 3 arm を C1 coverage 観点で
+// lock-in (testing.md "Branch Coverage (C1) — Every if/match arm must have at least one test
+// exercising each branch direction" 要件)。matrix cell 化は subsequent T11 (11-c) で
+// expansion 予定。
+
+#[test]
+fn test_t6_read_static_setter_only_emits_unsupported_syntax_error() {
+    // dispatch_static_member_read の "Setter present、Getter absent" defensive arm:
+    // `Counter.count;` for static setter only → Tier 2 honest error "read of write-only
+    // static property"。matrix cell 化なし (T11 (11-c) で expansion 予定)、Read context の
+    // C1 coverage 補完 (T5 で未 test だった defensive arm)。
+    let src = "class Counter { static _n: number = 0; static set count(v: number) { Counter._n = v; } }\n\
+               function probe(): void { const r = Counter.count; }";
+    let fx = TctxFixture::from_source(src);
+    let module = fx.module();
+    let read_init = extract_fn_body_var_init(module, 1, 0);
+    let err = Transformer::for_module(&fx.tctx(), &mut SyntheticTypeRegistry::new())
+        .convert_expr(&read_init)
+        .expect_err("static setter only Read must Err (read of write-only static property)");
+    let usx = err
+        .downcast::<UnsupportedSyntaxError>()
+        .expect("error must be UnsupportedSyntaxError");
+    assert_eq!(
+        usx.kind, "read of write-only static property",
+        "static B3 Read: kind mismatch"
+    );
+}
+
+#[test]
+fn test_t6_read_static_method_emits_unsupported_syntax_error() {
+    // dispatch_static_member_read の "Method only" defensive arm:
+    // `const f = Counter.greet;` for static method (no-paren reference) → Tier 2 honest
+    // error "static-method-as-fn-reference (no-paren)"。matrix cell 化なし (T11 (11-c)
+    // で expansion 予定)、Read context C1 coverage 補完。
+    let src = "class Counter { static greet(): number { return 1; } }\n\
+               function probe(): void { const f = Counter.greet; }";
+    let fx = TctxFixture::from_source(src);
+    let module = fx.module();
+    let read_init = extract_fn_body_var_init(module, 1, 0);
+    let err = Transformer::for_module(&fx.tctx(), &mut SyntheticTypeRegistry::new())
+        .convert_expr(&read_init)
+        .expect_err("static method Read must Err (static-method-as-fn-reference)");
+    let usx = err
+        .downcast::<UnsupportedSyntaxError>()
+        .expect("error must be UnsupportedSyntaxError");
+    assert_eq!(
+        usx.kind, "static-method-as-fn-reference (no-paren)",
+        "static B6 Read: kind mismatch"
+    );
+}
+
+#[test]
+fn test_t6_read_static_inherited_getter_emits_unsupported_syntax_error() {
+    // dispatch_static_member_read の "is_inherited=true" defensive arm:
+    // `Sub.count` where Base has static getter → Tier 2 honest error "inherited static
+    // accessor access"。matrix cell 化なし (T11 (11-c) で expansion 予定)、Read context
+    // C1 coverage 補完。
+    let src =
+        "class Base { static _n: number = 0; static get count(): number { return Base._n; } }\n\
+               class Sub extends Base {}\n\
+               function probe(): void { const r = Sub.count; }";
+    let fx = TctxFixture::from_source(src);
+    let module = fx.module();
+    let read_init = extract_fn_body_var_init(module, 2, 0);
+    let err = Transformer::for_module(&fx.tctx(), &mut SyntheticTypeRegistry::new())
+        .convert_expr(&read_init)
+        .expect_err("static inherited getter Read must Err (inherited static accessor access)");
+    let usx = err
+        .downcast::<UnsupportedSyntaxError>()
+        .expect("error must be UnsupportedSyntaxError");
+    assert!(
+        usx.kind.starts_with("inherited static accessor access"),
+        "static B7 Read: kind must start with \"inherited static accessor access\", got: {}",
+        usx.kind
+    );
 }

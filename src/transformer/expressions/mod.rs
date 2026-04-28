@@ -21,6 +21,7 @@ mod data_literals;
 mod functions;
 mod literals;
 pub(crate) mod member_access;
+pub(crate) mod member_dispatch;
 pub(crate) mod methods;
 pub(crate) mod patterns;
 mod type_resolution;
