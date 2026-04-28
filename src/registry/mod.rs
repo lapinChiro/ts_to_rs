@@ -674,6 +674,58 @@ impl TypeRegistry {
         })
     }
 
+    /// Looks up a method's signatures in a type's inheritance chain (`extends` traversal).
+    ///
+    /// I-205 T5 (Iteration v9): B7 inherited accessor detection を実現する。
+    /// `type_name` で直接 lookup (= same class、`is_inherited = false`)、不在なら
+    /// `TypeDef::Struct.extends` 経由で parent class を再帰的に走査 (= inherited、
+    /// `is_inherited = true`)。Cycle-safe (循環継承 `class A extends B { } class B extends A { }`
+    /// 等の degenerate ケースを `HashSet<String> visited` で防止)。
+    ///
+    /// Returns `(sigs, is_inherited)`:
+    /// - `sigs`: 該当 method の overload 全 signature (Getter / Setter pair も同 vec に含む)
+    /// - `is_inherited`: parent class 経由 hit なら `true`、direct なら `false`
+    ///
+    /// Caller (`resolve_member_access` / `dispatch_member_write`) で `sigs.iter().any(|s|
+    /// s.kind == ...)` で getter / setter co-presence を判定し、`is_inherited` で B7 dispatch
+    /// arm (Tier 2 honest error reclassify) を分岐する。
+    pub fn lookup_method_sigs_in_inheritance_chain(
+        &self,
+        type_name: &str,
+        field: &str,
+    ) -> Option<(Vec<MethodSignature>, bool)> {
+        let mut visited = std::collections::HashSet::new();
+        self.lookup_method_sigs_with_traversal_inner(type_name, field, &mut visited)
+    }
+
+    fn lookup_method_sigs_with_traversal_inner(
+        &self,
+        type_name: &str,
+        field: &str,
+        visited: &mut std::collections::HashSet<String>,
+    ) -> Option<(Vec<MethodSignature>, bool)> {
+        if !visited.insert(type_name.to_string()) {
+            return None;
+        }
+        let TypeDef::Struct {
+            methods, extends, ..
+        } = self.get(type_name)?
+        else {
+            return None;
+        };
+        if let Some(sigs) = methods.get(field) {
+            return Some((sigs.clone(), false));
+        }
+        for parent_name in extends.clone() {
+            if let Some((sigs, _)) =
+                self.lookup_method_sigs_with_traversal_inner(&parent_name, field, visited)
+            {
+                return Some((sigs, true));
+            }
+        }
+        None
+    }
+
     /// Looks up a field type from the object type's definition.
     ///
     /// Handles `Vec<T>` → `Array<T>` mapping for field access (e.g., `arr.length`).

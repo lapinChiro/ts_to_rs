@@ -254,14 +254,25 @@ pub(in crate::registry) fn collect_decl(
         }
         ast::Decl::Class(class) => {
             let ts_def = collect_class_info(class);
+            // I-205 Iteration v9: empty body の class でも `extends Parent` がある場合は
+            // registry に Pass 2 結果を登録する必要がある (B7 inherited dispatch detection の
+            // 前提)。旧 condition `!fields.is_empty() || !methods.is_empty() ||
+            // constructor.is_some()` では `class Sub extends Base {}` が placeholder の
+            // 空 TypeDef (= extends: []) のまま放置されていた。`extends.is_empty()` も
+            // condition に追加し、extends を持つ class は body が空でも登録する。
             if let TypeDef::Struct {
                 ref fields,
                 ref methods,
                 ref constructor,
+                ref extends,
                 ..
             } = ts_def
             {
-                if !fields.is_empty() || !methods.is_empty() || constructor.is_some() {
+                if !fields.is_empty()
+                    || !methods.is_empty()
+                    || constructor.is_some()
+                    || !extends.is_empty()
+                {
                     if let Ok(resolved) = resolve_typedef(ts_def, lookup, synthetic) {
                         reg.register(class.ident.sym.to_string(), resolved);
                     }

@@ -186,13 +186,33 @@ pub(super) fn collect_class_info(class: &ast::ClassDecl) -> TypeDef<TsTypeInfo> 
     } else {
         Some(constructor_sigs)
     };
+    // I-205 Iteration v9: TS class の `extends Parent` を Vec<String> に登録 (single inheritance)。
+    // 旧 hardcode `vec![]` は B7 inherited accessor detection (Design section #3-bis
+    // `lookup_method_in_inheritance_chain`) の前提を欠いた Implementation gap で、
+    // 本 T5 で fix。SWC AST では `class.class.super_class: Option<Box<ast::Expr>>`、
+    // Ident 以外 (e.g., `class B extends getMixin() {}`) は registration scope 外
+    // (= drop、Tier 1 化は別 PRD = "Class inheritance dispatch")。Interface 用
+    // `decl.rs:63-73` と symmetric な registration pattern。
+    let extends: Vec<String> = class
+        .class
+        .super_class
+        .as_ref()
+        .and_then(|expr| {
+            if let ast::Expr::Ident(ident) = expr.as_ref() {
+                Some(ident.sym.to_string())
+            } else {
+                None
+            }
+        })
+        .into_iter()
+        .collect();
     TypeDef::Struct {
         type_params,
         fields,
         methods,
         constructor,
         call_signatures: vec![],
-        extends: vec![],
+        extends,
         is_interface: false,
     }
 }
