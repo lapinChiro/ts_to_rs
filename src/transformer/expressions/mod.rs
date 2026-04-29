@@ -42,8 +42,8 @@ pub(crate) use binary::convert_binary_op;
 /// Single source of truth for the postfix old-value emission binding name —
 /// references this constant from all emission sites (`assignments.rs`
 /// `convert_update_expr` + `build_fallback_field_update_block`、
-/// `member_dispatch.rs` `build_update_setter_block`) to prevent silent drift if
-/// the convention changes.
+/// `member_dispatch/shared.rs` `build_setter_desugar_block`) to prevent silent
+/// drift if the convention changes.
 ///
 /// ## I-154 namespace reservation extension
 ///
@@ -61,11 +61,41 @@ pub(super) const TS_OLD_BINDING: &str = "__ts_old";
 ///
 /// Used in `++obj.x` desugar:
 /// `{ let __ts_new = obj.x() + 1.0; obj.set_x(__ts_new); __ts_new }`
-/// (B4 setter dispatch、prefix yields the new value).
+/// (B4 setter dispatch、prefix yields the new value)、および compound assign
+/// (`obj.x += v`) yields the new value (= prefix update と same shape with
+/// `rhs` replacing `1.0`)。
 ///
-/// Single source of truth for the prefix new-value emission binding name (see
-/// [`TS_OLD_BINDING`] for the I-154 namespace reservation extension rationale).
+/// Single source of truth for the prefix/compound new-value emission binding name
+/// (see [`TS_OLD_BINDING`] for the I-154 namespace reservation extension rationale).
 pub(super) const TS_NEW_BINDING: &str = "__ts_new";
+
+/// Binding name for **side-effect-having receiver** preservation in setter
+/// desugar IIFE block emissions (T8 INV-3 1-evaluate compliance).
+///
+/// Used when the receiver of `obj.x += v` / `obj.x++` carries side effects
+/// (e.g., `getInstance().value += v`). The IIFE form binds the receiver to
+/// `__ts_recv` (mutable for setter `&mut self` borrow) and reroutes both
+/// getter call (`__ts_recv.x()`) and setter call (`__ts_recv.set_x(...)`)
+/// through this binding, ensuring the source-side receiver expression is
+/// evaluated **exactly once** per INV-3 (a) Property statement:
+///
+/// ```text
+/// {
+///   let mut __ts_recv = <receiver>;          // evaluated once
+///   let __ts_new = __ts_recv.x() + v;
+///   __ts_recv.set_x(__ts_new);
+///   __ts_new
+/// }
+/// ```
+///
+/// Side-effect-free receivers (`Expr::Ident` / depth-bounded `Expr::FieldAccess`)
+/// skip this binding and embed the receiver directly twice — Rust handles
+/// `obj.x()` + `obj.set_x(...)` via auto-borrow without source-level repetition
+/// changing semantics.
+///
+/// Single source of truth for the IIFE receiver binding name (see
+/// [`TS_OLD_BINDING`] for the I-154 namespace reservation extension rationale).
+pub(super) const TS_RECV_BINDING: &str = "__ts_recv";
 
 impl<'a> Transformer<'a> {
     /// Converts an SWC [`ast::Expr`] into an IR [`Expr`].

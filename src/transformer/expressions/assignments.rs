@@ -14,6 +14,40 @@ use super::member_dispatch::{
 };
 use super::TS_OLD_BINDING;
 
+/// Maps an arithmetic / bitwise compound `AssignOp` to the corresponding `BinOp`
+/// for T8 setter dispatch. Returns `None` for plain `=`、A5 logical compound
+/// (`??=`/`&&=`/`||=`) — those are routed through their own paths
+/// (`dispatch_member_write` for plain `=`、`nullish_assign.rs` /
+/// `compound_logical_assign.rs` for logical compound).
+///
+/// Op-axis orthogonality merge (Rule 1 (1-4) compliance): all 11 arithmetic /
+/// bitwise compound ops share the same dispatch logic; this 1-to-1 mapping is
+/// the single source of truth for the conversion (= matrix cells 20-29 +
+/// 30-35 are op-axis orthogonality-equivalent under this mapping).
+fn arithmetic_compound_op_to_binop(op: ast::AssignOp) -> Option<BinOp> {
+    match op {
+        ast::AssignOp::AddAssign => Some(BinOp::Add),
+        ast::AssignOp::SubAssign => Some(BinOp::Sub),
+        ast::AssignOp::MulAssign => Some(BinOp::Mul),
+        ast::AssignOp::DivAssign => Some(BinOp::Div),
+        ast::AssignOp::ModAssign => Some(BinOp::Mod),
+        ast::AssignOp::BitAndAssign => Some(BinOp::BitAnd),
+        ast::AssignOp::BitOrAssign => Some(BinOp::BitOr),
+        ast::AssignOp::BitXorAssign => Some(BinOp::BitXor),
+        ast::AssignOp::LShiftAssign => Some(BinOp::Shl),
+        ast::AssignOp::RShiftAssign => Some(BinOp::Shr),
+        ast::AssignOp::ZeroFillRShiftAssign => Some(BinOp::UShr),
+        // Plain `=` (T6 plain Assign path) and A5 logical compound (??= / &&= /
+        // ||=、T9 scope) are not in T8's scope: caller dispatches these through
+        // their own paths.
+        ast::AssignOp::Assign
+        | ast::AssignOp::NullishAssign
+        | ast::AssignOp::AndAssign
+        | ast::AssignOp::OrAssign
+        | ast::AssignOp::ExpAssign => None,
+    }
+}
+
 impl<'a> Transformer<'a> {
     /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
     pub(crate) fn convert_assign_expr(&mut self, assign: &ast::AssignExpr) -> Result<Expr> {
@@ -39,6 +73,28 @@ impl<'a> Transformer<'a> {
                 ) {
                     let value = self.convert_expr(&assign.right)?;
                     return self.dispatch_member_write(member, value);
+                }
+            }
+        }
+
+        // I-205 T8: arithmetic / bitwise compound assign × Member × non-Computed
+        // dispatch gate。`obj.x += v` (and the 10 sibling ops) routes through
+        // `dispatch_member_compound` (T8) for class member dispatch (B4 instance
+        // setter desugar / B8 static setter desugar / B2 read-only / B3 write-only-
+        // read-fail / B6 method / B7 inherited Tier 2 honest error)、Fallback
+        // (B1 field / B9 unknown / non-class receiver / static field) で既存
+        // `Expr::Assign { FieldAccess, BinaryOp }` desugar emit (regression preserve)。
+        // A5 logical compound (`??=`/`&&=`/`||=`) は subsequent T9 で setter dispatch
+        // integration を `nullish_assign.rs` / `compound_logical_assign.rs` 経由で別途追加。
+        if let Some(op) = arithmetic_compound_op_to_binop(assign.op) {
+            if let ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(member)) = &assign.left
+            {
+                if matches!(
+                    &member.prop,
+                    ast::MemberProp::Ident(_) | ast::MemberProp::PrivateName(_)
+                ) {
+                    let rhs = self.convert_expr(&assign.right)?;
+                    return self.dispatch_member_compound(member, op, rhs);
                 }
             }
         }
@@ -282,7 +338,13 @@ impl<'a> Transformer<'a> {
         // strategy arms above can skip it when dead.
         let right = self.convert_expr(&assign.right)?;
 
-        // For compound assignment (+=, -=, *=, /=), desugar to target = target op value
+        // Plain `=` / arithmetic compound desugar (Ident / Computed target only):
+        // Member target × plain `=` (T6) は line 33-44 の早期 return、Member target ×
+        // arithmetic / bitwise compound (T8) は line 46-66 の早期 return で先 dispatch
+        // 済 (`dispatch_member_write` / `dispatch_member_compound` 経由)、本 match arm
+        // に到達するのは **Ident target / Computed target** の compound assign のみ。
+        // 例: `i += 1;` (Ident) → `Expr::Assign { Ident, BinaryOp { Ident, Add, 1.0 } }`、
+        //     `arr[i] += 1;` (Computed) → `Expr::Assign { Index, BinaryOp { Index, Add, 1.0 } }`。
         let value = match assign.op {
             ast::AssignOp::Assign => right,
             ast::AssignOp::AddAssign => Expr::BinaryOp {
@@ -335,14 +397,49 @@ impl<'a> Transformer<'a> {
                 op: BinOp::Shr,
                 right: Box::new(right),
             },
-            // `AndAssign` / `OrAssign` are handled above by the I-161
-            // desugar path and never reach this match arm.
             ast::AssignOp::ZeroFillRShiftAssign => Expr::BinaryOp {
                 left: Box::new(target.clone()),
                 op: BinOp::UShr,
                 right: Box::new(right),
             },
-            _ => return Err(anyhow!("unsupported compound assignment operator")),
+            // I-205 T8 Iteration v12 third-review (Rule 11 (d-1) compliance):
+            // explicit enumerate of remaining `ast::AssignOp` variants (= 3 ops)
+            // で `_ =>` arm 排除、`UnsupportedSyntaxError::new` 経由で user-facing
+            // line:col 含む transparent Tier 2 honest error を emit (T8 review F2/F3 fix)。
+            //
+            // - `AndAssign` / `OrAssign`: I-161 desugar path で line 247-281 で先に
+            //   intercept、本 arm は **構造的 unreachable** (= `unreachable!()` macro で
+            //   structural enforcement codify)。
+            // - `ExpAssign` (`**=`): TS exponentiation compound assign。Member target は
+            //   T8 dispatch gate (line 49-65) が `arithmetic_compound_op_to_binop` で
+            //   `None` を return するため経由しない、Ident target の `**=` は本 arm で
+            //   honest reject (= TS exponentiation conversion 別 architectural concern、
+            //   PRD scope 外)。`UnsupportedSyntaxError` で user-facing localization。
+            ast::AssignOp::AndAssign | ast::AssignOp::OrAssign => unreachable!(
+                "convert_assign_expr compound desugar arm: AndAssign/OrAssign は I-161 \
+                 desugar path で先に intercept される (line 247-281)、本 match arm は \
+                 構造的 unreachable。op={:?}",
+                assign.op
+            ),
+            ast::AssignOp::ExpAssign => {
+                return Err(UnsupportedSyntaxError::new(
+                    "exponentiation compound assign (**=) — TS exponentiation conversion \
+                     out of I-205 PRD scope",
+                    assign.span(),
+                )
+                .into())
+            }
+            // NullishAssign (`??=`) は line 142-251 で全 target shape (Ident / Member /
+            // Computed) が intercept されるため、本 match arm は構造的 unreachable。
+            // (Plain `=` は本 match の最初の arm `Assign => right` で legitimately handle
+            // される: plain `=` × Ident target / Computed target が本 path に流れる、
+            // T6 Member target gate は assignments.rs 早期 return で先に dispatch される。)
+            ast::AssignOp::NullishAssign => unreachable!(
+                "convert_assign_expr compound desugar arm: NullishAssign は line 142-251 で \
+                 全 target shape が intercept される、本 match arm は構造的 unreachable。\
+                 op={:?}",
+                assign.op
+            ),
         };
         Ok(Expr::Assign {
             target: Box::new(target),

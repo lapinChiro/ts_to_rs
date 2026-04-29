@@ -13,9 +13,8 @@ use crate::ir::{ClosureBody, Expr, MatchArm, Param, Pattern, RustType, Stmt};
 use crate::pipeline::type_resolution::Span;
 use crate::registry::{FieldDef, TypeDef};
 
-use super::member_dispatch::{
-    dispatch_instance_member_read, dispatch_static_member_read, MemberReceiverClassification,
-};
+use super::member_dispatch::read::{dispatch_instance_member_read, dispatch_static_member_read};
+use super::member_dispatch::MemberReceiverClassification;
 use super::methods::map_method_call;
 use crate::transformer::Transformer;
 

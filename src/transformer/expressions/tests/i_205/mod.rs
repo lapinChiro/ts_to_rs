@@ -21,12 +21,17 @@
 //!   second-review C1 coverage 補完)
 //! - [`update`]: T7 UpdateExpr dispatch tests (cells 42-45) — A6 Increment/Decrement Member
 //!   target で B4 setter desugar (postfix old-value / prefix new-value) + B1/B9 fallback +
-//!   non-numeric Tier 2 reclassify + B2/B3/B6/B7 Tier 2 honest error。
+//!   non-numeric Tier 2 reclassify + B2/B3/B6/B7 Tier 2 honest error。Iteration v12 で T8
+//!   INV-3 back-port verify (= side-effect-having receiver で IIFE form emit) を追加。
+//! - [`compound`]: T8 Arithmetic / Bitwise compound assign Member target dispatch tests
+//!   (cells 20-29 + 30-35 + Static defensive arms) + INV-3 1-evaluate compliance lock-in
+//!   (side-effect-free vs side-effect-having receiver C1 branch coverage)。
 //!
 //! 全 test は `Transformer::for_module(...).convert_expr(&swc_expr)` で direct invoke、IR Expr
 //! を `assert_eq!` で token-level verify。Tier 2 path は `convert_expr` の Err を
 //! `downcast::<UnsupportedSyntaxError>` で kind verify。
 
+mod compound;
 mod read;
 mod update;
 mod write;

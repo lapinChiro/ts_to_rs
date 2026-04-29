@@ -1239,6 +1239,63 @@ block しない** latent imprecision として TODO 化する。
 
   - 🔗 PRD I-205 (T6 second-review 由来)、I-171 T4 Layer 3c (`convert_bang_assign` 導入の precedent、本 entry の compound × bang 軸 base)、I-161 T7-1/T7-2 (narrow F64 &&=/||= from-inside-narrow return form の compound × narrow 軸)、I-177 (mutation propagation 本体、F1/F3 mutation の broader architectural concern)、I-209 (Function reference semantic、`obj.method` no-paren reference の bang interaction が同様の divergent expression value semantic)
 
+- **[I-217]** **Fallback path INV-3 1-evaluate compliance for side-effect-having receiver — `obj.x = obj.x OP rhs` (Update / Compound assign on B1 field / B9 unknown / non-class receiver) の receiver double/triple-eval (PRD I-205 T8 Iteration v12 second-review `/check_job` F-AT-1 由来、user 確定 2026-04-29)** [**L4** (latent silent semantic loss、Hono reachability 要 audit、reachable なら L1 promote 余地あり)] — PRD I-205 T8 で `dispatch_instance_member_compound` / `dispatch_instance_member_update` の **B4 setter dispatch path** に INV-3 1-evaluate compliance (`{ let mut __ts_recv = receiver; ... }` IIFE wrap for side-effect-having receiver) を `is_side_effect_free` + `wrap_with_recv_binding` 経由で structural fix。一方、**Fallback path** (B1 field、B9 unknown、non-class receiver、static field) は本 T8 scope 外として class member dispatch の architectural concern 1 PRD = 1 と分離、pre-existing latent silent semantic loss が残存。
+
+  **直接症状**: Fallback path で `obj.x += v` (compound assign) は `Expr::Assign { target: FieldAccess obj.x, value: BinaryOp { left: FieldAccess obj.x, op, right: rhs } }` emit、`obj.x++` (Update) は `Expr::Block { let __ts_old = FieldAccess obj.x; obj.x = __ts_old OP 1.0; __ts_old }` (postfix) / `Expr::Block { obj.x = obj.x OP 1.0; obj.x }` (prefix) emit。両形式とも **`obj` (= FieldAccess.object) を Rust source 上で 2-3 回 出現させる** = side-effect-having receiver (`getInstance().x += v`、`getInstance().x++` 等) で `getInstance()` が 2-3 回 evaluate される silent semantic loss。
+
+  **Trace**:
+  - **TS spec**: `obj.x += v` で `obj` は **1 回のみ evaluate** されるべき (TS spec、ECMA-262 13.15.2 AssignmentExpression evaluation step)。`obj.x++` も同様。
+  - **Rust 出力 (post-T8 Fallback path)**: `obj.x = obj.x + v;` (compound) や `{ let __ts_old = obj.x; obj.x = __ts_old + 1.0; __ts_old }` (Update postfix) で `obj` が 2 回 (compound) / 2 回 (Update postfix、Let init + Assign target) / 3 回 (Update prefix、Assign LHS + Assign RHS + TailExpr) 出現。
+  - **Tier 分類**: Tier 1 silent semantic change (compile pass、TS と Rust で副作用回数 divergent、`getInstance()` 副作用 2-3 倍化 + return 値 caching なしで間欠的差異)、`conversion-correctness-priority.md` 参照。
+
+  **影響範囲**:
+  - `src/transformer/expressions/assignments.rs::build_fallback_field_update_block` (Update Fallback path、line ~605-641 周辺)
+  - `src/transformer/expressions/member_dispatch/mod.rs::dispatch_member_compound::Fallback arm` (Compound assign Fallback path、line ~354-369)
+  - `src/transformer/expressions/member_dispatch/mod.rs::dispatch_member_write::Fallback arm` (plain `=` Fallback path、line ~270-281、ただし `=` は read 不要のため receiver 1 回 evaluate で OK = INV-3 違反は **Update/Compound のみ scope**)
+
+  **Resolution direction (詳細)**:
+  - Fix 1 (本質解決): 既存 `is_side_effect_free` / `wrap_with_recv_binding` shared helper を **Fallback path にも適用**。`dispatch_member_compound::Fallback` で `convert_member_expr_for_write(member)` の代わりに、receiver expr を independent convert + side-effect 判定 + 必要なら IIFE wrap で `let mut __ts_recv = receiver_expr; let __ts_new = __ts_recv.x OP rhs; __ts_recv.x = __ts_new; __ts_new`。Update Fallback も同 pattern で `build_fallback_field_update_block` を IIFE wrap 化。
+  - Fix 2 (interim、scope 縮小): Fallback path での `obj` 2 回出現 (compound) は **TS と同 semantic = legitimate な共通 sub-expression** として ignore (TS で `obj.x = obj.x + v` も `obj` を 2 回 evaluate するため side-effect 2 倍化は TS でも発生?? — 要 verify、ECMA spec 確認)。実は TS は `obj.x += v` で `obj` を 1 回 evaluate (左辺 reference 取得後に +v)、`obj.x = obj.x + v` (TS source 直接) なら 2 回 evaluate。後者 source は別 syntax のため scope 外、前者の compound は INV-3 violation。Fix 1 が正解。
+
+  **Problem Space (要 Spec stage enumerate)**:
+  - Receiver shape: SE-free (Ident / FieldAccess of Ident / etc.) vs SE-having (FnCall / MethodCall / etc.) × Operation context (Update postfix / Update prefix / Compound assign 11 ops) × Member shape (B1 field / B9 unknown / non-class receiver / static field) = 4 × (2 + 11) × 4 = 208 cells (orthogonality merge で代表 cells に縮小可能)。
+  - Update Fallback の場合: postfix yield (let binding 経由で 2 source 出現) / prefix yield (3 source 出現) × SE-having receiver で latent gap 顕在化。
+  - Compound Fallback の場合: target.clone() + value BinaryOp で 2 source 出現 × SE-having receiver。
+
+  **Reachability audit candidates**:
+  - Hono benchmark で `<fnCall()>.<field> += v` / `<fnCall()>.<field>++` 等の reachable pattern を `scripts/inspect-errors.py --kind OTHER --source` 等で audit。reachable なら L1 promote、unreachable なら L4 latent でも本質 fix が望ましい (= silent Tier 1 化に常時 expose されている state)。
+  - I-209 (`obj.method` no-paren reference) と semantic 近接 (= Member access の receiver 1-evaluate compliance、ただし I-209 は read 軸、本 entry は write/update 軸)。
+
+  **Resolution target**: PRD I-205 close 後の早期 audit、reachable なら独立 PRD として起票 (L1 候補)、unreachable でも本質的 silent semantic loss として Tier 1 fix を計画 (`ideal-implementation-primacy.md` 観点)。Fix 1 (shared helper Fallback path 適用) で `is_side_effect_free` / `wrap_with_recv_binding` を leverage 可能、本 T8 で確立した DRY infrastructure が直接 reusable。
+
+  **発見経緯**: PRD I-205 T8 Iteration v12 second-review (`/check_job` 4-layer review 2026-04-29) で発見された F-AT-1 (Fallback path target.clone() pre-existing) を起点に、Fallback path 全体の INV-3 1-evaluate compliance gap として broader concern 化。本 T8 で setter dispatch path の INV-3 を structural fix 完了、Fallback path は別 architectural concern として split (= "setter dispatch INV-3" と "Fallback path INV-3" の 1 PRD = 1 architectural concern 厳格適用)、本 entry で詳細 record。
+
+  - 🔗 PRD I-205 (T8 second-review 由来、setter dispatch INV-3 fix の symmetric counterpart for Fallback path)、I-209 (Function reference semantic、Member access receiver 1-evaluate compliance の read 軸 sibling)、I-177 (mutation propagation 本体、F1/F3 mutation の broader architectural concern、Fallback path の expr-level mutation 整合)
+
+- **[I-218]** **TypeResolver compound assign Member field type completeness — arithmetic/bitwise compound op で `member.span` の expr_types 未登録 latent gap (PRD I-205 T8 Iteration v12 second-review `/check_job` F-SX-1 由来、user 確定 2026-04-29)** [**L4** (latent gap、本 T8 / 既存 dispatch logic に直接影響なし、ただし subsequent T9 logical compound + Member target dispatch で member field type 必要時に silent Unknown 取得の risk あり)] — PRD I-205 T8 Iteration v12 で TypeResolver `resolve_assign_expr` の compound `Member` arm に **receiver expr_type の unconditional resolve** を追加 (Spec gap fix、`is_propagating_op` 限定の resolve 経路を全 11 ops に拡張)。一方、**field type** (= `member.span` 全体の expr_types entry = `lhs.x` の resolve 結果型) は依然 `is_propagating_op` (NullishAssign / AndAssign / OrAssign) ブロック内のみで register、arithmetic/bitwise compound op (`+= -= *= /= ... |=`) では field type が cache されない。
+
+  **直接症状 (現時点 reachability なし)**: 本 T8 `dispatch_member_compound` の `classify_member_receiver` は **receiver の expr_type のみ参照** (= `get_expr_type(receiver)` で `member.obj` span の entry を見る)、field type は不要なため本 T8 dispatch 動作に影響なし。subsequent T9 logical compound (`obj.x ??= d` / `obj.x &&= v` / `obj.x ||= v`) の dispatch 拡張で member 全体の field type-aware emission が必要になった場合、arithmetic/bitwise compound では silent Unknown 取得 = silent semantic loss 候補。
+
+  **Trace**:
+  - **コード**: `src/pipeline/type_resolver/expressions/assignments.rs:130-167` の `Some(SimpleAssignTarget::Member(member))` arm。`is_propagating_op` ブロック内 (line 131-167) で `field_type` を `expr_types.insert(member_span, ResolvedType::Known(ft.clone()))` 登録、外側 (= arithmetic/bitwise compound 経路) では未登録。
+  - **dependency**: T9 (logical compound integration) の implementation 着手時に `obj.x ??= d` の dispatch logic で member LHS の Option<T> shape を判定する場合、member span の expr_types エントリ参照の検討が必要。
+
+  **影響範囲**:
+  - `src/pipeline/type_resolver/expressions/assignments.rs::resolve_assign_expr` の `Member` arm (~30 LOC restructure、`is_propagating_op` ブロックの分岐を field type register と RHS expected propagation に分離 = field type は全 op で register、RHS expected propagation のみ propagating ops 限定)
+  - subsequent T9 implementation で実 reachability 顕在化、本 T9 着手時に audit + fix 検討
+
+  **Resolution direction**:
+  - Fix 1 (本質解決): `is_propagating_op` ブロックを 2 段階に分離:
+    1. **Always register field type**: receiver type known なら member field type を全 compound op で `expr_types` に register (line 131-159 の field_type 計算 + insert を `is_propagating_op` 外に move)。
+    2. **Conditional RHS expected propagation**: `is_propagating_op` の場合のみ `rhs_expected_for_compound` 適用 (現 line 159-167 維持)。
+  - Fix 2 (T9 着手時に audit + 必要時 Fix 1 適用): T9 implementation で member field type 参照の必要性が判明したタイミングで本 entry を escalate、必要なら本 T9 scope 内で Fix 1 適用 or 別 PRD 切り出し。
+
+  **Resolution target**: PRD I-205 T9 着手時に本 entry を re-audit、T9 implementation で member field type が必要なら T9 scope 内 fix (= cohesive batch with T9 architectural concern = "logical compound + Member target dispatch")、不要なら本 entry のまま L4 残置 + reachability 顕在化時に L1 promote。
+
+  **発見経緯**: PRD I-205 T8 Iteration v12 second-review (`/check_job` 4-layer review 2026-04-29) Layer 3 で発見された F-SX-1 (TypeResolver compound Member arm の comment `全 compound op で resolve` が partial 真実 = receiver only) を起点に、field type completeness の broader latent gap として TODO 起票。本 T8 内では comment clarify のみで動作変更なし (= `1 PRD = 1 architectural concern` 厳格適用)、subsequent T9 着手時に audit + fix 判断。
+
+  - 🔗 PRD I-205 (T8 second-review 由来、TypeResolver compound assign coverage の receiver 軸 fix の field 軸 counterpart)、I-175 (Compound ops coercion gap、historical no-op behavior preserve の broader architectural concern、本 entry と peer)
+
 ---
 
 ## 保留

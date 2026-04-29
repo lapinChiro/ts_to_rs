@@ -111,8 +111,33 @@ impl<'a> TypeResolver<'a> {
                     if let ast::Expr::Ident(ident) = member.obj.as_ref() {
                         self.mark_var_mutable(ident.sym.as_ref());
                     }
+                    // I-205 T8 Iteration v12 Spec gap fix: **receiver** (= `member.obj`)
+                    // の expr_type を全 compound op で unconditional resolve する。
+                    // pre-T8 では `is_propagating_op` (`??= &&= ||=`) のみ resolve 経路を
+                    // 通り、arithmetic/bitwise compound (`+= -= *= ... |=`) で receiver
+                    // の expr_type が cache されず → T8 `dispatch_member_compound` の
+                    // `classify_member_receiver` で `get_expr_type(receiver) = None` →
+                    // silent Fallback dispatch (= class member setter dispatch を逃す
+                    // silent semantic loss、本 T8 implementation で発覚した Spec gap)。
+                    // T7 Iteration v11 で同 pattern の `Update.arg` 未再帰を fix した
+                    // 構造的解消 と整合 (= TypeResolver visit coverage of operand-context
+                    // expressions の cohesion)。
+                    //
+                    // Scope clarification (Iteration v12 second-review F-SX-1 由来): 本 fix
+                    // で register されるのは **receiver の expr_type のみ** (= `member.obj`
+                    // span)。**field type** (= `member.span` 全体の expr_types entry =
+                    // `lhs.x` の resolve 結果型) は依然 `is_propagating_op` ブロック内のみ
+                    // で register される。`classify_member_receiver` は receiver の
+                    // expr_type のみ参照するため本 T8 dispatch の動作に影響なし、ただし
+                    // 将来 `get_expr_type(&assign.left)` 等で field type を読む code path
+                    // (例: T9 logical compound の member LHS type-aware emission) が
+                    // arithmetic/bitwise compound では `Unknown` を得る latent gap あり。
+                    // T9 着手時 (logical compound + Member target dispatch) に再 audit、
+                    // 必要に応じて field type も全 op で register する extension を検討
+                    // (本 T8 scope では unnecessary、`1 PRD = 1 architectural concern`
+                    // 厳格適用)。
+                    let obj_type = self.resolve_expr(&member.obj);
                     if is_propagating_op {
-                        let obj_type = self.resolve_expr(&member.obj);
                         if let ResolvedType::Known(ref ty) = obj_type {
                             // For named fields: use resolve_member_type.
                             // For computed index (HashMap): extract value type.

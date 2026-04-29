@@ -957,3 +957,12 @@ fn test_static_b6_method_update_emits_write_to_static_method_error() {
 // review C1 補完では Read 3 + Write 3 = 6 件追加で inherited static は除外)。本 T7 でも T6
 // pattern と整合させ、static B7 inherited は code-level defensive のみで test は subsequent
 // T11 (11-c) matrix expansion で Static × {B7 inherited} cell 明示 enumerate 時に追加。
+
+// Note: T8 INV-3 back-port verification (= UpdateExpr Member target with side-effect-having
+// receiver emits IIFE form for `dispatch_instance_member_update` cohesive helper update with
+// `dispatch_instance_member_compound`) は本 file 単位の cohesive concern boundary を維持
+// するため、本 test の存在を `tests/i_205/compound.rs` の architectural concern (= T8
+// arithmetic/bitwise compound assign + INV-3 1-evaluate compliance) に co-locate
+// (`test_t8_inv3_backport_update_postfix_increment_side_effect_having_receiver_emits_iife_form`)。
+// Update Ident form (cells 42-45 + 45-b3) の test は本 file に集中、INV-3 cross-cutting
+// invariant の verification は T8 architectural concern と論理的 cohesive のため移動済。

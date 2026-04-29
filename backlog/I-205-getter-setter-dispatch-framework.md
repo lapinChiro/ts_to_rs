@@ -192,34 +192,34 @@ primary axes A × B、secondary axis D (`.clone()` insertion 用) で全 cell �
 | 18 | A2 Write simple | B8 static setter | * (orthogonality-equivalent: D dimension は dispatch logic に影響なし) | `Foo::set_x(v);` | `Foo.x = v` (Rust syntax error: `.` on type path is not field assignment) | ✗ | 本 PRD |
 | 19 | A2 Write simple | B9 unknown | * | `obj.x = v;` (fallback) | 同 | ✓ | regression lock-in |
 | 20 | A3 Write compound (`+=`) | B1 field | * | `obj.x += v;` | 同 | ✓ | regression lock-in |
-| 21 | A3 Write compound (`+=`) | B4 both | * (orthogonality-equivalent: D dimension は dispatch logic に影響なし) | `obj.set_x(obj.x() + v);` (簡易) or `let __tmp = obj.x() + v; obj.set_x(__tmp);` (side-effect-having receiver の場合) | E0609 | ✗ | 本 PRD |
+| 21 | A3 Write compound (`+=`) | B4 both | * (orthogonality-equivalent: D dimension は dispatch logic に影響なし) | **Block form setter desugar (yield_new、prefix update と same shape with rhs replacing 1.0)**: side-effect-free receiver = `{ let __ts_new = obj.x() + v; obj.set_x(__ts_new); __ts_new }` / side-effect-having receiver (INV-3 1-evaluate compliance) = `{ let mut __ts_recv = <object>; let __ts_new = __ts_recv.x() + v; __ts_recv.set_x(__ts_new); __ts_new }`。statement context (`obj.x += v;`) では TailExpr discarded、expression context (`let z = (obj.x += v)`) では `__ts_new` yield (TS spec: compound assign yields assigned value)。 | E0609 | ✗ | 本 PRD |
 | 22 | A3 Write compound (`+=`) | B2 getter only | * | Tier 2 honest error | E0609 | ✗ | 本 PRD |
 | 23 | A3 Write compound (`+=`) | B3 setter only | * | Tier 2 honest error (read part 不能) | E0609 | ✗ | 本 PRD |
 | 24 | A3 Write compound (`+=`) | B5 AutoAccessor | * | `obj.set_x(obj.x() + v);` (PRD 2.8 で AutoAccessor が methods にregister された後、本 framework leverage) | Tier 2 honest error (PRD 2.7) | NA | 別 PRD (PRD 2.8) |
 | 25 | A3 Write compound (`+=`) | B6 regular method | * | Tier 2 honest error (`UnsupportedSyntaxError::new("compound assign to method", span)`) | E0609 | ✗ | 本 PRD (Tier 2 honest error reclassify) |
 | 26 | A3 Write compound (`+=`) | B7 inherited setter | * | Tier 2 honest error (`UnsupportedSyntaxError::new("compound assign to inherited accessor", span)`) | E0609 | △ | 本 PRD (Tier 2 honest error reclassify) |
-| 27 | A3 Write compound (`+=`) | B8 static accessor | D1-D15 | `Foo::set_x(Foo::x() + v);` (静的 accessor、associated fn) | `Foo.x += v` (Rust syntax error) | ✗ | 本 PRD |
+| 27 | A3 Write compound (`+=`) | B8 static accessor | D1-D15 | **Block form static setter desugar (yield_new、cell 21 と orthogonality-equivalent dispatch with `Foo::x()` / `Foo::set_x(...)` 置換)**: `{ let __ts_new = Foo::x() + v; Foo::set_x(__ts_new); __ts_new }`。Static dispatch では receiver = class TypeName で side-effect なし、IIFE form 不要。 | `Foo.x += v` (Rust syntax error) | ✗ | 本 PRD |
 | 28 | A3 Write compound (`+=`) | B9 unknown | * | `obj.x += v;` (current behavior、fallback) | 同 | ✓ | regression lock-in |
 | 29-a | A3 `-=` | B1 field | * | `obj.x -= v;` (current direct field、IR BinOp = Sub、Rust 直接対応) | `obj.x -= v` | ✓ | regression lock-in |
 | 29-b | A3 `-=` | B2 getter only | * | Tier 2 honest error (write to read-only) | E0609 | ✗ | 本 PRD |
 | 29-c | A3 `-=` | B3 setter only | * | Tier 2 honest error (read part 不能) | E0609 | ✗ | 本 PRD |
-| 29-d | A3 `-=` | B4 both | D1 numeric | `obj.set_x(obj.x() - v);` (簡易) or temp binding (side-effect-having receiver) | E0609 | ✗ | 本 PRD |
+| 29-d | A3 `-=` | B4 both | D1 numeric | **Block form setter desugar (cell 21 と op-axis orthogonality-equivalent、BinOp::Sub 置換)**: side-effect-free = `{ let __ts_new = obj.x() - v; obj.set_x(__ts_new); __ts_new }` / side-effect-having (INV-3) = `{ let mut __ts_recv = <object>; let __ts_new = __ts_recv.x() - v; __ts_recv.set_x(__ts_new); __ts_new }` | E0609 | ✗ | 本 PRD |
 | 29-e-a | A3 `-=`/`*=`/`/=`/`%=`/`**=` | B5 AutoAccessor | * | `obj.set_x(obj.x() OP v);` (PRD 2.8 で AutoAccessor が methods に register された後、本 framework leverage、operator は IR BinOp 層 Sub/Mul/Div/Rem/Pow で吸収) | Tier 2 honest error (PRD 2.7) | NA | 別 PRD (PRD 2.8) |
 | 29-e-b | A3 `-=`/`*=`/`/=`/`%=`/`**=` | B6 regular method | * | Tier 2 honest error (`UnsupportedSyntaxError::new("compound assign to method", span)`、cell 25 と同 dispatch、operator 非依存) | E0609 | ✗ | 本 PRD (Tier 2 honest error reclassify) |
 | 29-e-c | A3 `-=`/`*=`/`/=`/`%=`/`**=` | B7 inherited setter | * | Tier 2 honest error (cell 26 と同 dispatch、operator 非依存) | E0609 | △ | 本 PRD (Tier 2 honest error reclassify) |
-| 29-e-d | A3 `-=`/`*=`/`/=`/`%=`/`**=` | B8 static accessor | D1-D15 | `Foo::set_x(Foo::x() OP v);` (cell 27 と operator 違いのみ、Sub/Mul/Div/Rem/Pow は IR BinOp 層で吸収) | Rust syntax error | ✗ | 本 PRD |
+| 29-e-d | A3 `-=`/`*=`/`/=`/`%=`/`**=` | B8 static accessor | D1-D15 | **Block form static setter desugar (cell 27 と op-axis orthogonality-equivalent、BinOp::Sub/Mul/Div/Mod 置換、`**=` は本 PRD scope 外 = TS exponent op 別 architectural concern)**: `{ let __ts_new = Foo::x() OP v; Foo::set_x(__ts_new); __ts_new }`。 | Rust syntax error | ✗ | 本 PRD |
 | 29-e-e | A3 `-=`/`*=`/`/=`/`%=`/`**=` | B9 unknown | * | `obj.x OP= v;` (current behavior、fallback、operator 直接 emit) | 同 | ✓ | regression lock-in |
 | 30 | A4 Bitwise compound (`\|=`) | B1 field | * | `obj.x \|= v;` (current direct field write、Rust 直接対応) | 同 | ✓ | regression lock-in |
 | 31 | A4 Bitwise compound (`\|=`) | B2 getter only | * | Tier 2 honest error (write to read-only) | E0609 | ✗ | 本 PRD |
 | 32 | A4 Bitwise compound (`\|=`) | B3 setter only | * | Tier 2 honest error (read part 不能、setter only では `obj.x()` undefined) | E0609 | ✗ | 本 PRD |
-| 33 | A4 Bitwise compound (`\|=`) | B4 both | D1 numeric | `obj.set_x(obj.x() \| v);` (簡易) or temp binding (side-effect-having receiver) | E0609 | ✗ | 本 PRD |
+| 33 | A4 Bitwise compound (`\|=`) | B4 both | D1 numeric | **Block form setter desugar (cell 21 と op-axis orthogonality-equivalent、BinOp::BitOr 置換)**: side-effect-free = `{ let __ts_new = obj.x() \| v; obj.set_x(__ts_new); __ts_new }` / side-effect-having (INV-3) = `{ let mut __ts_recv = <object>; let __ts_new = __ts_recv.x() \| v; __ts_recv.set_x(__ts_new); __ts_new }` | E0609 | ✗ | 本 PRD |
 | 34-a | A4 `<<=`/`>>=`/`>>>=`/`&=`/`^=` | B1 field | * | `obj.x <<= v;` 等 (current direct field、IR BinOp 層で operator 区別吸収、Rust 直接対応) | direct compound (current behavior) | ✓ | regression lock-in |
 | 34-b | A4 各 bitwise operator | B2 getter only | * | Tier 2 honest error (write to read-only) | E0609 | ✗ | 本 PRD |
-| 34-c | A4 各 bitwise operator | B4 both | D1 numeric | `obj.set_x(obj.x() OP v);` (OP = `<<` / `>>` / `>>>` / `&` / `^`) | E0609 | ✗ | 本 PRD |
+| 34-c | A4 各 bitwise operator | B4 both | D1 numeric | **Block form setter desugar (cell 21 と op-axis orthogonality-equivalent、BinOp::Shl/Shr/UShr/BitAnd/BitXor 置換)**: side-effect-free = `{ let __ts_new = obj.x() OP v; obj.set_x(__ts_new); __ts_new }` / side-effect-having (INV-3) = IIFE form with `__ts_recv` | E0609 | ✗ | 本 PRD |
 | 35-a | A4 Bitwise compound (`<<=`/`>>=`/`>>>=`/`&=`/`^=`) | B5 AutoAccessor | * | `obj.set_x(obj.x() OP v);` (PRD 2.8 後)、operator は IR BinOp 層 Shl/Shr/UShr/BitAnd/BitXor で吸収 | Tier 2 honest error (PRD 2.7) | NA | 別 PRD (PRD 2.8) |
 | 35-b | A4 Bitwise compound (各 operator) | B6 regular method | * | Tier 2 honest error (cell 25 と同 dispatch、operator 非依存) | E0609 | ✗ | 本 PRD (Tier 2 honest error reclassify) |
 | 35-c | A4 Bitwise compound (各 operator) | B7 inherited setter | * | Tier 2 honest error (cell 26 と同 dispatch、operator 非依存) | E0609 | △ | 本 PRD (Tier 2 honest error reclassify) |
-| 35-d | A4 Bitwise compound (各 operator) | B8 static accessor | D1 numeric | `Foo::set_x(Foo::x() OP v);` (operator IR BinOp 層 Shl/Shr/UShr/BitAnd/BitXor 吸収) | Rust syntax error | ✗ | 本 PRD |
+| 35-d | A4 Bitwise compound (各 operator) | B8 static accessor | D1 numeric | **Block form static setter desugar (cell 27 と op-axis orthogonality-equivalent、BinOp::Shl/Shr/UShr/BitAnd/BitXor 置換)**: `{ let __ts_new = Foo::x() OP v; Foo::set_x(__ts_new); __ts_new }`。Static dispatch では receiver = class TypeName で side-effect なし、IIFE form 不要。 | Rust syntax error | ✗ | 本 PRD |
 | 35-e | A4 Bitwise compound (各 operator) | B9 unknown | * | `obj.x OP= v;` (current behavior、fallback) | 同 | ✓ | regression lock-in |
 | 36 | A5 Logical compound (`??=`) | B1 field | D6 Option<T> | `obj.x.get_or_insert_with(\|\| d);` (既存 nullish_assign helper、I-142 pattern) | 同 | ✓ | regression lock-in |
 | 37 | A5 Logical compound (`??=`) | B2 getter only | * | Tier 2 honest error (write to read-only) | E0609 | ✗ | 本 PRD |
@@ -666,12 +666,26 @@ test fixture site (`src/registry/tests/`、`src/transformer/*/tests/`、`src/pip
 - **(c) Verification method**: Integration test (`tests/i205_invariants_test.rs::test_invariant_2_external_internal_dispatch_symmetry`) で external `f.name` と internal `this.name` の emit IR を比較、両者の MethodCall arg 順序 / receiver expr / method 名 一致を verify
 - **(d) Failure detectability**: I-201-B (decorator) 統合時 silent semantic divergence (decorator hook が internal call では fire せず external のみ fire = TS spec から divergent)
 
+### Cell 21 corollary: B4 + non-numeric getter return type × compound assign の semantic safety (Iteration v12 review F5 insight、本 PRD scope 内 verify)
+
+`obj.x += rhs` (B4 instance setter desugar) で getter return type が non-numeric (String / Vec<T> / Struct / etc.) の場合、emission は `obj.set_x(obj.x() OP rhs)` (yield_new Block form)。各 op × type 組合せは Rust 型システムの `Add` / `Sub` / 等 trait 実装次第:
+
+- **`String += String` / `String += &str`**: Rust `String + String` は `Add<String> for String` trait 実装あり = **Tier 1 (silent semantic loss なし、TS string concat と意味一致)**
+- **`String += f64`**: Rust `String + f64` は `Add` trait 不在 = **compile error E0277** (Tier 2 等価で自動 surface、TS の string coercion と divergent だが silent semantic change ではない = Rust compiler が safety net として機能)
+- **`Vec<T> += anything`**: Rust `Vec` に `Add` trait 実装なし = compile error (Tier 2 等価)
+- **`Struct += anything`**: derive-not-Add struct で compile error (Tier 2 等価)、user `impl Add for Struct` ありなら Tier 1
+
+**Verdict**: 本 PRD T8 では B4 + non-numeric getter return type × compound assign に **追加 gate 不要**。T7 update (`++/--`) は **必ず numeric 演算** (`+ 1.0`) のため non-numeric type で必ず E0277 = `getter_return_is_numeric` gate で先回り Tier 2 honest error reclassify する価値あり (= specific TS NaN coercion semantic を user-friendly error message で説明)、しかし T8 compound は `op` と `rhs` が user-supplied で `String += String` が legitimate Tier 1 case であるため pre-gate は不可能。Rust compile error fallthrough = Tier 2 等価で自動 surface する設計が ideal。
+
+(本 corollary は Iteration v12 `/check_job` 4-layer review F5 finding の本質的解決として PRD に追記、framework 失敗 signal ではない = `is_side_effect_free` + `getter_return_is_numeric` の semantic 差異 (前者 = INV-3 receiver eval count concern、後者 = T7-specific numeric coercion concern) を明示化することで Rule 9 Spec → Impl Mapping completeness を補強。)
+
 ### INV-3: Compound assign desugar の receiver evaluation 1 回
 
-- **(a) Property statement**: `obj.x += v` の desugar `obj.set_x(obj.x() + v)` で `obj` は **1 回のみ evaluated** (TS source の side-effect 数 = Rust output)。side-effect-having receiver (e.g., `getInstance().x += v`) では temp binding (`let __recv = getInstance(); __recv.set_x(__recv.x() + v);`) で receiver eval を 1 回に bound
-- **(b) Justification**: TS の `obj.x += v` は `obj` を 1 回 evaluate。Rust の naive desugar `obj.set_x(obj.x() + v)` は `obj` を 2 回 evaluate (getter call + setter call)、side-effect-having receiver で副作用重複実行 = silent semantic change
-- **(c) Verification method**: Integration test (`tests/i205_invariants_test.rs::test_invariant_3_compound_assign_receiver_eval_once`)、Side-effect counting test (counter で getInstance() 呼出回数を count、TS と Rust output で一致 verify)
+- **(a) Property statement**: `obj.x += v` の desugar `obj.set_x(obj.x() + v)` で `obj` は **1 回のみ evaluated** (TS source の side-effect 数 = Rust output)。side-effect-having receiver (e.g., `getInstance().x += v`) では IIFE form binding (`{ let mut __ts_recv = getInstance(); let __ts_new = __ts_recv.x() + v; __ts_recv.set_x(__ts_new); __ts_new }`) で receiver eval を 1 回に bound。同 INV-3 compliance は **UpdateExpr Member target setter dispatch path** (`obj.x++` / `obj.x--`) にも extend (T8 で T7 dispatch_instance_member_update に back-port 完了 = `build_setter_desugar_block` + `wrap_with_recv_binding` shared helper integration)
+- **(b) Justification**: TS の `obj.x += v` は `obj` を 1 回 evaluate。Rust の naive desugar `obj.set_x(obj.x() + v)` は `obj` を 2 回 evaluate (getter call + setter call)、side-effect-having receiver で副作用重複実行 = silent semantic change。同 latent gap が UpdateExpr setter dispatch path (`{ let __ts_old = getInstance().x(); getInstance().set_x(__ts_old + 1.0); __ts_old }`、getInstance() 2 回 eval) にも存在、T8 で structural cohesive 解消
+- **(c) Verification method**: Integration test (`tests/i205_invariants_test.rs::test_invariant_3_compound_assign_receiver_eval_once`)、Side-effect counting test (counter で getInstance() 呼出回数を count、TS と Rust output で一致 verify)。Helper-level lock-in: `is_side_effect_free(expr: &Expr) -> bool` の judgment matrix (Ident → true / FieldAccess recursive → object 依存 / FnCall → false / MethodCall → false / etc.) を C1 branch coverage で test
 - **(d) Failure detectability**: silent semantic change (compile pass、副作用が 1 回多く発生)
+- **(e) Scope clarification (本 T8 で structural fix path)**: 本 INV-3 は **setter dispatch path のみ scope** (= compound assign on B4 instance / B8 static / UpdateExpr B4 setter dispatch)。Fallback path (B1 field、B9 unknown、non-class receiver、`obj.x = obj.x + v` direct field access desugar) の INV-3 1-evaluate compliance は本 PRD scope 外 (= 別 architectural concern として TODO 起票候補、`1 PRD = 1 architectural concern` 厳格適用)
 
 ### INV-4: Method kind tracking propagation chain integrity
 
@@ -1325,6 +1339,110 @@ T7 atomic commit ready (post-deep-deep-review 1 課題 (DD1) 本質 fix 適用�
 
 本 PRD I-205 close 時 integrate or 別 framework PRD 起票候補。
 
+### Iteration v12 (2026-04-29、T8 単独 commit + Spec gap fix = TypeResolver compound assign Member arm 未再帰 + DRY refactor + member_dispatch.rs 6-file split)
+
+**Architectural concern**: arithmetic / bitwise compound assign (`+= -= *= /= %= |= &= ^= <<= >>= >>>=`、11 ops) Member target で setter desugar (B4 instance、B8 static) + Tier 2 honest error reclassify (B2 read-only / B3 write-only-read-fail / B6 method / B7 inherited) + INV-3 1-evaluate compliance (side-effect-having receiver IIFE form `{ let mut __ts_recv = ...; ... }`) + T7 dispatch_instance_member_update への INV-3 back-port (cohesive batch、`build_setter_desugar_block` + `wrap_with_recv_binding` + `build_instance_setter_desugar_with_iife_wrap` shared)。
+
+**Implementation 内容**:
+- `assignments.rs` に `arithmetic_compound_op_to_binop` mapping helper + T8 dispatch gate (T6 plain `=` gate の直後、`AddAssign..ZeroFillRShiftAssign` 11 ops × Member × MemberProp::Ident|PrivateName で `dispatch_member_compound` 経由) 追加。
+- `member_dispatch/` directory new (1 → 6 file split): `mod.rs` (entry impl Transformer + classifier + shared types) / `shared.rs` (DRY-extracted infrastructure: MemberKindFlags + is_side_effect_free + wrap_with_recv_binding + build_setter_desugar_block + **build_instance_setter_desugar_with_iife_wrap** + **build_static_setter_desugar_block**) / `read.rs` / `write.rs` / `update.rs` / `compound.rs`。
+- `dispatch_instance_member_compound` / `dispatch_static_member_compound` 新規 helper (T8、shared.rs 内 IIFE wrap + setter desugar 経由)。
+- `Transformer::dispatch_member_compound` entry method (mod.rs、`classify_member_receiver` 経由 Static / Instance / Fallback dispatch)。
+- `expressions/mod.rs` に `TS_RECV_BINDING = "__ts_recv"` constant 追加 (I-154 namespace reservation extension to receiver IIFE binding)。
+- T7 `dispatch_instance_member_update` を `build_instance_setter_desugar_with_iife_wrap` 経由に refactor (= INV-3 1-evaluate compliance back-port、T8 と shared)。
+
+**Spec gap fix (本 T8 scope 内、Iteration v9 / v11 と同 pattern = framework 失敗 signal)**:
+- **Defect**: `pipeline/type_resolver/expressions/assignments.rs::resolve_assign_expr` の compound `SimpleAssignTarget::Member` arm が `is_propagating_op` (NullishAssign / AndAssign / OrAssign) のみ `resolve_expr(&member.obj)` 経路を通っていた。Arithmetic / bitwise compound (AddAssign 等) では receiver expr_type が `expr_types` に register されず → Transformer `classify_member_receiver` の `get_expr_type(receiver)` が None → silent Fallback dispatch (= class member setter dispatch を逃す silent semantic loss、cells 21/27/29-d/29-e-d/33/34-c/35-d で setter desugar 発火せず B1/B9 fallback `Expr::Assign { FieldAccess, BinaryOp }` emit、Tier 2 broken state 維持)。
+- **Trace** (`post-implementation-defect-classification.md` 5-category):
+  - reference doc: ClassMember 章 entry あり
+  - oracle: `tests/e2e/scripts/i-205/cell-21-*.ts` 等 fixture で TS observation 済
+  - matrix: cells 21/27/29-d/29-e-d/33/34-c/35-d を ✗ 修正対象として enumerate 済
+  - **enumerate gap**: spec stage で TypeResolver coverage axis (= "TypeResolver が Member access の receiver expr_type を compound assign Member target context で register するか") を independent dimension として enumerate していなかった = **Spec gap category** (framework 失敗 signal、Iteration v11 T7 Update.arg 未再帰 と本質同 pattern)
+- **Fix**: `is_propagating_op` ブロックの外側に `let obj_type = self.resolve_expr(&member.obj);` を移動、全 compound op (NullishAssign / AndAssign / OrAssign + AddAssign..ZeroFillRShiftAssign) で receiver の expr_type を unconditional register。`is_propagating_op` block 内では既存 field type / expected propagation logic を維持 (I-175 historical no-op behavior preserve)。
+- **Framework 改善検討**: `spec-stage-adversarial-checklist.md` Rule 10 axis enumeration の default check axis "TypeResolver visit coverage of operand-context expressions" (Iteration v11 で追加候補化済) を **正式 default axis に昇格** + audit script `audit-prd-rule10-compliance.py` で Rule 10 application yaml block の axis 列挙に本 axis 出現を verify する mechanism 追加候補 (= I-205 で 2 度連続発生 (Update.arg + compound assign Member.obj) の structural prevention、3 度目発生前の framework hardening)。
+
+**DRY refactor (本 T8 scope 内、Iteration v12 third-review、`design-integrity.md` "DRY")**:
+- T7 `dispatch_instance_member_update` + T8 `dispatch_instance_member_compound` の B4 setter desugar arm (各 30 行) が完全 identical な receiver-type detection + IIFE wrap + getter/setter call construction logic を 60 行で重複。`shared.rs::build_instance_setter_desugar_with_iife_wrap` shared helper に集約 (= IIFE wrap concern が 1 箇所に集中、subsequent T9 logical compound も同 helper を leverage 可能、DRY violation 増殖を構造的に防止)。
+- T7 `dispatch_static_member_update` + T8 `dispatch_static_member_compound` の static B4/B8 setter desugar arm (各 ~10 行) も `shared.rs::build_static_setter_desugar_block` に集約。Static dispatch では receiver = class TypeName で side-effect なし、IIFE wrap 不要 = simpler shared helper。
+
+**File split refactor (本 T8 scope 内、Iteration v12 third-review、CLAUDE.md "0 errors / 0 warnings" file-line threshold 1000 行 violation 解消)**:
+- pre-split: 単一 `member_dispatch.rs` (1179 行)、4 architectural concern (Read / Write / Update / Compound) が単一 file に同居。
+- post-split: `member_dispatch/{mod, shared, read, write, update, compound}.rs` (6 file 計 1331 行、各 file 100-369 行)、各 file = 単一 architectural concern。`shared.rs` に cross-cutting infrastructure (MemberKindFlags / is_side_effect_free / IIFE wrap / setter desugar block builder / DRY-extracted helpers) を集約。
+
+**`/check_job` 4-layer review (本 T8 commit 前 invocation) findings + 本 T8 内 fix**:
+- **F1 (Implementation gap、Medium)**: `is_side_effect_free` を 1 helper 内で 2 回呼び出し → `let se_free = is_side_effect_free(object);` で事前格納に refactor (`shared.rs::build_instance_setter_desugar_with_iife_wrap`)。
+- **F2 (Implementation gap、High)**: `convert_assign_expr` compound match の `_ => return Err(anyhow!(...))` arm が Rule 11 (d-1) 違反 → `AndAssign | OrAssign` (I-161 desugar path で先 intercept = `unreachable!()`)、`ExpAssign` (`UnsupportedSyntaxError` で TS exponentiation conversion を out-of-scope 明示)、`NullishAssign` (line 142-251 で intercept = `unreachable!()`) で exhaustive enumerate 化。
+- **F3 (Spec gap、High)**: `ExpAssign` × Member の user-facing error wording が pre-fix で `anyhow!` (= internal error、line:col なし) だった → F2 fix で `UnsupportedSyntaxError::new` 経由 transparent error reporting に統一。
+- **F5 (Review insight、Medium)**: B4 + non-numeric getter return type × compound assign の semantic safety analysis を PRD matrix に明示 (`Cell 21 corollary` section 新規追加)。`String += String` / `Vec<T> += anything` 等の Rust trait 実装次第で Tier 1 / Tier 2 (Rust compile error fallthrough = silent semantic change なし) の挙動を verify。本 T8 で additional gate 不要 = `getter_return_is_numeric` (T7-specific numeric coercion concern、`++/--` で必ず `+ 1.0` のため non-numeric type で必ず E0277) と `is_side_effect_free` (INV-3 receiver eval count concern、T7/T8 共通) の semantic 差異を Rule 9 Spec → Impl Mapping completeness 観点で明示化。
+- **F4 / F7 (Review insight、Pre-existing)**: T8 で導入した defect ではない、別 PRD scope。本 T8 内では fix なし、TODO 起票候補 (= TypeResolver field expr_types completeness audit / Fallback path receiver clone optimization)。
+
+**Unit tests** (T8 unit + INV-3 + T7 back-port verify、計 19 + 1 = 20 件):
+- `tests/i_205/compound.rs` 新規 (19 件):
+  - Cells 20/28 (B1 field / B9 unknown × `+=`、Fallback regression preserve)
+  - Cell 21 SE-free (B4 × `+=` × Ident receiver、setter desugar yield_new)
+  - Cell 21 IIFE (B4 × `+=` × FnCall receiver、IIFE form for INV-3 1-evaluate)
+  - Cells 22/23/25/26 (B2/B3/B6/B7 instance × `+=`、Tier 2 honest error wording lock-in)
+  - Cells 27/29-e-d/35-d (B8 static × `+=`/`-=`/`|=`、static setter desugar)
+  - Cells 29-d/33/34-c (B4 × `-=`/`|=`/`<<=`、op-axis orthogonality verify)
+  - Static defensive arms (matrix cell 化なし、Static B2/B3/B6/B7 compound、Tier 2 wording lock-in)
+  - INV-3 FieldAccess receiver recursive judgment (`is_side_effect_free(FieldAccess of Ident) → true`、IIFE 不採用)
+  - T7 INV-3 back-port verify (T8 で T7 update helper を update したことを `getInstance().value++` で IIFE form emit verify)
+- `tests/i_205/update.rs` (T7 back-port test を本 file から compound.rs に move、note のみ追加)。
+
+**Pre/post matrix** (T8 cells 全 transition):
+
+| Cell | Pre-T8 | Post-T8 | Delta |
+|------|--------|---------|-------|
+| 20 (B1 field `+=`) | ✓ Fallback | ✓ Fallback | preserved |
+| 21 (B4 `+=` SE-free recv) | ✗ silent Fallback (broken Tier 2) | ✓ setter desugar yield_new | fix (Tier 2 → Tier 1) |
+| 21 IIFE (B4 `+=` SE-having recv) | ✗ silent Fallback + INV-3 violation latent | ✓ IIFE setter desugar | fix (Tier 2 → Tier 1 + INV-3 compliance) |
+| 22 (B2 `+=`) | ✗ silent Fallback | ✓ Tier 2 honest "compound assign to read-only property" | fix (silent → Tier 2 honest) |
+| 23 (B3 `+=`) | ✗ silent Fallback | ✓ Tier 2 honest "compound assign read of write-only property" | fix |
+| 25 (B6 method `+=`) | ✗ silent Fallback | ✓ Tier 2 honest "compound assign to method" | fix |
+| 26 (B7 inherited `+=`) | ✗ silent Fallback | ✓ Tier 2 honest "compound assign to inherited accessor" | fix |
+| 27 (B8 static `+=`) | ✗ Rust syntax error (`Foo.x += v`) | ✓ static setter desugar yield_new | fix (Tier 2 → Tier 1) |
+| 28 (B9 unknown `+=`) | ✓ Fallback | ✓ Fallback | preserved |
+| 29-d (B4 `-=`) | ✗ silent Fallback | ✓ setter desugar BinOp::Sub | fix (op-axis orthogonality, cell 21 と equivalent) |
+| 29-e-d (B8 `-=`) | ✗ Rust syntax error | ✓ static setter desugar BinOp::Sub | fix |
+| 33 (B4 `\|=`) | ✗ silent Fallback | ✓ setter desugar BinOp::BitOr | fix |
+| 34-c (B4 `<<=`) | ✗ silent Fallback | ✓ setter desugar BinOp::Shl | fix |
+| 35-d (B8 `\|=`) | ✗ Rust syntax error | ✓ static setter desugar BinOp::BitOr | fix |
+| T7 cell 43 IIFE (B4 SE-having `++`) | ✗ INV-3 violation latent (double-eval) | ✓ IIFE setter desugar | fix (T7 back-port) |
+
+**No regression** (✓ → ✗) cells: 0 件。
+
+**Final quality (post-fix、本 T8 commit ready)**:
+- cargo test --lib **3267 pass** (3247 baseline + 19 T8 compound + 1 T7 back-port = 3267)
+- cargo test --tests: e2e 159 pass + 70 ignored / integration 122 pass / compile_test 3 pass
+- clippy 0 warning / fmt 0 diff / check-file-lines OK (全 .rs file < 1000 行、最大 369 行 = `member_dispatch/mod.rs`)
+- Hono Tier-transition compliance = **Preservation** (clean 111 / errors 63 = T7 baseline 同一、`prd-completion.md` broken-fix PRD allowed pattern = Hono が compound assign on class instances を主要使用していないため expected)
+
+**Defect Classification** (本 T8 内 final、Iteration v12 first + second review 累積):
+- **Spec gap: 3** (= [first] TypeResolver compound assign Member arm receiver 未再帰 + `ExpAssign` × Member user-facing wording、[second] TypeResolver compound assign Member arm field type completeness が partial = comment clarify で本 T8 内 resolved + 別 TODO `[I-218]` 起票 詳細 record、framework 失敗 signal)
+- **Implementation gap: 3** (= [first] `is_side_effect_free` 二重呼び出し + `_` arm Rule 11 d-1 違反、[second] `TS_OLD_BINDING` doc comment stale reference `build_update_setter_block` → `build_setter_desugar_block` rename、3 件本 T8 内 全 resolved)
+- **Review insight: 4** (= [first] cell 21 corollary semantic safety、[second] assignments.rs compound desugar match comment clarify (Member target は早期 return で本 match に到達しないこと明示)、`arithmetic_compound_op_to_binop` 11 ops exhaustive mapping unit test 不在 (本 T8 内 7 op 追加 unit test で structural verify)、Fallback path INV-3 1-evaluate compliance gap (pre-existing、本 T8 setter dispatch path scope と orthogonal、別 TODO `[I-217]` 起票 詳細 record + Resolution direction = `is_side_effect_free` / `wrap_with_recv_binding` shared helper Fallback path 適用))
+
+**framework 改善 candidates (本 PRD close 時 integrate or 別 framework PRD 起票候補)**:
+- **Rule 10 default axis 正式昇格 (Iteration v11/v12 連続 2 度発生 source)**: "TypeResolver visit coverage of operand-context expressions" を Rule 10 axis enumeration default check axis に昇格 + audit script で yaml block parse して自動 verify する mechanism 追加。Update.arg / Compound assign Member.obj の 2 度連続 Spec gap 発生 source、3 度目発生前の structural prevention。
+
+#### Iteration v12 完了判定 (2026-04-29、first + second `/check_job` 4-layer review 累積 fix、計 10 件 finding 全 fix + 別 scope defer 2 件 TODO 起票)
+
+**First review (commit 前 initial review)**: F1/F2/F3 (Critical block findings) + F5 (Review insight) + F4/F7 (pre-existing、scope-out) を発見、F1/F2/F3 + Cell 21 corollary record で本 T8 内 全 fix。
+
+**Second review (post-fix state、追加発見) findings 5 件 (本 T8 内 fix + 別 scope TODO)**:
+- **F-SL-1 (Review insight、Medium)**: assignments.rs compound desugar match の comment が "Member target も通過する" と読み手に誤解を与える misleading wording → Member target は早期 return で本 match arm に到達しない事を明示する comment clarify (line 341 周辺)。
+- **F-SL-2 (Implementation gap、High)**: `TS_OLD_BINDING` doc comment の stale reference `member_dispatch.rs` `build_update_setter_block` → post-T8 split で `member_dispatch/shared.rs` `build_setter_desugar_block` に rename/generalize されている、doc comment と実装不一致 (CLAUDE.md "Public types/functions must have doc comments" 準拠 violation)。本 T8 内 fix で reference 訂正。
+- **F-SX-1 (Spec gap、Medium)**: TypeResolver compound assign Member arm の comment が "全 compound op で recursively resolve" と書いているが、register されるのは **receiver の expr_type のみ**、**field type** (= `member.span` 全体の expr_types entry) は依然 `is_propagating_op` ブロック内のみで partial register。本 T8 内 fix で comment clarify (= receiver 軸のみ resolve、field 軸は subsequent T9 着手時に audit) + 別 TODO `[I-218]` 起票で詳細 Resolution direction record (Fix 1 = field type 全 op register への restructure、Fix 2 = T9 着手時 audit)。
+- **F-EM-1 (Review insight、Medium)**: `arithmetic_compound_op_to_binop` 11 ops 全 mapping を end-to-end lock-in する unit test 不在、unit test では 4 ops (AddAssign / SubAssign / BitOrAssign / LShiftAssign) のみ B4 dispatch verify。本 T8 内 fix で **7 op (MulAssign / DivAssign / ModAssign / BitAndAssign / BitXorAssign / RShiftAssign / ZeroFillRShiftAssign) の B4 instance dispatch unit test を追加**、11 ops 全件の structural mapping verify を完成 (orthogonality merge proof + dispatch arm coverage transitively complete)。
+- **F-AT-1 (Review insight、Low)**: `dispatch_member_compound::Fallback` arm の `target.clone()` (line ~362、pre-existing F7 same issue) で receiver double/triple-eval が latent silent semantic loss + Update Fallback path (`build_fallback_field_update_block`) も同 INV-3 violation pattern。本 T8 setter dispatch path scope と orthogonal な architectural concern (= "Fallback path INV-3 1-evaluate compliance") として split、本 T8 内 fix なし、別 TODO `[I-217]` 起票で詳細 Resolution direction record (Fix 1 = `is_side_effect_free` / `wrap_with_recv_binding` shared helper Fallback path 適用、Fix 2 = scope 縮小)。
+
+**累積 Defect Classification (final)**:
+- **Spec gap: 3** (1 件 framework 失敗 signal、2 件本 T8 内 resolved + 1 件 [I-218] TODO 起票)
+- **Implementation gap: 3** (全件本 T8 内 resolved)
+- **Review insight: 4** (1 件 PRD doc record、1 件 comment clarify、1 件 unit test 拡張、1 件 [I-217] TODO 起票)
+
+✅ 全 finding 本 T8 内 fix or 別 TODO 起票 + PRD doc 詳細 record 完了。Pre/post matrix で no regression verify、Hono Tier-transition compliance Preservation verify (clean 111 / errors 63 = T7 baseline 同一、no new compile errors)。本 T8 commit ready (= second review 累積 fix 後 final state、user 指示 "妥協は絶対に許容しない" + "現在のスコープで対応するべきものは全て、本質的な方法で解決" 完全準拠)。
+
 ## Goal
 
 PRD 完了時、以下が達成される (verifiable):
@@ -1843,18 +1961,59 @@ Static dispatch context = receiver が `ast::Expr::Ident(class_name)` で `get_e
 - (b) tsc oracle observation + per-cell E2E fixture (red lock-in)
 - (c) reachability audit (本 review insight #2)
 
-### `convert_assign_expr` compound branch (A3-A5 dispatch)
+### `convert_assign_expr` compound branch (A3 arithmetic + A4 bitwise dispatch、Iteration v12 で T8 implementation 想定に整合 + structural form 化)
+
+T8 scope = **arithmetic compound (`+= -= *= /= %=`) + bitwise compound (`<<= >>= >>>= &= |= ^=`) = 11 ops**。
+A5 logical compound (`??= &&= ||=`) は **T9 scope** (既存 `nullish_assign.rs` / `compound_logical_assign.rs` helper integration、別 architectural concern)、本 mapping table では別 sub-section で T9 の予測 dispatch を記載。
+
+`convert_assign_expr` の T8 entry: T6 plain `=` × Member の gate 直後に T8 compound × Member gate を追加。Op-axis orthogonality merge (Rule 1 (1-4)): 全 arm の op variant (AddAssign / SubAssign / .../ BitXorAssign) は dispatch logic 同一 (= BinOp 置換のみ、`arithmetic_compound_op_to_binop` mapping helper で AssignOp → BinOp 1-to-1 変換)、本 table は **Instance dispatch arms / Static dispatch arms / Fallback arm** の 3 sub-section で structural form 化 (T7 update Mapping table と symmetric)。
+
+#### Instance dispatch arms (`dispatch_instance_member_compound`)
 
 | Predicted dispatch arm | Matrix cell(s) | Emit IR |
 |------------------------|---------------|---------|
-| `op == AssignOp::AddAssign` and target = Member with setter | cells 21, 29-* (operator-equiv) | `Expr::MethodCall { method: set_x, args: [Expr::BinOp { op: Add, lhs: Expr::MethodCall { method: x }, rhs: value }] }` (side-effect-free recv) or temp binding (side-effect recv) |
-| `op == AssignOp::BitOrAssign` etc. (A4 bitwise) | cells 30-34, 35-* | 同 above with BinOp = BitOr/BitXor/Shl/Shr 等 |
-| `op == AssignOp::NullishAssign` (A5 ??=) | cells 36-40, 41-* | `if Expr::MethodCall.is_none() { Expr::MethodCall set_x with default }` (statement context) |
-| `op == AssignOp::AndAssign` (A5 &&=) | cells 39, 41 series | `if Expr::MethodCall { Expr::MethodCall set_x }` |
-| `op == AssignOp::OrAssign` (A5 ||=) | cells 40, 41 series | `if !Expr::MethodCall { Expr::MethodCall set_x }` |
-| Compound assign with B2 getter only (read-only) | cells 22, 31, 37 | `Err(UnsupportedSyntaxError::new("compound assign to read-only", ...))` |
-| Compound assign with B3 setter only (write-only read part) | cells 23, 32 | `Err(UnsupportedSyntaxError::new("compound assign read of write-only", ...))` |
-| Compound assign with B7 inherited | cells 26, 35-c, 41-c, 45-dc | `Err(UnsupportedSyntaxError::new("compound assign to inherited", ...))` |
+| `MemberReceiverClassification::Instance` + `has_getter && has_setter` (B4) + side-effect-free receiver | cells 21, 29-d, 33, 34-c (op-axis orthogonality-equivalent) | `Expr::Block { Let __ts_new = BinOp MethodCall obj.x() OP rhs; Stmt::Expr MethodCall obj.set_x(__ts_new); TailExpr __ts_new }` (compound assign yields new value、prefix update と same shape with rhs replacing 1.0) |
+| `Instance` + `has_getter && has_setter` (B4) + side-effect-having receiver (INV-3 1-evaluate compliance) | cells 21, 29-d, 33, 34-c (op-axis orthogonality-equivalent) | `Expr::Block { Let mut __ts_recv = <object>; Let __ts_new = BinOp MethodCall __ts_recv.x() OP rhs; Stmt::Expr MethodCall __ts_recv.set_x(__ts_new); TailExpr __ts_new }` (IIFE form で receiver 1-evaluate 保証) |
+| `Instance` + `has_getter` only (B2) | cells 22, 29-b, 31, 34-b (op-axis orthogonality-equivalent) | `Err(UnsupportedSyntaxError::new("compound assign to read-only property", ...))` |
+| `Instance` + `has_setter` only (B3) | cells 23, 29-c, 32 (op-axis orthogonality-equivalent) | `Err(UnsupportedSyntaxError::new("compound assign read of write-only property", ...))` (compound assign は read 先行、getter 不在で read fail) |
+| `Instance` + `has_method` only (B6) | cells 25, 29-e-b, 35-b (op-axis orthogonality-equivalent) | `Err(UnsupportedSyntaxError::new("compound assign to method", ...))` |
+| `Instance` + `is_inherited = true` (B7) | cells 26, 29-e-c, 35-c (op-axis orthogonality-equivalent) | `Err(UnsupportedSyntaxError::new("compound assign to inherited accessor", ...))` |
+
+#### Static dispatch arms (`dispatch_static_member_compound`、receiver = class TypeName で IIFE form 不要 = side-effect なし path)
+
+| Predicted dispatch arm | Matrix cell(s) | Emit IR |
+|------------------------|---------------|---------|
+| `Static` + `has_getter && has_setter` (B8) | cells 27, 29-e-d, 35-d (op-axis orthogonality-equivalent) | `Expr::Block { Let __ts_new = BinOp FnCall::UserAssocFn Class::x() OP rhs; Stmt::Expr FnCall::UserAssocFn Class::set_x(__ts_new); TailExpr __ts_new }` |
+| `Static` + has_getter only (defensive、static B2) | (matrix cell 化なし、subsequent T11 (11-c) で expansion) | `Err(UnsupportedSyntaxError::new("compound assign to read-only static property", ...))` |
+| `Static` + has_setter only (defensive、static B3) | (matrix cell 化なし) | `Err(UnsupportedSyntaxError::new("compound assign read of write-only static property", ...))` |
+| `Static` + has_method only (defensive、static B6) | (matrix cell 化なし) | `Err(UnsupportedSyntaxError::new("compound assign to static method", ...))` |
+| `Static` + `is_inherited = true` (defensive、static B7) | (matrix cell 化なし) | `Err(UnsupportedSyntaxError::new("compound assign to inherited static accessor", ...))` |
+
+#### Fallback arm (B1 field、B9 unknown、non-class receiver、static field)
+
+| Predicted dispatch arm | Matrix cell(s) | Emit IR |
+|------------------------|---------------|---------|
+| `MemberReceiverClassification::Fallback` (B1 field、B9 unknown、non-class receiver) | cells 20, 28, 29-a, 29-e-e, 30, 34-a, 35-e (op-axis orthogonality-equivalent regression preserve) | `Expr::Assign { target: <FieldAccess obj.x>, value: Expr::BinaryOp { left: <FieldAccess obj.x>, op: <BinOp from AssignOp>, right: rhs } }` (= existing compound desugar emit、`convert_member_expr_for_write` 経由で Member target を FieldAccess IR 化、regression lock-in) |
+| Non-Member target (Ident / Computed / etc.) | (本 dispatch entry を経由しない) | 既存 `convert_assign_expr` の compound branch fall-through で Ident binding update / Computed Index update emit (不変) |
+
+**Structural invariant (Iteration v12)**: `dispatch_instance_member_compound` / `dispatch_static_member_compound` の本体 4 if-block (B4 setter desugar / B2 getter only / B3 setter only / B6 method) は `MethodKind` enum 3 variant 完全列挙 + `lookup_method_sigs_in_inheritance_chain` non-empty vec invariant により **構造的に必ず 1 arm が fire**、`unreachable!()` macro で structural enforcement (T5/T6/T7 helpers と symmetric)。
+
+**Op-axis orthogonality merge** (Rule 1 (1-4) compliance): 全 arm の AssignOp variant (AddAssign / SubAssign / MulAssign / DivAssign / ModAssign / BitAndAssign / BitOrAssign / BitXorAssign / LShiftAssign / RShiftAssign / ZeroFillRShiftAssign = 11 ops) は dispatch logic 同一 (= BinOp 置換のみ、`arithmetic_compound_op_to_binop` 1-to-1 mapping helper で AssignOp → BinOp { Add / Sub / Mul / Div / Mod / BitAnd / BitOr / BitXor / Shl / Shr / UShr } 変換)、Rule 1 (1-4-a)/(1-4-b)/(1-4-c) compliant な op-axis orthogonality merge 適用。
+
+**INV-3 1-evaluate compliance (本 T8 scope、setter dispatch path のみ)**: `obj.x += v` の desugar で receiver `obj` が **1 回のみ evaluate** されることを保証する。判定 helper `is_side_effect_free(expr: &Expr) -> bool` で receiver IR を check、結果に応じて 2 path に分岐:
+- side-effect-free (`Expr::Ident` / depth-bounded `Expr::FieldAccess`): 直接 emit (Rust source 上 receiver が 2 回出現するが cheap reference copy で意味 invariant)
+- side-effect (`Expr::FnCall` / `Expr::MethodCall` / etc.): IIFE form `{ let mut __ts_recv = <object>; ... }` で binding 経由、receiver expression eval は Let init で 1 回のみ実行
+INV-3 (a) Property statement compliance、Fallback path (B1/B9) は本 T8 scope 外 (= 別 architectural concern として TODO 起票候補)。
+
+**T7 INV-3 back-port (本 T8 scope)**: `dispatch_instance_member_update` の B4 setter desugar arm も同 `is_side_effect_free` + IIFE wrap で update、T7 で発覚した latent gap を T8 で structural cohesive 解消 (T7 helpers と T8 helpers が `build_setter_desugar_block` (旧 `build_update_setter_block` の generalize 版) + `wrap_with_recv_binding` を共有)。
+
+#### A5 Logical compound dispatch (T9 scope、本 T8 では dispatch なし)
+
+| Predicted dispatch arm | Matrix cell(s) | Emit IR |
+|------------------------|---------------|---------|
+| `op == AssignOp::NullishAssign` (A5 ??=) | cells 36-40, 41-* | T9 で既存 `nullish_assign.rs` `pick_strategy` helper integration、setter dispatch arm 追加 |
+| `op == AssignOp::AndAssign` (A5 &&=) | cells 39, 41 series | T9 で既存 `compound_logical_assign.rs` helper integration、setter dispatch arm 追加 |
+| `op == AssignOp::OrAssign` (A5 ||=) | cells 40, 41 series | 同上 |
 
 ### `convert_update_expr` Member target dispatch (A6 ++/-- dispatch、Iteration v11 Spec gap fix で B2/B3 enumerate completeness 化)
 
@@ -2011,7 +2170,7 @@ Stage 2 で実装する `src/` 修正 task。**Spec Stage Tasks (TS-0〜TS-5) �
 - **Hono Tier-transition compliance** (per `prd-completion.md` broken-fix PRD): **Improvement (allowed)** = T5 baseline (b617386) との累積 diff で clean files 110 → 111 (+1) / error instances 64 → 63 (-1) / compile (file) 109 → 110 (+1)。Category changes: -2 OTHER / +1 OBJECT_LITERAL_NO_TYPE = **2 files が OTHER 状態から improvement、1 file が clean 化、1 file が OBJECT_LITERAL_NO_TYPE category へ shift (= UpdateExpr 関連 OTHER blocker が T7 で removed、別の orthogonal blocker = OBJECT_LITERAL_NO_TYPE が exposed、これは Phase B Step (RC-11) scope の expected blocker、本 PRD scope 外への new compile error 導入は 0 件)**。`prd-completion.md` "New compile errors prohibited" requirement 違反なし、Improvement path 正当 (= 既 broken Tier 2 file が Tier 1 clean 化 / 別 file の partial improvement)。
 - **Depends on**: T1, T6
 
-### T8: Compound assign (`+= -= *= ... \|=`) setter desugar
+### T8: Compound assign (`+= -= *= ... \|=`) setter desugar [完了 2026-04-29]
 
 - **Work**: `convert_assign_expr` の compound branch で setter desugar (cells 20-29 + 30-35 + 35-* + B6/B7 Tier 2 honest error)。T7 で確立した `build_update_setter_block` (instance/static 共通 setter desugar block builder) + `dispatch_instance_member_update` / `dispatch_static_member_update` arm 構造を leverage、compound assign 用 `dispatch_instance_member_compound` / `dispatch_static_member_compound` 新規 helper として extension (rhs を引数で受ける + compound op を BinOp で受ける + value-yield 必要なら Block form / 不要なら直接 setter MethodCall emit)。
 - **(8-a、Iteration v11 review L4-2 由来) INV-3 1-evaluate compliance for non-Ident receiver**: T7 Iteration v11 で発覚した latent gap = 非-Ident receiver (`getInstance().x++` 等) で `obj` が 2 回 evaluate される (`getter_call = obj.clone()` + `setter_call = obj.clone()` で 2 clone → generated Rust で `getInstance()` 2 回呼出)。INV-3 (compound assign side-effect 1-evaluate) 違反 latent。
