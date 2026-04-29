@@ -1,6 +1,5 @@
 ---
 source: tests/integration_test.rs
-assertion_line: 85
 expression: output
 ---
 fn countdown(n: f64) -> f64 {
@@ -23,9 +22,9 @@ fn findFirstNegative(values: Vec<f64>) -> f64 {
             break;
         }
         {
-    let _old = i;
+    let __ts_old = i;
     i = i + 1.0;
-    _old
+    __ts_old
 };
         if !(i < values.len() as f64) {
             break;
@@ -43,18 +42,18 @@ fn multiplyUntilOverflow(a: f64, b: f64, limit: f64) -> f64 {
         loop {
             result = result + b;
             {
-    let _old = j;
+    let __ts_old = j;
     j = j + 1.0;
-    _old
+    __ts_old
 };
             if !(j < 2.0) {
                 break;
             }
         }
         {
-    let _old = i;
+    let __ts_old = i;
     i = i + 1.0;
-    _old
+    __ts_old
 };
         if !(result < limit) {
             break;
@@ -70,17 +69,17 @@ fn sumPositiveOnly(values: Vec<f64>) -> f64 {
         '__ts_do_while: {
             if values.get(i as usize).cloned().unwrap() < 0.0 {
                 {
-    let _old = i;
+    let __ts_old = i;
     i = i + 1.0;
-    _old
+    __ts_old
 };
                 break '__ts_do_while;
             }
             total = total + values.get(i as usize).cloned().unwrap();
             {
-    let _old = i;
+    let __ts_old = i;
     i = i + 1.0;
-    _old
+    __ts_old
 };
         }
         if !(i < values.len() as f64) {
@@ -96,9 +95,9 @@ fn sumUntilLimit(limit: f64) -> f64 {
     loop {
         result = result + i;
         {
-    let _old = i;
+    let __ts_old = i;
     i = i + 1.0;
-    _old
+    __ts_old
 };
         if !(result < limit) {
             break;

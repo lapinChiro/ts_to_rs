@@ -2227,8 +2227,28 @@ fn test_e2e_cell_i205_43_postfix_increment() {
     run_cell_e2e_test("i-205", "cell-43-postfix-increment");
 }
 
+// cell 44: A6 Increment × non-numeric String (Rule 3 (3-3) NA → Tier 2 honest error reclassify)
 #[test]
-#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 44)"]
+#[ignore = "I-205 cell 44 (A6 Increment × non-numeric T、Rule 3 (3-3) reclassify) は Transformer \
+            Tier 2 honest error (UnsupportedSyntaxError(\"increment of non-numeric (String/etc.) — \
+            TS NaN coercion semantic\"))。SWC parser empirical で `s++` (s: string) accept、tsx \
+            runtime で String → Number coercion → NaN を return する semantic を Rust に直接対応 \
+            する mechanism なし、honest error が ideal (PRD 2.7 cell 15 Prop::Assign lesson と同 \
+            pattern)。\n\
+            \n\
+            **Permanent #[ignore]** (= Tier 1 化されない、Rust の static type system に NaN \
+            coercion semantic 不在のため、honest error reject が ideal、Tier 1 化計画なし)。\n\
+            \n\
+            Behavioral / structural lock-in は他 layer で完成済 (T7 Iteration v11):\n\
+              - `tests/swc_parser_increment_non_numeric_test.rs` (SWC parser accept structural \
+                assumption lock-in、3 sub-cases: postfix/prefix/compound non-numeric)\n\
+              - `src/transformer/expressions/tests/i_205/update.rs::test_cell_44_b4_string_increment_emits_unsupported_syntax_error` \
+                (B4 class member context での Tier 2 honest error wording lock-in、`++` 用)\n\
+              - 同 file `test_cell_44_symmetric_b4_string_decrement_emits_unsupported_syntax_error` \
+                (`--` symmetric の \"decrement of non-numeric (...)\" wording lock-in)\n\
+            \n\
+            本 fixture は historical record + Tier 2 honest error の TS source 例として保持 \
+            (cell-15-prop-assign-na fixture の保持 pattern と整合)。"]
 fn test_e2e_cell_i205_44_increment_string_nan() {
     run_cell_e2e_test("i-205", "cell-44-increment-string-nan");
 }

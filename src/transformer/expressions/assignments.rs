@@ -8,6 +8,12 @@ use crate::ir::{BinOp, ClosureBody, Expr, RustType, Stmt};
 use crate::transformer::statements::nullish_assign::{pick_strategy, NullishAssignStrategy};
 use crate::transformer::{Transformer, UnsupportedSyntaxError};
 
+use super::member_access::extract_non_computed_field_name;
+use super::member_dispatch::{
+    dispatch_instance_member_update, dispatch_static_member_update, MemberReceiverClassification,
+};
+use super::TS_OLD_BINDING;
+
 impl<'a> Transformer<'a> {
     /// Converts an assignment expression (`target = value`) to `Expr::Assign`.
     pub(crate) fn convert_assign_expr(&mut self, assign: &ast::AssignExpr) -> Result<Expr> {
@@ -345,47 +351,291 @@ impl<'a> Transformer<'a> {
     }
 }
 
-/// Converts an update expression (`i++`, `i--`, `++i`, `--i`) to `Expr::Assign`.
+impl<'a> Transformer<'a> {
+    /// Converts an update expression (`i++`, `i--`, `++i`, `--i`,
+    /// `obj.x++`, `Class.x--`, etc.) to an `Expr::Block` that yields the
+    /// expected old-value (postfix) or new-value (prefix) per ECMAScript spec.
+    ///
+    /// ## Dispatch by argument shape
+    ///
+    /// - **`Ident`** (`i++`): direct binding update
+    ///   - Postfix `i++` → `{ let __ts_old = i; i = i + 1.0; __ts_old }`
+    ///   - Prefix `++i` → `{ i = i + 1.0; i }`
+    ///
+    /// - **`Member` with `Ident`/`PrivateName` prop** (`obj.x++` / `Class.x++`):
+    ///   class member dispatch via [`Self::classify_member_receiver`] (T6
+    ///   shared classifier). Routes through [`dispatch_instance_member_update`]
+    ///   / [`dispatch_static_member_update`] (T7) for class accessor receivers,
+    ///   else falls back to `Expr::Assign { FieldAccess, BinaryOp }` for B1
+    ///   field / B9 unknown / non-class receivers (cells 42, 45-a, 45-de).
+    ///
+    /// - **Other shapes** (`Computed obj[i]++`, complex receivers): existing
+    ///   `unsupported update expression target` error path (matrix scope 外、
+    ///   I-203 codebase-wide AST exhaustiveness compliance で別 PRD 取り扱い)。
+    ///
+    /// ## Postfix old-value preservation invariant (matrix cells 42-45)
+    ///
+    /// For both Member dispatch (B4 setter desugar) and Member fallback (B1
+    /// field), postfix yields the **old** value while still performing the
+    /// mutation; prefix yields the **new** value. The block expression is
+    /// transparent in statement context (`obj.x++;` discards the tail expr).
+    ///
+    /// ## Variable namespace hygiene (I-154 + T7 extension)
+    ///
+    /// All emission bindings use the `__ts_` prefix per the [I-154 namespace
+    /// reservation rule](crate::transformer::statements). T7 extends the
+    /// `__ts_` namespace from labels (I-154 scope) to value bindings; the
+    /// prior single-underscore `_old` (Ident form pre-T7) is renamed in this
+    /// task as cohesive cleanup since T7 introduces new uses of the same
+    /// emission pattern.
+    pub(crate) fn convert_update_expr(&mut self, up: &ast::UpdateExpr) -> Result<Expr> {
+        let op = match up.op {
+            ast::UpdateOp::PlusPlus => BinOp::Add,
+            ast::UpdateOp::MinusMinus => BinOp::Sub,
+        };
+        let is_postfix = !up.prefix;
+
+        // SWC `ast::Expr` 全 38 variants を **exhaustive enumerate** (Rule 11 (d-1)
+        // `_ => ` arm 全面禁止 compliant、`#[non_exhaustive]` ではないため Rust compiler
+        // が新 variant 追加時 compile error で全 dispatch fix 強制 = structural enforcement)。
+        // 本 dispatch arms:
+        // - `Member` → class member dispatch (Static/Instance/Fallback) per T7 cells 42-45
+        // - `Ident` → direct binding update (Ident form、I-154 + T7 extension to value
+        //   bindings の `TS_OLD_BINDING` 経由)
+        // - その他 36 variants → Tier 2 honest error per Rule 11 (d-2) Transformer phase
+        //   mechanism (`UnsupportedSyntaxError` で user-facing line:col 含む transparent
+        //   error reporting via `resolve_unsupported()` 経路)
+        match up.arg.as_ref() {
+            ast::Expr::Member(member) => {
+                self.convert_update_expr_member_arm(member, op, is_postfix, up.span)
+            }
+            ast::Expr::Ident(ident) => {
+                let name = ident.sym.to_string();
+                let assign = Stmt::Expr(Expr::Assign {
+                    target: Box::new(Expr::Ident(name.clone())),
+                    value: Box::new(Expr::BinaryOp {
+                        left: Box::new(Expr::Ident(name.clone())),
+                        op,
+                        right: Box::new(Expr::NumberLit(1.0)),
+                    }),
+                });
+                if up.prefix {
+                    // Prefix: ++i → { i = i + 1.0; i }
+                    Ok(Expr::Block(vec![assign, Stmt::TailExpr(Expr::Ident(name))]))
+                } else {
+                    // Postfix: i++ → `{ let __ts_old = i; i = i + 1.0; __ts_old }`
+                    // (binding name = `TS_OLD_BINDING`、I-154 namespace reservation
+                    // extension to value bindings)
+                    Ok(Expr::Block(vec![
+                        Stmt::Let {
+                            mutable: false,
+                            name: TS_OLD_BINDING.to_string(),
+                            ty: None,
+                            init: Some(Expr::Ident(name)),
+                        },
+                        assign,
+                        Stmt::TailExpr(Expr::Ident(TS_OLD_BINDING.to_string())),
+                    ]))
+                }
+            }
+            // Unsupported `ast::Expr` variants as UpdateExpr target (TS-invalid or
+            // matrix scope-out)。Rule 11 (d-1) compliance per `or_pattern` で 36 variants
+            // を集約 enumerate (Rule 11 (d-2) Transformer phase = `UnsupportedSyntaxError`
+            // で line:col 含む user-facing error)。
+            //
+            // Categories (informational):
+            // - Literal / wrapper shapes (TS-valid syntax で UpdateExpr target が type
+            //   error or matrix scope-out): `This`, `Lit`, `Paren`, `TsAs`, `TsNonNull`,
+            //   `TsTypeAssertion`, `TsConstAssertion`, `TsInstantiation`, `TsSatisfies`,
+            //   `Seq`, `Arrow`, `Fn`, `Class`, `Tpl`, `TaggedTpl`, `Array`, `Object`,
+            //   `Cond`
+            // - Compound / call / chain shapes (TS で type error な UpdateExpr target):
+            //   `Bin`, `Unary`, `Update`, `Assign`, `Call`, `New`, `MetaProp`, `Yield`,
+            //   `Await`, `SuperProp`, `OptChain`, `PrivateName`
+            // - Special / non-target shapes: `Invalid` (parser error), `JSXMember`,
+            //   `JSXNamespacedName`, `JSXEmpty`, `JSXElement`, `JSXFragment`
+            //   (JSX = TypeScript JSX/TSX context、UpdateExpr target にはならない)
+            ast::Expr::This(_)
+            | ast::Expr::Array(_)
+            | ast::Expr::Object(_)
+            | ast::Expr::Fn(_)
+            | ast::Expr::Unary(_)
+            | ast::Expr::Update(_)
+            | ast::Expr::Bin(_)
+            | ast::Expr::Assign(_)
+            | ast::Expr::SuperProp(_)
+            | ast::Expr::Cond(_)
+            | ast::Expr::Call(_)
+            | ast::Expr::New(_)
+            | ast::Expr::Seq(_)
+            | ast::Expr::Lit(_)
+            | ast::Expr::Tpl(_)
+            | ast::Expr::TaggedTpl(_)
+            | ast::Expr::Arrow(_)
+            | ast::Expr::Class(_)
+            | ast::Expr::Yield(_)
+            | ast::Expr::MetaProp(_)
+            | ast::Expr::Await(_)
+            | ast::Expr::Paren(_)
+            | ast::Expr::JSXMember(_)
+            | ast::Expr::JSXNamespacedName(_)
+            | ast::Expr::JSXEmpty(_)
+            | ast::Expr::JSXElement(_)
+            | ast::Expr::JSXFragment(_)
+            | ast::Expr::TsTypeAssertion(_)
+            | ast::Expr::TsConstAssertion(_)
+            | ast::Expr::TsNonNull(_)
+            | ast::Expr::TsAs(_)
+            | ast::Expr::TsInstantiation(_)
+            | ast::Expr::TsSatisfies(_)
+            | ast::Expr::PrivateName(_)
+            | ast::Expr::OptChain(_)
+            | ast::Expr::Invalid(_) => Err(UnsupportedSyntaxError::new(
+                "unsupported update expression target",
+                up.span,
+            )
+            .into()),
+        }
+    }
+
+    /// Member target arm of [`Self::convert_update_expr`] (T7 cells 42-45).
+    ///
+    /// Splits on [`MemberReceiverClassification`]:
+    /// - `Static` → [`dispatch_static_member_update`] (B8 setter desugar /
+    ///   defensive Tier 2 for B2/B3/B6/B7 static)
+    /// - `Instance` → [`dispatch_instance_member_update`] (B4 setter desugar
+    ///   with numeric type check / Tier 2 for B2/B3/B6/B7)
+    /// - `Fallback` → direct `Expr::Assign { FieldAccess, BinaryOp }` block
+    ///   with postfix/prefix old-/new-value preservation (cells 42, 45-a,
+    ///   45-de = B1 field + B9 unknown regression Tier 2 → Tier 1 transition)
+    ///
+    /// `MemberProp` shape handling (本 arm 入口の field name extraction):
+    /// - `MemberProp::Ident` / `MemberProp::PrivateName`:
+    ///   `extract_non_computed_field_name` が `Some(field_name)` を返し、
+    ///   `classify_member_receiver` 経由 dispatch に進む (`dispatch_member_write`
+    ///   と symmetric な class member dispatch)。
+    /// - `MemberProp::Computed` (`obj[i]++`):
+    ///   `extract_non_computed_field_name` が `None` を返し、本 arm 入口で
+    ///   `unsupported update expression target` anyhow Err を直接 return
+    ///   (= outer `convert_update_expr` の non-Ident reject path と **同一 wording**、
+    ///   Computed update は matrix scope 外 / 別 architectural concern として
+    ///   I-203 codebase-wide AST exhaustiveness で取り扱う)。本 reject は
+    ///   `MemberReceiverClassification::Fallback` ではなく **early return**、
+    ///   classify_member_receiver は呼ばれない。
+    fn convert_update_expr_member_arm(
+        &mut self,
+        member: &ast::MemberExpr,
+        op: BinOp,
+        is_postfix: bool,
+        up_span: swc_common::Span,
+    ) -> Result<Expr> {
+        // `MemberProp` shape gate:
+        // - `Ident` / `PrivateName` → `Some(field)` で classify_member_receiver dispatch
+        // - `Computed` → `None` で early return (matrix scope 外、`convert_update_expr`
+        //   の non-Ident reject wording と統一)。Transformer phase mechanism per Rule 11
+        //   (d-2) で `UnsupportedSyntaxError` 必須 (`up_span` で whole UpdateExpr context
+        //   の line:col を user-facing error に含む、Computed update target の precise
+        //   localization)。
+        let Some(field) = extract_non_computed_field_name(&member.prop) else {
+            return Err(UnsupportedSyntaxError::new(
+                "unsupported update expression target",
+                up_span,
+            )
+            .into());
+        };
+
+        match self.classify_member_receiver(&member.obj, &field) {
+            MemberReceiverClassification::Static {
+                class_name,
+                sigs,
+                is_inherited,
+            } => dispatch_static_member_update(
+                &class_name,
+                &field,
+                &sigs,
+                is_inherited,
+                op,
+                is_postfix,
+                &member.obj,
+            ),
+            MemberReceiverClassification::Instance { sigs, is_inherited } => {
+                let object = self.convert_expr(&member.obj)?;
+                dispatch_instance_member_update(
+                    &object,
+                    &field,
+                    &sigs,
+                    is_inherited,
+                    op,
+                    is_postfix,
+                    &member.obj,
+                )
+            }
+            MemberReceiverClassification::Fallback => {
+                // B1 field / B9 unknown / non-class receiver / static field:
+                // direct `obj.x = obj.x OP 1.0` block with postfix/prefix
+                // old-/new-value preservation (cells 42, 45-a, 45-de regression
+                // Tier 2 → Tier 1 transition for B1/B9 from current-broken state
+                // where `convert_update_expr` rejected all Member targets).
+                let object = self.convert_expr(&member.obj)?;
+                Ok(build_fallback_field_update_block(
+                    &object, &field, op, is_postfix,
+                ))
+            }
+        }
+    }
+}
+
+/// Builds the direct field update block for `obj.x++` / `obj.x--` Fallback
+/// (B1 field、B9 unknown、non-class receiver、static field) — used by T7
+/// `convert_update_expr_member_arm` when no class member dispatch fires.
 ///
-/// Both prefix and postfix forms are converted to the same assignment:
-/// - `i++` / `++i` → `i = i + 1.0`
-/// - `i--` / `--i` → `i = i - 1.0`
+/// Postfix `obj.x++`:
+/// ```text
+/// { let __ts_old = obj.x; obj.x = __ts_old <op> 1.0; __ts_old }
+/// ```
 ///
-/// Note: In statement context, prefix/postfix distinction is irrelevant.
-/// In expression context where the return value matters (e.g., `while (i--)`),
-/// the prefix/postfix semantics differ, but this is not yet handled.
-pub(super) fn convert_update_expr(up: &ast::UpdateExpr) -> Result<Expr> {
-    let name = match up.arg.as_ref() {
-        ast::Expr::Ident(ident) => ident.sym.to_string(),
-        _ => return Err(anyhow!("unsupported update expression target")),
-    };
-    let op = match up.op {
-        ast::UpdateOp::PlusPlus => BinOp::Add,
-        ast::UpdateOp::MinusMinus => BinOp::Sub,
+/// Prefix `++obj.x`:
+/// ```text
+/// { obj.x = obj.x <op> 1.0; obj.x }
+/// ```
+///
+/// Symmetric with the Ident-target form in [`Transformer::convert_update_expr`]
+/// — postfix uses `__ts_old` let binding for old-value preservation, prefix
+/// re-reads `obj.x` for the tail expr.
+fn build_fallback_field_update_block(
+    object: &Expr,
+    field: &str,
+    op: BinOp,
+    is_postfix: bool,
+) -> Expr {
+    let field_access = Expr::FieldAccess {
+        object: Box::new(object.clone()),
+        field: field.to_string(),
     };
     let assign = Stmt::Expr(Expr::Assign {
-        target: Box::new(Expr::Ident(name.clone())),
+        target: Box::new(field_access.clone()),
         value: Box::new(Expr::BinaryOp {
-            left: Box::new(Expr::Ident(name.clone())),
+            left: Box::new(if is_postfix {
+                Expr::Ident(TS_OLD_BINDING.to_string())
+            } else {
+                field_access.clone()
+            }),
             op,
             right: Box::new(Expr::NumberLit(1.0)),
         }),
     });
-
-    if up.prefix {
-        // Prefix: ++i → { i = i + 1.0; i }
-        Ok(Expr::Block(vec![assign, Stmt::TailExpr(Expr::Ident(name))]))
-    } else {
-        // Postfix: i++ → { let _old = i; i = i + 1.0; _old }
-        Ok(Expr::Block(vec![
+    if is_postfix {
+        Expr::Block(vec![
             Stmt::Let {
                 mutable: false,
-                name: "_old".to_string(),
+                name: TS_OLD_BINDING.to_string(),
                 ty: None,
-                init: Some(Expr::Ident(name)),
+                init: Some(field_access),
             },
             assign,
-            Stmt::TailExpr(Expr::Ident("_old".to_string())),
-        ]))
+            Stmt::TailExpr(Expr::Ident(TS_OLD_BINDING.to_string())),
+        ])
+    } else {
+        Expr::Block(vec![assign, Stmt::TailExpr(field_access)])
     }
 }

@@ -25,8 +25,47 @@ pub(crate) mod member_dispatch;
 pub(crate) mod methods;
 pub(crate) mod patterns;
 mod type_resolution;
-use assignments::convert_update_expr;
 pub(crate) use binary::convert_binary_op;
+
+// =============================================================================
+// I-154 namespace reservation rule extension to value bindings (T7 source)
+// =============================================================================
+
+/// Binding name for postfix UpdateExpr / compound assign **old-value**
+/// preservation in setter desugar / fallback FieldAccess block emissions.
+///
+/// Used in `obj.x++` desugar:
+/// `{ let __ts_old = obj.x(); obj.set_x(__ts_old + 1.0); __ts_old }`
+/// (B4 setter dispatch) and `{ let __ts_old = obj.x; obj.x = __ts_old + 1.0;
+/// __ts_old }` (B1 field fallback)、Ident form `i++` も同 binding。
+///
+/// Single source of truth for the postfix old-value emission binding name —
+/// references this constant from all emission sites (`assignments.rs`
+/// `convert_update_expr` + `build_fallback_field_update_block`、
+/// `member_dispatch.rs` `build_update_setter_block`) to prevent silent drift if
+/// the convention changes.
+///
+/// ## I-154 namespace reservation extension
+///
+/// The `__ts_` prefix namespace is reserved for ts_to_rs internal emission per
+/// the [I-154 rule](crate::transformer::statements) (originally for labels:
+/// `__ts_switch`, `__ts_try_block`, `__ts_do_while`, `__ts_do_while_loop`).
+/// T7 (Iteration v11) extends the reservation from labels (statement-level) to
+/// **value bindings** (expression-level) — user TS code containing identifiers
+/// like `_old` / `_new` cannot collide with this emission inside the inner
+/// block scope, ensuring hygiene without case-by-case collision check.
+pub(super) const TS_OLD_BINDING: &str = "__ts_old";
+
+/// Binding name for prefix UpdateExpr / compound assign **new-value**
+/// preservation in setter desugar block emissions.
+///
+/// Used in `++obj.x` desugar:
+/// `{ let __ts_new = obj.x() + 1.0; obj.set_x(__ts_new); __ts_new }`
+/// (B4 setter dispatch、prefix yields the new value).
+///
+/// Single source of truth for the prefix new-value emission binding name (see
+/// [`TS_OLD_BINDING`] for the I-154 namespace reservation extension rationale).
+pub(super) const TS_NEW_BINDING: &str = "__ts_new";
 
 impl<'a> Transformer<'a> {
     /// Converts an SWC [`ast::Expr`] into an IR [`Expr`].
@@ -126,7 +165,7 @@ impl<'a> Transformer<'a> {
             ast::Expr::Member(member) => self.convert_member_expr(member),
             ast::Expr::This(_) => Ok(Expr::Ident("self".to_string())),
             ast::Expr::Assign(assign) => self.convert_assign_expr(assign),
-            ast::Expr::Update(up) => convert_update_expr(up),
+            ast::Expr::Update(up) => self.convert_update_expr(up),
             ast::Expr::Arrow(arrow) => self.convert_arrow_expr(arrow, false, &mut Vec::new()),
             ast::Expr::Fn(fn_expr) => self.convert_fn_expr(fn_expr),
             ast::Expr::Call(call) => self.convert_call_expr(call),

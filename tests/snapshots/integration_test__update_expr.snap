@@ -5,9 +5,9 @@ expression: output
 fn incrementCounter(initial: f64) -> f64 {
     let mut count: f64 = initial;
     {
-    let _old = count;
+    let __ts_old = count;
     count = count + 1.0;
-    _old
+    __ts_old
 };
     count
 }
@@ -15,9 +15,9 @@ fn incrementCounter(initial: f64) -> f64 {
 fn decrementCounter(initial: f64) -> f64 {
     let mut count: f64 = initial;
     {
-    let _old = count;
+    let __ts_old = count;
     count = count - 1.0;
-    _old
+    __ts_old
 };
     count
 }
@@ -26,9 +26,9 @@ fn consumeWhitespace(s: String, start: f64) -> f64 {
     let mut startIndex: f64 = start;
     while startIndex < s.len() as f64 {
         {
-    let _old = startIndex;
+    let __ts_old = startIndex;
     startIndex = startIndex + 1.0;
-    _old
+    __ts_old
 };
     }
     startIndex
@@ -66,9 +66,9 @@ fn readSequence(arr: Vec<f64>, count: f64) -> f64 {
     let mut total = 0.0;
     while i < count {
         total = total + arr.get({
-    let _old = i;
+    let __ts_old = i;
     i = i + 1.0;
-    _old
+    __ts_old
 } as usize).cloned().unwrap();
     }
     total
@@ -78,9 +78,9 @@ fn countDown(start: f64) -> f64 {
     let mut count = start;
     while count > 0.0 {
         {
-    let _old = count;
+    let __ts_old = count;
     count = count - 1.0;
-    _old
+    __ts_old
 };
     }
     count

@@ -4,7 +4,7 @@ use super::*;
 fn test_convert_expr_postfix_increment_returns_old_value() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    // i++ → { let _old = i; i = i + 1.0; _old }
+    // i++ → { let __ts_old = i; i = i + 1.0; __ts_old }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i++");
 
@@ -20,8 +20,8 @@ fn test_convert_expr_postfix_increment_returns_old_value() {
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 3);
-            assert!(matches!(&stmts[0], IrStmt::Let { name, .. } if name == "_old"));
-            assert!(matches!(&stmts[2], IrStmt::TailExpr(Expr::Ident(n)) if n == "_old"));
+            assert!(matches!(&stmts[0], IrStmt::Let { name, .. } if name == "__ts_old"));
+            assert!(matches!(&stmts[2], IrStmt::TailExpr(Expr::Ident(n)) if n == "__ts_old"));
         }
         other => panic!("expected Block for postfix i++, got: {other:?}"),
     }
@@ -58,7 +58,7 @@ fn test_convert_expr_prefix_increment_returns_new_value() {
 fn test_convert_expr_postfix_decrement_returns_old_value() {
     let f = TctxFixture::new();
     let tctx = f.tctx();
-    // i-- → { let _old = i; i = i - 1.0; _old }
+    // i-- → { let __ts_old = i; i = i - 1.0; __ts_old }
     use crate::ir::Stmt as IrStmt;
     let expr = parse_expr("i--");
 
@@ -74,7 +74,7 @@ fn test_convert_expr_postfix_decrement_returns_old_value() {
     match &result {
         Expr::Block(stmts) => {
             assert_eq!(stmts.len(), 3);
-            assert!(matches!(&stmts[2], IrStmt::TailExpr(Expr::Ident(n)) if n == "_old"));
+            assert!(matches!(&stmts[2], IrStmt::TailExpr(Expr::Ident(n)) if n == "__ts_old"));
         }
         other => panic!("expected Block for postfix i--, got: {other:?}"),
     }

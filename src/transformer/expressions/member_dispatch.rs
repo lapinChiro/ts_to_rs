@@ -41,11 +41,12 @@ use anyhow::Result;
 use swc_common::Spanned;
 use swc_ecma_ast as ast;
 
-use crate::ir::{CallTarget, Expr, MethodKind, RustType};
+use crate::ir::{BinOp, CallTarget, Expr, MethodKind, RustType, Stmt};
 use crate::registry::{MethodSignature, TypeDef};
 use crate::transformer::{Transformer, UnsupportedSyntaxError};
 
 use super::member_access::extract_non_computed_field_name;
+use super::{TS_NEW_BINDING, TS_OLD_BINDING};
 
 // =============================================================================
 // MemberKindFlags — DRY-extracted member-kind classification (Iteration v10 second-review)
@@ -488,4 +489,294 @@ fn dispatch_static_member_write(
          never returns Some(empty vec)) and MethodKind is exhaustive (Method/Getter/Setter), \
          so one of the 3 if-blocks above must fire. class={class_name}, field={field}"
     );
+}
+
+// =============================================================================
+// Update context dispatch helpers (T7、called from convert_update_expr Member arm)
+// =============================================================================
+
+/// Returns `true` if the getter's return type is numeric (`f64` or any integer
+/// `Primitive` variant), where TS `++`/`--` operators are runtime-defined and
+/// can be desugared to Rust `+ 1.0` / `- 1.0` arithmetic without semantic loss.
+///
+/// For non-numeric getter return types (`String`, `Bool`, `Vec<T>`, struct, enum,
+/// `Any`, etc.), TS `++`/`--` performs runtime `Number(value)` coercion and may
+/// yield `NaN`. Rust has no NaN coercion semantic for `String + 1.0` (E0277), so
+/// matrix cell 44 (B4 + non-numeric ++) and its `--` symmetric counterpart are
+/// reclassified as Tier 2 honest error per Rule 3 (3-3) (NA → Tier 2 reclassify
+/// because SWC parser empirical observation in
+/// `tests/swc_parser_increment_non_numeric_test.rs` accepts the syntax).
+///
+/// I-205 T7 invariant: this helper is only called from the B4 (`has_getter &&
+/// has_setter`) arm where the getter signature exists; the `Some(_)` extraction
+/// failure (= no Getter sig found) cannot occur in that path. For defensive
+/// coding it returns `false` (= treat as non-numeric, fire honest error) when
+/// the lookup unexpectedly misses, surfacing any future caller-site invariant
+/// violation as a Tier 2 honest error rather than a silent setter desugar with
+/// wrong semantic.
+fn getter_return_is_numeric(sigs: &[MethodSignature]) -> bool {
+    sigs.iter()
+        .find(|s| s.kind == MethodKind::Getter)
+        .and_then(|s| s.return_type.as_ref())
+        .map(|ty| matches!(ty, RustType::F64 | RustType::Primitive(_)))
+        .unwrap_or(false)
+}
+
+/// Builds the setter desugar block expression for an UpdateExpr (`++` / `--`)
+/// on a class member with both getter and setter (B4 instance, B8 setter +
+/// getter static).
+///
+/// Postfix (`obj.x++` / `obj.x--`、old value yielded):
+/// ```text
+/// { let __ts_old = <getter_call>; <setter_emit(__ts_old <op> 1.0)>; __ts_old }
+/// ```
+///
+/// Prefix (`++obj.x` / `--obj.x`、new value yielded):
+/// ```text
+/// { let __ts_new = <getter_call> <op> 1.0; <setter_emit(__ts_new)>; __ts_new }
+/// ```
+///
+/// `setter_emit_for_arg` is a closure that takes the setter argument
+/// (`__ts_old <op> 1.0` for postfix, or `__ts_new` for prefix) and returns the
+/// setter call IR (`Expr::MethodCall` for instance, `Expr::FnCall` for static).
+/// This abstraction shares the block shape between instance and static dispatch
+/// while keeping the call IR specific to each context.
+///
+/// Variable names use the `__ts_` prefix per [I-154 namespace reservation
+/// rule](crate::transformer::statements) so user code containing identifiers
+/// like `_old` / `_new` cannot shadow or collide with this emission. (T7
+/// extends the `__ts_` namespace from labels (I-154) to value bindings.)
+fn build_update_setter_block(
+    getter_call: Expr,
+    op: BinOp,
+    is_postfix: bool,
+    setter_emit_for_arg: impl FnOnce(Expr) -> Expr,
+) -> Expr {
+    let one = Expr::NumberLit(1.0);
+    let (binding_name, binding_init, setter_arg) = if is_postfix {
+        (
+            TS_OLD_BINDING,
+            getter_call,
+            Expr::BinaryOp {
+                left: Box::new(Expr::Ident(TS_OLD_BINDING.to_string())),
+                op,
+                right: Box::new(one),
+            },
+        )
+    } else {
+        (
+            TS_NEW_BINDING,
+            Expr::BinaryOp {
+                left: Box::new(getter_call),
+                op,
+                right: Box::new(one),
+            },
+            Expr::Ident(TS_NEW_BINDING.to_string()),
+        )
+    };
+    let setter_call = setter_emit_for_arg(setter_arg);
+    Expr::Block(vec![
+        Stmt::Let {
+            mutable: false,
+            name: binding_name.to_string(),
+            ty: None,
+            init: Some(binding_init),
+        },
+        Stmt::Expr(setter_call),
+        Stmt::TailExpr(Expr::Ident(binding_name.to_string())),
+    ])
+}
+
+/// Update context dispatch helper for instance access (`obj.x++` / `obj.x--`).
+///
+/// I-205 T7: dispatches A6 Increment/Decrement on Member target with instance
+/// receiver. Unlike [`dispatch_instance_member_write`] (which fires setter for
+/// any has_setter), update dispatch must distinguish B3 (setter only、read of
+/// write-only fails because `++/--` requires read first) from B4 (both、setter
+/// desugar with numeric type check).
+///
+/// Dispatch arms (matrix cells 42-45):
+/// - `is_inherited = true` (B7) → Tier 2 honest `"write to inherited accessor"`
+///   (cells 45-dc and `++` symmetric)
+/// - `has_getter && has_setter` (B4) with **numeric getter return type** → setter
+///   desugar block (cells 43, 45-c)
+/// - `has_getter && has_setter` (B4) with **non-numeric getter return type** →
+///   Tier 2 honest `"increment of non-numeric (String/etc.) — TS NaN coercion
+///   semantic"` for `++` / `"decrement of non-numeric (String/etc.) — TS NaN
+///   coercion semantic"` for `--` (cell 44 and `--` symmetric、Rule 3 (3-3) NA
+///   → Tier 2 reclassify)
+/// - `has_getter` only (B2) → Tier 2 honest `"write to read-only property"`
+///   (cell 45-b and `++` symmetric)
+/// - `has_setter` only (B3) → Tier 2 honest `"read of write-only property"`
+///   (B3 update with write-only fails because `++/--` reads first)
+/// - `has_method` only (B6) → Tier 2 honest `"write to method"` (cells 45-db
+///   and `++` symmetric)
+///
+/// Cells 42 (B1 field) / 45-a (B1 field --) / 45-de (B9 unknown --) do **not**
+/// reach this helper — they take the `MemberReceiverClassification::Fallback`
+/// path in [`Transformer::convert_update_expr`] which builds a direct
+/// `FieldAccess` postfix/prefix block (regression Tier 2 → Tier 1 transition).
+pub(super) fn dispatch_instance_member_update(
+    object: &Expr,
+    field: &str,
+    sigs: &[MethodSignature],
+    is_inherited: bool,
+    op: BinOp,
+    is_postfix: bool,
+    ts_obj: &ast::Expr,
+) -> Result<Expr> {
+    if is_inherited {
+        return Err(
+            UnsupportedSyntaxError::new("write to inherited accessor", ts_obj.span()).into(),
+        );
+    }
+    let kinds = MemberKindFlags::from_sigs(sigs);
+    if kinds.has_getter && kinds.has_setter {
+        // B4: setter desugar with numeric type gate
+        if !getter_return_is_numeric(sigs) {
+            return Err(
+                UnsupportedSyntaxError::new(non_numeric_update_message(op), ts_obj.span()).into(),
+            );
+        }
+        let getter_call = Expr::MethodCall {
+            object: Box::new(object.clone()),
+            method: field.to_string(),
+            args: vec![],
+        };
+        let setter_method = format!("set_{field}");
+        let object_for_setter = object.clone();
+        return Ok(build_update_setter_block(
+            getter_call,
+            op,
+            is_postfix,
+            move |arg| Expr::MethodCall {
+                object: Box::new(object_for_setter),
+                method: setter_method,
+                args: vec![arg],
+            },
+        ));
+    }
+    if kinds.has_getter {
+        // B2 getter only: write attempt fails (++/-- requires write of new value)
+        return Err(
+            UnsupportedSyntaxError::new("write to read-only property", ts_obj.span()).into(),
+        );
+    }
+    if kinds.has_setter {
+        // B3 setter only: read attempt fails (++/-- requires read first)
+        return Err(
+            UnsupportedSyntaxError::new("read of write-only property", ts_obj.span()).into(),
+        );
+    }
+    if kinds.has_method {
+        // B6 method only
+        return Err(UnsupportedSyntaxError::new("write to method", ts_obj.span()).into());
+    }
+    unreachable!(
+        "dispatch_instance_member_update: sigs is non-empty (lookup_method_sigs_in_inheritance_chain \
+         never returns Some(empty vec)) and MethodKind is exhaustive (Method/Getter/Setter), \
+         so one of the 4 if-blocks above must fire. field={field}"
+    );
+}
+
+/// Update context dispatch helper for static access (`Class.x++` / `Class.x--`).
+///
+/// I-205 T7: dispatches A6 Increment/Decrement on Member target with static
+/// (class TypeName) receiver. Symmetric to [`dispatch_instance_member_update`]
+/// with `Class::method`-form FnCall emit instead of `obj.method`-form
+/// MethodCall emit.
+///
+/// Dispatch arms (matrix cell 45-dd is primary、A6 `++` static symmetric is the
+/// `op = BinOp::Add` mirror; static B2/B3/B6/B7 are matrix cell 化なし but
+/// covered defensively per the same `dispatch_static_member_write` pattern from
+/// T6 Iteration v9 deep deep review).
+pub(super) fn dispatch_static_member_update(
+    class_name: &str,
+    field: &str,
+    sigs: &[MethodSignature],
+    is_inherited: bool,
+    op: BinOp,
+    is_postfix: bool,
+    ts_obj: &ast::Expr,
+) -> Result<Expr> {
+    if is_inherited {
+        return Err(UnsupportedSyntaxError::new(
+            "write to inherited static accessor",
+            ts_obj.span(),
+        )
+        .into());
+    }
+    let kinds = MemberKindFlags::from_sigs(sigs);
+    if kinds.has_getter && kinds.has_setter {
+        if !getter_return_is_numeric(sigs) {
+            return Err(
+                UnsupportedSyntaxError::new(non_numeric_update_message(op), ts_obj.span()).into(),
+            );
+        }
+        let getter_call = Expr::FnCall {
+            target: CallTarget::UserAssocFn {
+                ty: crate::ir::UserTypeRef::new(class_name),
+                method: field.to_string(),
+            },
+            args: vec![],
+        };
+        let class_name_for_setter = class_name.to_string();
+        let setter_method = format!("set_{field}");
+        return Ok(build_update_setter_block(
+            getter_call,
+            op,
+            is_postfix,
+            move |arg| Expr::FnCall {
+                target: CallTarget::UserAssocFn {
+                    ty: crate::ir::UserTypeRef::new(&class_name_for_setter),
+                    method: setter_method,
+                },
+                args: vec![arg],
+            },
+        ));
+    }
+    if kinds.has_getter {
+        return Err(UnsupportedSyntaxError::new(
+            "write to read-only static property",
+            ts_obj.span(),
+        )
+        .into());
+    }
+    if kinds.has_setter {
+        return Err(UnsupportedSyntaxError::new(
+            "read of write-only static property",
+            ts_obj.span(),
+        )
+        .into());
+    }
+    if kinds.has_method {
+        return Err(UnsupportedSyntaxError::new("write to static method", ts_obj.span()).into());
+    }
+    unreachable!(
+        "dispatch_static_member_update: sigs is non-empty (lookup_method_sigs_in_inheritance_chain \
+         never returns Some(empty vec)) and MethodKind is exhaustive (Method/Getter/Setter), \
+         so one of the 4 if-blocks above must fire. class={class_name}, field={field}"
+    );
+}
+
+/// Operator-specific Tier 2 honest error message for non-numeric UpdateExpr.
+///
+/// `++` (BinOp::Add) → `"increment of non-numeric (String/etc.) — TS NaN
+/// coercion semantic"` (matches cell-44-increment-string-nan.expected fixture
+/// content modulo `(Tier 2 honest error)` postfix that the e2e harness adds).
+/// `--` (BinOp::Sub) → `"decrement of non-numeric (String/etc.) — TS NaN
+/// coercion semantic"` (symmetric counterpart).
+fn non_numeric_update_message(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "increment of non-numeric (String/etc.) — TS NaN coercion semantic",
+        BinOp::Sub => "decrement of non-numeric (String/etc.) — TS NaN coercion semantic",
+        // Caller (`convert_update_expr`) only passes `BinOp::Add` (++) or
+        // `BinOp::Sub` (--). Other ops are not produced by `ast::UpdateOp`
+        // (UpdateOp = PlusPlus | MinusMinus only); `unreachable!()` codifies
+        // this invariant.
+        _ => unreachable!(
+            "non_numeric_update_message: caller must pass BinOp::Add (++) or BinOp::Sub (--), \
+             got {op:?}"
+        ),
+    }
 }

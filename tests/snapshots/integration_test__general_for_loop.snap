@@ -61,9 +61,9 @@ fn multiplicationTable(n: f64) -> f64 {
                 break;
             }
             {
-    let _old = count;
+    let __ts_old = count;
     count = count + 1.0;
-    _old
+    __ts_old
 };
             j = j + 1.0;
         }

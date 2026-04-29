@@ -115,8 +115,23 @@ impl<'a> TypeResolver<'a> {
             }
             ast::Expr::Object(obj) => self.resolve_object_expr(obj),
             ast::Expr::OptChain(opt) => self.resolve_opt_chain_expr(opt),
-            ast::Expr::Update(_) => {
-                // i++ / i-- → f64
+            ast::Expr::Update(update) => {
+                // I-205 T7 spec gap fix (Iteration v11): UpdateExpr.arg を recursively
+                // resolve して inner Member/Ident receiver の expr_type を register。
+                //
+                // Pre-fix: `_ => F64` only で arg traversal なし → `obj.x++` の receiver
+                // `obj` Ident に type 未登録 → Transformer `classify_member_receiver` の
+                // `get_expr_type(receiver)` が None を返し silent Fallback dispatch =
+                // class member setter dispatch を逃す silent semantic loss (cells 43,
+                // 45-c, 45-dd で setter desugar が発火せず Tier 2 broken state)。
+                //
+                // Pattern follows the symmetric `Unary` arm (line 98-108): recurse into
+                // arg to populate inner types, then return the op-specific result type.
+                // Effect は narrow context にも届く (= subsequent T8/T9 compound assign
+                // dispatch も同 prerequisite を共有、本 fix で structural に解消)。
+                self.resolve_expr(&update.arg);
+                // i++ / i-- → f64 (ECMAScript runtime numeric semantic、TS の `++` は
+                // number 型 only spec だが ECMA tolerant coercion で String 等は NaN 化)
                 ResolvedType::Known(RustType::F64)
             }
             ast::Expr::This(_) => {

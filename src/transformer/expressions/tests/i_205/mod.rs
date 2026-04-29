@@ -19,10 +19,14 @@
 //!   equivalence (T5 `for_write=true` skip path との token-level identical lock-in) + Static
 //!   field lookup miss + Write defensive dispatch arm tests (matrix cell 化なし、Iteration v10
 //!   second-review C1 coverage 補完)
+//! - [`update`]: T7 UpdateExpr dispatch tests (cells 42-45) — A6 Increment/Decrement Member
+//!   target で B4 setter desugar (postfix old-value / prefix new-value) + B1/B9 fallback +
+//!   non-numeric Tier 2 reclassify + B2/B3/B6/B7 Tier 2 honest error。
 //!
 //! 全 test は `Transformer::for_module(...).convert_expr(&swc_expr)` で direct invoke、IR Expr
 //! を `assert_eq!` で token-level verify。Tier 2 path は `convert_expr` の Err を
 //! `downcast::<UnsupportedSyntaxError>` で kind verify。
 
 mod read;
+mod update;
 mod write;
