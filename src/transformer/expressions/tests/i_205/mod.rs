@@ -32,6 +32,8 @@
 //! `downcast::<UnsupportedSyntaxError>` で kind verify。
 
 mod compound;
+mod logical_compound;
+mod logical_compound_strategies;
 mod read;
 mod update;
 mod write;

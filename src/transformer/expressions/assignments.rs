@@ -10,7 +10,8 @@ use crate::transformer::{Transformer, UnsupportedSyntaxError};
 
 use super::member_access::extract_non_computed_field_name;
 use super::member_dispatch::{
-    dispatch_instance_member_update, dispatch_static_member_update, MemberReceiverClassification,
+    dispatch_instance_member_update, dispatch_static_member_update, LogicalCompoundContext,
+    MemberReceiverClassification,
 };
 use super::TS_OLD_BINDING;
 
@@ -95,6 +96,34 @@ impl<'a> Transformer<'a> {
                 ) {
                     let rhs = self.convert_expr(&assign.right)?;
                     return self.dispatch_member_compound(member, op, rhs);
+                }
+            }
+        }
+
+        // I-205 T9: logical compound (`??=` / `&&=` / `||=`) × Member dispatch
+        // gate (expression context)。Static / Instance with class member dispatch
+        // (B2/B3/B4/B6/B7/B8) は `try_dispatch_member_logical_compound` 経由で
+        // setter desugar emission、Fallback (B1 field / B9 unknown / non-class
+        // receiver / static field / Computed) は `Ok(None)` 返却で既存 path に
+        // 流す (cells 36 + 41-e regression preserve)。Statement-context (`obj.x ??= d;`
+        // / `obj.x &&= v;` bare stmt) は別途 `try_convert_nullish_assign_stmt` /
+        // `try_convert_compound_logical_assign_stmt` の Member arm で同 helper を
+        // 呼ぶ、expression vs statement context は `LogicalCompoundContext` 引数で
+        // 分岐 (Expression = Block + tail = `<getter>` / Statement = Block stmts
+        // only、no tail)。
+        if matches!(
+            assign.op,
+            ast::AssignOp::NullishAssign | ast::AssignOp::AndAssign | ast::AssignOp::OrAssign
+        ) {
+            if let ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(member)) = &assign.left
+            {
+                if let Some(block) = self.try_dispatch_member_logical_compound(
+                    member,
+                    assign.op,
+                    &assign.right,
+                    LogicalCompoundContext::Expression,
+                )? {
+                    return Ok(block);
                 }
             }
         }

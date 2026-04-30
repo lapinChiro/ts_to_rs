@@ -73,11 +73,13 @@ use crate::transformer::Transformer;
 use super::member_access::extract_non_computed_field_name;
 
 mod compound;
+mod logical;
 pub(crate) mod read;
 mod shared;
 mod update;
 mod write;
 
+pub(crate) use logical::LogicalCompoundContext;
 pub(crate) use update::{dispatch_instance_member_update, dispatch_static_member_update};
 
 // =============================================================================
@@ -279,6 +281,108 @@ impl<'a> Transformer<'a> {
         }
     }
 
+    /// Tries to dispatch the LHS of a logical compound assignment (`obj.x ??= d`
+    /// / `obj.x &&= v` / `obj.x ||= v` or their static counterparts) through
+    /// the class member dispatch framework. T9 entry counterpart of
+    /// [`Self::dispatch_member_compound`] (T8) for A5 logical compound ops
+    /// (`AssignOp::NullishAssign | AndAssign | OrAssign`).
+    ///
+    /// Single source of truth for the T9 dispatch gate, called from three sites:
+    /// 1. `convert_assign_expr` (expression context、`obj.x ??= d` inside call
+    ///    arg / return value / ternary branch / etc.) → wraps the returned
+    ///    `Expr::Block` (TailExpr = post-state getter call).
+    /// 2. `try_convert_nullish_assign_stmt` (statement context、`obj.x ??= d;`
+    ///    bare stmt for `??=`) → wraps the returned `Expr::Block` in
+    ///    `Stmt::Expr(...)` (no TailExpr).
+    /// 3. `try_convert_compound_logical_assign_stmt` (statement context、
+    ///    `obj.x &&= v;` / `obj.x ||= v;` bare stmt for `&&=`/`||=`) → wraps
+    ///    the returned `Expr::Block` in `Stmt::Expr(...)`.
+    ///
+    /// Returns `Ok(Some(block))` when the receiver classifies as Static or
+    /// Instance (= class member dispatch fires). Returns `Ok(None)` when:
+    /// - `member.prop` is `Computed` (`obj[i] ??= d`、matrix scope 外、I-203
+    ///   codebase-wide AST exhaustiveness defer)
+    /// - `classify_member_receiver` returns `Fallback` (B1 field / B9 unknown
+    ///   / non-class receiver / static field) — caller falls through to
+    ///   existing `nullish_assign.rs` / `compound_logical_assign.rs` emission
+    ///   logic, preserving cells 36 + 41-e regression behavior.
+    ///
+    /// `Err(UnsupportedSyntaxError)` is returned when the LHS member type
+    /// cannot be resolved (rare; `nullish_assign.rs` / `compound_logical_assign.rs`
+    /// surface the same wording for unresolved types).
+    pub(crate) fn try_dispatch_member_logical_compound(
+        &mut self,
+        member: &ast::MemberExpr,
+        op: ast::AssignOp,
+        rhs_ast: &ast::Expr,
+        context: LogicalCompoundContext,
+    ) -> Result<Option<Expr>> {
+        // `MemberProp::Computed` (`obj[i] ??= d`) は dispatch 外。Caller-side
+        // で既存 path に流す前提で early Ok(None)。
+        if !matches!(
+            &member.prop,
+            ast::MemberProp::Ident(_) | ast::MemberProp::PrivateName(_)
+        ) {
+            return Ok(None);
+        }
+        let Some(field) = extract_non_computed_field_name(&member.prop) else {
+            // `MemberProp::Ident | PrivateName` filter passed but extraction
+            // returned None: invariant violation (extract_non_computed_field_name
+            // covers both arms). Codify as unreachable.
+            unreachable!(
+                "try_dispatch_member_logical_compound: MemberProp filter passed but \
+                 extract_non_computed_field_name returned None"
+            )
+        };
+        let classification = self.classify_member_receiver(&member.obj, &field);
+        if matches!(classification, MemberReceiverClassification::Fallback) {
+            return Ok(None);
+        }
+        // Static / Instance dispatch fires: convert rhs only (lhs_type は dispatch
+        // helper 内 sigs から extract、TypeResolver `expr_types[member_span]` への
+        // dependency を排除 = T8 second-review F-SX-1 で予測された Spec gap (= class
+        // member access for getter は registry の `lookup_field_type` で None、
+        // `expr_types` 未 populate) の self-contained 回避)。Iteration v14 deep-deep
+        // review で entry method の lhs_type lookup を完全 remove (TypeVar generic
+        // class member の expr_types 未 populate に対する resilience 確保)。
+        let rhs = self.convert_expr(rhs_ast)?;
+        match classification {
+            MemberReceiverClassification::Static {
+                class_name,
+                sigs,
+                is_inherited,
+            } => Ok(Some(logical::dispatch_static_member_logical_compound(
+                &class_name,
+                &field,
+                &sigs,
+                is_inherited,
+                op,
+                rhs,
+                self.synthetic,
+                &member.obj,
+                context,
+            )?)),
+            MemberReceiverClassification::Instance { sigs, is_inherited } => {
+                let object = self.convert_expr(&member.obj)?;
+                Ok(Some(logical::dispatch_instance_member_logical_compound(
+                    &object,
+                    &field,
+                    &sigs,
+                    is_inherited,
+                    op,
+                    rhs,
+                    self.synthetic,
+                    &member.obj,
+                    context,
+                )?))
+            }
+            MemberReceiverClassification::Fallback => unreachable!(
+                "try_dispatch_member_logical_compound: Fallback classification was \
+                 early-returned above; this match arm cannot fire"
+            ),
+        }
+    }
+
     /// Dispatches the LHS of an arithmetic / bitwise compound assignment
     /// `obj.x <op>= rhs` (or `Class.x <op>= rhs`) according to the class member
     /// shape registered for the receiver type. T8 entry counterpart of
@@ -288,12 +392,13 @@ impl<'a> Transformer<'a> {
     /// `ZeroFillRShiftAssign`、collectively 11 ops mapped to `BinOp` via
     /// caller-side `arithmetic_compound_op_to_binop`).
     ///
-    /// A5 logical compound (`??=` / `&&=` / `||=`) is handled by separate paths
-    /// in [`Self::convert_assign_expr`] (existing `nullish_assign.rs` /
-    /// `compound_logical_assign.rs` helper integration、T9 で setter dispatch
-    /// integration を追加予定). Computed properties (`obj[i] += v`) are gated
-    /// out by the caller (Computed `MemberProp::Computed` path falls through to
-    /// the existing `convert_member_expr_for_write` `Expr::Index` route).
+    /// A5 logical compound (`??=` / `&&=` / `||=`) is handled by
+    /// [`Self::try_dispatch_member_logical_compound`] (T9) — symmetric counterpart
+    /// for class member dispatch、and falls through to existing `nullish_assign.rs`
+    /// / `compound_logical_assign.rs` helpers on `Fallback`. Computed properties
+    /// (`obj[i] += v`) are gated out by the caller (Computed `MemberProp::Computed`
+    /// path falls through to the existing `convert_member_expr_for_write`
+    /// `Expr::Index` route).
     ///
     /// Dispatch arms (Spec → Impl Mapping、`backlog/I-205-...md`
     /// `## Spec → Impl Dispatch Arm Mapping` の `convert_assign_expr compound

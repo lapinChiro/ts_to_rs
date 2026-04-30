@@ -38,6 +38,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{BuiltinVariant, CallTarget, Expr, RustType, Stmt};
 use crate::pipeline::synthetic_registry::SyntheticTypeRegistry;
+use crate::transformer::expressions::member_dispatch::LogicalCompoundContext;
 use crate::transformer::helpers::truthy::{
     falsy_predicate_for_expr, is_always_truthy_type, truthy_predicate_for_expr, TempBinder,
 };
@@ -68,6 +69,24 @@ impl<'a> Transformer<'a> {
             ast::AssignOp::AndAssign | ast::AssignOp::OrAssign
         ) {
             return Ok(None);
+        }
+        // I-205 T9: Member target × class member dispatch (Static / Instance with
+        // B2/B3/B4/B6/B7/B8) → conditional setter desugar emission via
+        // `try_dispatch_member_logical_compound`。Static / Instance with class
+        // member dispatch fires before reaching the existing I-161 desugar path
+        // below, so the per-LHS-type predicate dispatch (Bool / F64 / String /
+        // Option / Named / etc.) is **only** taken on Fallback (B1 field / B9
+        // unknown / non-class receiver / static field / Computed / Ident) which
+        // preserves cell 41-e regression behavior + Ident path (out of T9 scope).
+        if let ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(member)) = &assign.left {
+            if let Some(block) = self.try_dispatch_member_logical_compound(
+                member,
+                assign.op,
+                &assign.right,
+                LogicalCompoundContext::Statement,
+            )? {
+                return Ok(Some(vec![Stmt::Expr(block)]));
+            }
         }
         let (target, lhs_type) = self.resolve_compound_logical_assign_target(assign)?;
         let right = self.convert_expr(&assign.right)?;

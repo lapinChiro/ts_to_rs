@@ -223,9 +223,17 @@ primary axes A × B、secondary axis D (`.clone()` insertion 用) で全 cell �
 | 35-e | A4 Bitwise compound (各 operator) | B9 unknown | * | `obj.x OP= v;` (current behavior、fallback) | 同 | ✓ | regression lock-in |
 | 36 | A5 Logical compound (`??=`) | B1 field | D6 Option<T> | `obj.x.get_or_insert_with(\|\| d);` (既存 nullish_assign helper、I-142 pattern) | 同 | ✓ | regression lock-in |
 | 37 | A5 Logical compound (`??=`) | B2 getter only | * | Tier 2 honest error (write to read-only) | E0609 | ✗ | 本 PRD |
-| 38 | A5 Logical compound (`??=`) | B4 both | D6 Option<T> | desugar `if obj.x().is_none() { obj.set_x(d); }` (statement context) or `obj.x().or_else(\|\| { obj.set_x(d); Some(d) })` (expression context) | E0609 | ✗ | 本 PRD (既存 nullish_assign helper integration) |
+| 38 | A5 Logical compound (`??=`) | B4 both | D6 Option<T> | desugar `if obj.x().is_none() { obj.set_x(d); }` (statement context) or `obj.x().or_else(\|\| { obj.set_x(d); Some(d) })` (expression context、Iteration v13 で `{ if obj.x().is_none() { obj.set_x(Some(d)); }; obj.x() }` に revise = SE-having receiver の borrow checker E0502/E0506 回避) | E0609 | ✗ | 本 PRD (既存 nullish_assign helper integration) |
+| 38-identity | A5 Logical compound (`??=`) | B4 both | D1-D5 / D7-D15 (non-Option non-Any、cell 38 と orthogonality-equivalent inheritance per Rule 1 (1-4)、`pick_strategy` `Identity` strategy = TS dead code semantic) | **Tier 1 Identity emission** (Iteration v14 deep-deep review F-L4-1 source、cohesive with existing `nullish_assign.rs::try_convert_nullish_assign_stmt` Ident-target Identity emission): SE-free statement = empty Block / SE-having statement = `{ <obj>; }` evaluate-discard / SE-free expression = `<obj>.x()` direct getter call / SE-having expression = `{ let __ts_recv = <obj>; __ts_recv.x() }` IIFE evaluate-once + yield | Tier 2 broken (pre-T9: existing `nullish_assign.rs` Member arm が `convert_member_expr_for_write` 経由 FieldAccess emit、class with getter のみ field 不在で E0609) | ✗ | **本 PRD (Tier 2 broken → Tier 1 Identity transition、Iteration v14 deep-deep)** |
+| 38-blocked | A5 Logical compound (`??=`) | B4 both | Any (`pick_strategy` `BlockedByI050` strategy) | **Tier 2 honest error**: `UnsupportedSyntaxError::new("nullish-assign on Any class member (I-050 Any coercion umbrella)", span)`。wording consistency with existing `nullish_assign.rs::try_convert_nullish_assign_stmt` Ident-target `BlockedByI050` strategy。subsequent I-050 umbrella PRD で `serde_json::Value`-aware runtime null check + RHS coercion を提供、本 PRD scope では Tier 2 honest error 維持。 | E0599 (`is_none` not found on `serde_json::Value`) または silent type widening | ✗ | 本 PRD (Iteration v14 deep-deep) |
 | 39 | A5 Logical compound (`&&=`) | B4 both | D2 bool | desugar `if obj.x() { obj.set_x(v); }` | E0609 | ✗ | 本 PRD |
+| 39-other | A5 Logical compound (`&&=`) | B4 both | D1 F64 / D3 String / D4 Option (predicate-supported per truthy.rs Matrix A.12、cell 39 と orthogonality-equivalent inheritance per Rule 1 (1-4)) | **Predicate-based dispatch via existing `truthy_predicate_for_expr`** per-type (F64 truthy = `<getter> != 0.0 && !<getter>.is_nan()` with non-pure operand tmp-binding Block / String truthy = `!<getter>.is_empty()` / Option truthy = `<getter>.is_some_and(\|v\| <truthy(*v)>)` (Copy inner) or `<getter>.as_ref().is_some_and(\|v\| <truthy(v)>)` (!Copy inner))。setter 引数 = wrap_setter_value(rhs, lhs_type) (Option<T> なら Some-wrap、他は raw)。 | E0609 | ✗ | 本 PRD (Iteration v14 deep-deep、structural lock-in via tests) |
+| 39-truthy | A5 Logical compound (`&&=`) | B4 both | always-truthy (Vec / Fn / StdCollection / DynTrait / Ref / Tuple / Named non-union per `is_always_truthy_type`) | **Tier 1 const-fold = unconditional setter call** (Iteration v14 deep-deep review F-L4-2 source、cohesive with existing `compound_logical_assign.rs::const_fold_always_truthy_stmts`): SE-free statement = `<setter>(rhs);` (no `if` predicate、no eval-Block 余分 emission) / SE-having statement = `{ let __ts_recv = <obj>; __ts_recv.set_x(rhs); }` IIFE / Expression context = `<setter>(rhs); <getter>` Block + tail (post-state value yield)。 | Tier 2 broken (pre-T9: FieldAccess emit) または Tier 1 functional with eval-Block predicate (post-Iteration v13: 余分 emission) | ✗ | **本 PRD (Tier 1 const-fold ideal、Iteration v14 deep-deep)** |
+| 39-blocked | A5 Logical compound (`&&=`) | B4 both | Any / TypeVar (truthy/falsy predicate unavailable per truthy.rs Matrix A.12) | **Tier 2 honest error**: `UnsupportedSyntaxError::new("compound logical assign on Any/TypeVar class member (I-050 umbrella / generic bounds)", span)`。wording consistency with existing `compound_logical_assign.rs::desugar_compound_logical_assign_stmts` blocked path。 | silent (truthy_predicate_for_expr returned None で fallback path) または broken Rust output | ✗ | 本 PRD (Iteration v14 deep-deep) |
 | 40 | A5 Logical compound (`\|\|=`) | B4 both | D2 bool | desugar `if !obj.x() { obj.set_x(v); }` | E0609 | ✗ | 本 PRD |
+| 40-other | A5 Logical compound (`\|\|=`) | B4 both | D1 F64 / D3 String / D4 Option (predicate-supported、cell 40 と orthogonality-equivalent inheritance per Rule 1 (1-4)) | **Predicate-based dispatch via existing `falsy_predicate_for_expr`** per-type (De Morgan inverse of truthy)。setter 引数 wrap = cell 39-other と symmetric。 | E0609 | ✗ | 本 PRD (Iteration v14 deep-deep) |
+| 40-truthy | A5 Logical compound (`\|\|=`) | B4 both | always-truthy | **Tier 1 const-fold = no-op** (Iteration v14 deep-deep、`||=` always-truthy LHS は dead = setter never called): SE-free statement = empty Block (no-op) / SE-having statement = `{ <obj>; }` evaluate-discard / SE-free expression = `<obj>.x()` getter yield / SE-having expression = `{ let __ts_recv = <obj>; __ts_recv.x() }` IIFE。 | Tier 2 broken (pre-T9) または Tier 1 functional with eval-Block predicate (post-Iteration v13) | ✗ | **本 PRD (Tier 1 const-fold ideal、Iteration v14 deep-deep)** |
+| 40-blocked | A5 Logical compound (`\|\|=`) | B4 both | Any / TypeVar | Tier 2 honest error (cell 39-blocked と op-axis orthogonality-equivalent dispatch、wording 同一) | silent または broken Rust output | ✗ | 本 PRD (Iteration v14 deep-deep) |
 | 41-a | A5 Logical compound (`??=`/`&&=`/`\|\|=`) | B5 AutoAccessor | * | logical short-circuit desugar (PRD 2.8 後 leverage) | Tier 2 honest error (PRD 2.7) | NA | 別 PRD (PRD 2.8) |
 | 41-b | A5 Logical compound (各 operator) | B6 regular method | * | Tier 2 honest error (cell 25 と同 dispatch、logical operator 非依存) | E0609 | ✗ | 本 PRD (Tier 2 honest error reclassify) |
 | 41-c | A5 Logical compound (各 operator) | B7 inherited setter | * | Tier 2 honest error (cell 26 と同 dispatch、logical operator 非依存) | E0609 | △ | 本 PRD (Tier 2 honest error reclassify) |
@@ -2186,10 +2194,19 @@ Stage 2 で実装する `src/` 修正 task。**Spec Stage Tasks (TS-0〜TS-5) �
 - **Completion criteria**: cells 20-29 + 30-35 + 35-* + 41-* unit test green、INV-3 1-evaluate compliance verify (side-effect receiver で receiver 1 回 evaluate 確認)、T7 dispatch helpers の INV-3 back-port 完了 (= T7 latent gap structural 解消)
 - **Depends on**: T1, T6, T7 (= T7 で確立した dispatch_instance/static_member_update helper 構造を leverage、INV-3 back-port も T7 helpers 含む)
 
-### T9: Logical compound (`??= &&= \|\|=`) setter desugar (既存 nullish_assign helper integration)
+### T9: Logical compound (`??= &&= \|\|=`) setter desugar (既存 nullish_assign helper integration) [完了 2026-04-29]
 
-- **Work**: `src/transformer/statements/nullish_assign.rs` (and `&&=`, `\|\|=` 該当) を setter dispatch と integrate
-- **Completion criteria**: cell 36-41 unit test green
+- **Status**: 完了 (Iteration v13、2026-04-29)。新規 `src/transformer/expressions/member_dispatch/logical.rs` (442 行、T8 compound と symmetric) + `Transformer::try_dispatch_member_logical_compound` entry method (= 3 sites: `convert_assign_expr` expression-context gate / `try_convert_nullish_assign_stmt` Member arm / `try_convert_compound_logical_assign_stmt` Member arm) で `??=` / `&&=` / `||=` × Member × non-Computed × Static/Instance class member dispatch を新設。Fallback (B1 field / B9 unknown / non-class receiver / static field / Computed) は `Ok(None)` 経由で既存 `nullish_assign.rs` / `compound_logical_assign.rs` emission logic に流れる (cells 36 + 41-e regression preserve)。
+- **Production code**: `dispatch_instance_member_logical_compound` + `dispatch_static_member_logical_compound` 2 helpers (B4 conditional setter desugar / B7 inherited Tier 2 / B2 read-only / B3 read-of-write-only / B6 method Tier 2 + Static defensive arms)、`extract_getter_return_type` (sigs から Getter return_type 抽出、TypeResolver `expr_types[member_span]` 不在 = T8 second-review F-SX-1 で予測された Spec gap への self-contained 回避)、`build_logical_compound_predicate` (op-specific predicate dispatch: `??=` → `<getter>.is_none()` (lhs_type = Option<T> 必須 gate) / `&&=` → `truthy_predicate_for_expr` 経由 / `||=` → `falsy_predicate_for_expr` 経由)、`wrap_setter_value` (LHS = Option<T> なら `Some(rhs)` wrap、cell 38 setter argument)、`assemble_block` (Statement / Expression context 共通 Block 構築 + tail expr 有無 gate)、`LogicalCompoundContext` enum (Statement / Expression 2 variants)。
+- **INV-3 1-evaluate compliance**: SE-having receiver (`getInstance().value ??= 42` 等) は IIFE form `{ let mut __ts_recv = <obj>; if __ts_recv.value().is_none() { __ts_recv.set_value(Some(42)); }; <tail> }` で receiver 1-evaluate 保証 (T7/T8 IIFE pattern を `is_side_effect_free` / `TS_RECV_BINDING` 経由で reuse)。Static dispatch は class TypeName receiver で side-effect なし → IIFE wrap 不要。
+- **Spec gap fix (Iteration v13、`/check_job` Layer 3 finding)**: matrix cells 39/40 spec D=bool LHS のみ enumerate、他 D variants (F64/String/Option<T>) の `&&=`/`||=` × B4 dispatch は existing `truthy_predicate_for_expr` / `falsy_predicate_for_expr` per-type 経由で transitively 動作するが matrix に明記なし → unit test 3 件 (`test_lhs_type_f64_and_assign_emits_block_with_predicate_dispatch` / `test_lhs_type_string_or_assign_emits_block_with_is_empty_predicate` / `test_lhs_type_option_and_assign_emits_some_wrap_setter_arg`) で structural lock-in 適用。
+- **Implementation gap fix (Iteration v13、`/check_job` Layer 4 finding)**: ??= × non-Option LHS (= getter return type が F64/String/Bool/Named 等) で my dispatch が `<getter>.is_none()` を non-Option Rust type に対し emit → E0599 broken Rust output (silent broken) → `build_logical_compound_predicate` の `NullishAssign` arm に Option<T> gate を追加し、non-Option LHS は Tier 2 honest error reclassify (= "nullish-assign on non-Option class member (Identity strategy out of T9 scope)")。pre-T9 generic "nullish-assign on unresolved member type" wording より specific、subsequent PRD で Identity strategy emission 拡張可能。
+- **Unit test 22 件**: cells 36 (B1 field × ??= × Option<T> Fallback regression preserve、`Deref(MethodCall { get_or_insert_with })`) + 37 (B2 getter only ??=) + 38 (B4 ??= × Option<T>、expression + statement 2 contexts) + 39 (B4 &&= × bool) + 40 (B4 ||= × bool) + B3 setter only ??= + 41-b (B6 method) + 41-c (B7 inherited) + 41-d (B8 static ??=、expression + statement 2 contexts) + Static defensive 4 件 (B2/B3/B6/B7 static) + 3-op orthogonality merge mapping 2 件 (&&= truthy = identity / ||= falsy = `!operand` predicate shape) + INV-3 SE-having receiver IIFE form lock-in + LHS type orthogonality 3 件 (F64/String/Option<T>) + non-Option ??= Tier 2 honest error gate (Iteration v13 fix lock-in)。
+- **Pre/post matrix**: Fix (silent Tier 2 → Tier 1) cells 38/39/40/41-d、Reclassify (silent → Tier 2 honest) cells 37/41-b/41-c + Static defensive arms、Preserve cells 36/41-e (existing fallback path)、**No regression**。
+- **Final quality**: cargo test --lib 3296 pass (3274 baseline + 22 T9) / e2e 159 pass + 70 ignored / compile_test 3 pass / integration 122 pass / clippy 0 warning / fmt 0 diff / check-file-lines OK (logical.rs 442 行 / logical_compound.rs ~813 行、両者 < 1000 threshold) / Hono Tier-transition compliance = **Preservation** (clean 111 / errors 63 = T8 baseline 同一、no new compile errors、`prd-completion.md` broken-fix PRD allowed pattern: Hono が external setter dispatch on class instances を主要使用していないため expected)。
+- **Defect Classification (Iteration v13 final)**: Spec gap 1 (= cells 39/40 LHS type variants matrix gap、本 T9 内 lock-in test 3 件で structural verify、matrix doc 明示 revision は subsequent PRD doc iteration scope) / Implementation gap 1 (= ??= × non-Option LHS broken Rust emission、本 T9 内 Tier 2 honest error gate で fix) / Review insight 2 (= [I-216 等] setter accept type asymmetry vs getter return type pre-existing pattern T6 でも同 issue defer / TypeResolver `resolve_member_type` Spec gap = getter access Member exprs に Unknown 返却、T8 second-review F-SX-1 で予測済、subsequent PRD で TypeResolver-level structural fix 候補)。
+- **Work**: `src/transformer/expressions/member_dispatch/logical.rs` (新規、442 行) + `Transformer::try_dispatch_member_logical_compound` entry method を mod.rs に追加 + `convert_assign_expr` / `try_convert_nullish_assign_stmt` / `try_convert_compound_logical_assign_stmt` の 3 sites に gate 追加。
+- **Completion criteria**: cell 36-41 unit test green ✓ + LHS type orthogonality lock-in ✓ + non-Option ??= Tier 2 honest gate ✓ + INV-3 SE-having IIFE form lock-in ✓ + Hono Preservation ✓
 - **Depends on**: T1, T8
 
 ### T10: Inside-class `this.x` dispatch (P1 TC39 faithful)
@@ -2493,7 +2510,108 @@ INV-1〜INV-6 各 invariant の verification method (8-c) を **concrete test fu
 
 ## Spec Revision Log
 
-(Implementation stage で発見された Spec gap がここに記録される。Discovery 時点では空。)
+### Iteration v14 (2026-04-30、T9 deep-deep `/check_job` 4-layer review)
+
+T9 commit 後の deep-deep `/check_job` 4-layer review で発見された Spec gap + framework
+失敗 signal の self-applied integration record:
+
+#### Spec gap 1: matrix cells 39/40 D dimension orthogonality 不足 (Layer 3 finding)
+
+- **発見**: cells 39/40 spec `D2 bool` LHS のみ enumerate、他 D variants
+  (D1 F64 / D3 String / D6 Option<T> / etc.) for `&&=`/`||=` × B4 dispatch が
+  matrix に明示されていない。Implementation は existing
+  `truthy_predicate_for_expr` / `falsy_predicate_for_expr` per-type 経由で
+  transitively 動作するが、Rule 10 (Cross-axis matrix completeness) compliance 観点
+  で D dimension 完全 enumerate が必要。
+- **対応**: structural lock-in tests (F64 / String / Option<T>) を `logical_compound.rs`
+  に追加完了 (Iteration v13)、本 deep-deep review で本質的 verify 拡張
+  (`logical_compound_strategies.rs` 内 const-fold for always-truthy LHS + Identity
+  emission for non-Option non-Any LHS の test 追加)。
+- **Matrix doc revision (subsequent iteration)**: cells 39/40 を orthogonality-equivalent
+  merge form に書き換え、`Cells 39-* (D-axis variants of cells 39/40):
+  orthogonality-equivalent through truthy_predicate_for_expr per-type dispatch +
+  is_always_truthy_type const-fold + Any/TypeVar I-050 gate` の sub-table を追加する
+  scope は subsequent T15 (`/check_job` 4-layer review final) で実施候補。
+
+#### Spec gap 2: Cell 38 expression context Block-tail returns Option<T> (Layer 4 finding)
+
+- **発見**: cell 38 expression context emission の tail `<getter>` returns Option<T>、
+  TS `??=` semantic は narrowing-after-??= で T (= unwrapped) を yield するが、
+  本実装は Option<T> tail で divergent。ユーザー code `let z: number = c.value ??= 42;`
+  は Rust 上 type mismatch (`expected f64, found Option<f64>`) で Tier 2 compile error
+  surface (silent semantic change なし)。
+- **マトリックス整合**: 既存 matrix cell 38 ideal output が `obj.x().or_else(|| { obj.set_x(d);
+  Some(d) })` (Option<T> 返却) と記載されているため、本実装の Option<T> tail は
+  matrix-acknowledged divergence。
+- **将来対応 (subsequent PRD)**: TS narrowing-after-??= semantic を Rust で再現する
+  emission 拡張は I-NNN (新規 TODO 起票候補、narrowing-aware class member ??= expression
+  context) で取り扱う。Tier 1 真の理想化候補だが、現 T9 scope では Option<T> tail
+  emission を採用 (TS narrowing は class member 越境で divergent な complex case、
+  ownership / mut borrow constraints が non-trivial)。
+
+#### Implementation gap 1: ??= × non-Option non-Any LHS broken Rust emission (Layer 4 finding)
+
+- **発見**: 初期 T9 実装で `??=` × class member × non-Option non-Any LHS
+  (e.g., `c.value ??= 42` where `c.value: number`) は predicate `<getter>.is_none()`
+  を non-Option Rust type に対し emit → E0599 broken Rust output (silent broken Rust)。
+- **対応**: `build_logical_compound_predicate` の `NullishAssign` arm に Option<T> gate を
+  追加 (Iteration v13 = Tier 2 honest error "Identity strategy out of T9 scope"、
+  generic wording)。続いて Iteration v14 deep-deep review で `pick_strategy` 統合
+  (= 既存 `nullish_assign.rs::try_convert_nullish_assign_stmt` の Ident-target
+  emission logic と cohesive)、3-way dispatch 実装:
+    - `ShadowLet` (Option<T>): conditional setter desugar (cells 38、既存)
+    - `Identity` (non-Option non-Any): Tier 1 ideal Identity emission (no setter call、
+      yield current getter for expression context、empty Block / evaluate-discard for
+      statement context、INV-3 IIFE for SE-having receiver)
+    - `BlockedByI050` (Any): Tier 2 honest error `"nullish-assign on Any class member
+      (I-050 Any coercion umbrella)"` (consistent with existing Ident-target wording)
+- **Tier transition**: pre-T9 = Tier 2 broken (FieldAccess emission errors) →
+  Iteration v13 = Tier 2 honest error → Iteration v14 = **Tier 1 Identity emission**
+  (本 PRD scope 内で本質的解決完成)。
+
+#### Implementation gap 2: `&&=`/`||=` × Any/TypeVar wording inconsistency (Layer 1 finding)
+
+- **発見**: 初期 T9 実装で `&&=` / `||=` × Any/TypeVar LHS は
+  `truthy_predicate_for_expr` / `falsy_predicate_for_expr` が None を返却 → my T9 が
+  generic wording `"logical compound assign on unsupported lhs type (truthy/falsy
+  predicate unavailable)"` を emit。既存 `compound_logical_assign.rs::desugar_compound_logical_assign_stmts`
+  の Any/TypeVar gate wording (`"compound logical assign on Any/TypeVar (I-050 umbrella
+  / generic bounds)"`) と inconsistent。
+- **対応**: Iteration v14 deep-deep review で `dispatch_b4_strategy` の `&&=`/`||=` arm に
+  pre-check Any/TypeVar gate 追加、specific I-050 umbrella / generic bounds wording emit
+  (`"compound logical assign on Any/TypeVar class member (I-050 umbrella / generic
+  bounds)"`)。
+
+#### Implementation gap 3: `&&=`/`||=` × always-truthy LHS suboptimal predicate Block (Layer 4 finding)
+
+- **発見**: 初期 T9 実装で `&&=` / `||=` × always-truthy LHS (Vec / Fn / StdCollection /
+  DynTrait / Ref / Tuple / Named non-union) は existing `truthy_predicate_for_expr` 経由
+  で `Expr::Block { let __ts_eval0 = <getter>; true }` を予測 emit (= functional Tier 1
+  だが、`obj.set_x(rhs);` 直接 emit する const-fold より suboptimal)。
+- **対応**: Iteration v14 deep-deep review で `dispatch_b4_strategy` の `&&=`/`||=` arm に
+  `is_always_truthy_type` 経由 const-fold 追加、cohesive with existing
+  `compound_logical_assign.rs::const_fold_always_truthy_stmts`:
+    - `&&=` always-truthy: unconditional setter call `<setter>(rhs);` (statement) +
+      INV-3 IIFE wrap for SE-having
+    - `||=` always-truthy: no-op (statement) / getter-yield (expression) + INV-3 IIFE
+- **Tier transition**: Iteration v13 = Tier 1 functional (eval-Block predicate) →
+  Iteration v14 = **Tier 1 ideal const-fold** (Rust output 最適化、unused variable
+  warning 排除)。
+
+#### Framework 改善 candidate (本 PRD scope 外、後続 framework iteration 候補)
+
+1. **Rule 10 default check axis**: cross-axis matrix completeness (Layer 3) で
+   "TypeResolver visit coverage of operand-context expressions" を default check axis
+   として正式昇格 (Iteration v11/v12/v13 連続 3 度発生 = pattern recognition 確立、
+   Iteration v14 で確認済)。`spec-stage-adversarial-checklist.md` Rule 10 axis
+   enumeration default list に追加候補。
+2. **Rule 9 (a) symmetric counterpart helper test contracts**: `dispatch_b4_strategy`
+   shared helper (= ReceiverCalls struct + emit_* 4 sub-helpers) は instance/static 両 dispatch で
+   reused、symmetric test contracts の framework-level lock-in が今後の subsequent
+   T-* で類似 helper 再導入時に reusability 高めるため `Rule 9 (a) helper test
+   contracts` の sub-rule 候補。
+
+---
 
 ---
 

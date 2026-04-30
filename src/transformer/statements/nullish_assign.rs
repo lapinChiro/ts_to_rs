@@ -42,6 +42,7 @@ use swc_ecma_ast as ast;
 
 use crate::ir::{Expr, RustType, Stmt};
 use crate::pipeline::narrowing_analyzer::EmissionHint;
+use crate::transformer::expressions::member_dispatch::LogicalCompoundContext;
 use crate::transformer::{
     build_option_get_or_insert_with, build_option_unwrap_with_default, Transformer,
     UnsupportedSyntaxError,
@@ -190,6 +191,23 @@ impl<'a> Transformer<'a> {
                 Ok(Some(stmts))
             }
             ast::AssignTarget::Simple(ast::SimpleAssignTarget::Member(member)) => {
+                // I-205 T9: Member target × class member dispatch (Static / Instance
+                // with B2/B3/B4/B6/B7/B8) → conditional setter desugar emission via
+                // `try_dispatch_member_logical_compound`。Static / Instance with
+                // class member dispatch fires before reaching `pick_strategy` below,
+                // so the I-142 Option<T> ShadowLet path is **only** taken on Fallback
+                // (B1 field / B9 unknown / non-class receiver / static field /
+                // Computed) which preserves cell 36 regression behavior.
+                if let Some(block) = self.try_dispatch_member_logical_compound(
+                    member,
+                    ast::AssignOp::NullishAssign,
+                    &assign.right,
+                    LogicalCompoundContext::Statement,
+                )? {
+                    return Ok(Some(vec![Stmt::Expr(block)]));
+                }
+                // Fallback: existing I-142-b/c path (FieldAccess / Index LHS、cells
+                // 36 + 41-e regression preserve)。
                 // I-142-b/c: FieldAccess / Index LHS.
                 // Resolve field type via TypeResolver (recorded at member span).
                 let member_expr = ast::Expr::Member(member.clone());
