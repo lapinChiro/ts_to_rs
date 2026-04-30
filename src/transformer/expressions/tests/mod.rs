@@ -147,6 +147,42 @@ fn extract_fn_body_return_expr(
     }
 }
 
+/// Extract an expression statement from a class method body.
+///
+/// `class_index` selects which class declaration in the module, `member_index` selects
+/// which class member (method) and `stmt_index` selects which statement in the method body.
+/// The selected class member must be a `ClassMember::Method` and the statement must be an
+/// expression statement.
+///
+/// I-205 T10: Used to verify internal `this.x` dispatch from class method bodies (E2 context、
+/// `cells 60/61/63/64` Block Mapping)、INV-2 (External (E1) と internal (E2 this) dispatch
+/// path symmetry) の internal counterpart の direct probe。
+fn extract_class_method_body_expr_stmt(
+    module: &ast::Module,
+    class_index: usize,
+    member_index: usize,
+    stmt_index: usize,
+) -> ast::Expr {
+    let class_decl = match &module.body[class_index] {
+        ModuleItem::Stmt(Stmt::Decl(Decl::Class(c))) => c,
+        _ => panic!("expected class declaration at module index {class_index}"),
+    };
+    let method = match &class_decl.class.body[member_index] {
+        ast::ClassMember::Method(m) => m,
+        other => panic!(
+            "expected ClassMember::Method at class member index {member_index}, got: {other:?}"
+        ),
+    };
+    let body = method.function.body.as_ref().expect("method has no body");
+    match &body.stmts[stmt_index] {
+        ast::Stmt::Expr(expr_stmt) => *expr_stmt.expr.clone(),
+        other => panic!(
+            "expected expression statement at stmt index {stmt_index} of class method body, \
+             got: {other:?}"
+        ),
+    }
+}
+
 /// Register a struct with the given name and `f64` fields.
 fn register_f64_struct(reg: &mut TypeRegistry, name: &str, fields: &[&str]) {
     reg.register(

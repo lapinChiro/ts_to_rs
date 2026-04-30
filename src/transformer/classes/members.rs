@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use super::helpers::{body_has_self_assignment, resolve_member_visibility};
+use super::helpers::{body_requires_mut_self_borrow, resolve_member_visibility};
 use crate::ir::{
     sanitize_field_name, AssocConst, Expr, Method, Param, RustType, Stmt, StructField, Visibility,
 };
@@ -334,7 +334,7 @@ impl<'a> Transformer<'a> {
         };
 
         let body_stmts = body.as_deref().unwrap_or(&[]);
-        let needs_mut = is_setter || body_has_self_assignment(body_stmts);
+        let needs_mut = is_setter || body_requires_mut_self_borrow(body_stmts);
 
         Ok(Method {
             vis,

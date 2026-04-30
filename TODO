@@ -1296,6 +1296,141 @@ block しない** latent imprecision として TODO 化する。
 
   - 🔗 PRD I-205 (T8 second-review 由来、TypeResolver compound assign coverage の receiver 軸 fix の field 軸 counterpart)、I-175 (Compound ops coercion gap、historical no-op behavior preserve の broader architectural concern、本 entry と peer)
 
+- **[I-219]** **TypeResolver `resolve_member_type` returns Unknown for class member getter access — Spec gap (PRD I-205 T8 second-review F-SX-1 で予測、T9 Iteration v14 deep-deep review で再確認、user 確定 2026-04-30)** [**L3** (architectural concern: TypeResolver type tracking completeness for class member access via getter)] — `src/pipeline/type_resolver/expressions/member.rs::resolve_member_type` は registry の `lookup_field_type` 経由で fields のみ check、class methods (Getter/Setter) は skip → `c.value` の expr_types[member_span] は Unknown。
+
+  **直接症状 (現時点 self-contained 回避済)**: `??=`/`&&=`/`||=` × class member の RHS expected_type propagation が動作せず、TypeResolver が rhs を inner T で coerce できない (= silent type widening risk for unusual rhs types)。T9 では sigs から Getter return type を直接抽出する self-contained 回避を採用 (TypeResolver 拡張は scope 外)。
+
+  **Trace**:
+  - **コード**: `src/pipeline/type_resolver/expressions/member.rs::resolve_member_type` の field-only lookup path。class registry の methods (Getter/Setter sigs) を query しない。
+  - **dependency**: T10 (this.x dispatch) でも同 issue が internal context で発生する想定 (= `this.x` の expr_type が Unknown、T10 dispatch では sigs-based extraction で同 self-contained 回避を継続)。
+
+  **影響範囲**:
+  - `src/pipeline/type_resolver/expressions/member.rs::resolve_member_type` (~30 LOC、fields lookup miss 後 methods registry を check、Getter sig の return_type を type-of-member-access として返却)
+  - Read context (`resolve_member_expr`) + assign context (`resolve_assign_expr` is_propagating_op block) 両 path で benefit
+
+  **Resolution direction**:
+  - Fix 1 (本質解決): `resolve_member_type` で fields lookup miss 後 methods registry を check、Getter sig の return_type を type-of-member-access として返却。Read context + Write context (= LHS side) 両 path で benefit。
+  - **Caveat**: 非対称 setter (= `set value(v: T)` accepts T but `get value(): Option<T>` returns Option<T>) で Read context type tracking と Write context expected propagation が divergent、要 separate treatment (= `resolve_member_type_for_write` 別 helper 候補、I-220 と cohesive batch)。
+
+  **Resolution target**: 別 PRD で取り扱う。本 T9 / T10 では sigs-based extraction で代替済、I-220 (Setter accept type asymmetry) と cohesive batch で TypeResolver-level structural fix が ideal。
+
+  **発見経緯**: PRD I-205 T8 Iteration v12 second-review (`/check_job` 2026-04-29) F-SX-1 で予測、T9 Iteration v14 deep-deep review (2026-04-30) で実装 path の self-contained 回避必要性として再確認 → 本 entry 起票。
+
+  - 🔗 PRD I-205 (T8 / T9 由来、self-contained 回避済)、I-220 (Setter accept type asymmetry、本 entry の Write context counterpart、cohesive batch 候補)、I-218 (TypeResolver compound assign Member field type completeness、本 entry の compound op variant)
+
+- **[I-220]** **Setter accept type asymmetry vs getter return type — pre-existing pattern T6/T7/T8/T9 共通 latent gap (PRD I-205 T9 Iteration v14 deep-deep review 由来、user 確定 2026-04-30)** [**L4** (Localized、TS asymmetric setter syntax は corner case、Hono reachability 低想定)] — `set value(v: T)` accepts T while `get value(): Option<T>` returns Option<T> の asymmetric class definition で、T9 `wrap_setter_value` は lhs_type = getter return type を見て Some-wrap、setter accept type と一致しない → Some(rhs) 渡しが setter expecting T に対し type mismatch (Rust E0308 catch)。
+
+  **直接症状**: T6 `dispatch_member_write` も raw value passing で同類 issue。Rust compile error (E0308) で surface する Tier 2 等価、silent semantic change なし。pre-existing latent gap (T6/T7/T8/T9 全 dispatch helpers で symmetric)。
+
+  **Trace**:
+  - **コード**: T6 `src/transformer/expressions/member_dispatch/write.rs` (raw value passing)、T9 `src/transformer/expressions/member_dispatch/logical.rs::wrap_setter_value` (lhs_type = getter return type を見て Some-wrap、setter accept type 不参照)。
+  - **TS fixture**: `class C { _v?: number; get value(): number | undefined { return this._v; } set value(v: number) { this._v = v; } }` (asymmetric setter)、`c.value ??= 42;` で Some(42) 渡し → Rust `c.set_value(Some(42))` だが setter は `f64` 期待 → E0308。
+
+  **影響範囲**:
+  - `member_dispatch/{write,update,compound,logical}.rs` の全 setter dispatch helpers
+  - 全 T6/T7/T8/T9 で symmetric apply 必要
+
+  **Resolution direction**:
+  - Fix 1 (本質解決): setter sig (= MethodKind::Setter sig with `params[0].ty`) を抽出する `extract_setter_accept_type` helper を追加、`wrap_setter_value` で getter return type ではなく setter accept type を見る形に refactor。T6/T7/T8/T9 全 dispatch helpers で同 fix を symmetric apply (= I-205 framework v1.7 Rule 9 sub-rule (c) Field-addition symmetric audit に準拠)。
+  - I-219 (TypeResolver `resolve_member_type` Spec gap) と cohesive batch で TypeResolver-level structural fix も検討。
+
+  **Resolution target**: 別 PRD で取り扱う。reachability audit (Hono / e2e fixture で asymmetric setter 使用 case) で priority 確定、reachable なら L3 promote。
+
+  **発見経緯**: PRD I-205 T9 Iteration v14 deep-deep review (2026-04-30) で T9 `wrap_setter_value` の lhs_type 参照が getter return type ベースだが setter accept type と divergent ケースが pre-existing として T6/T7/T8 でも latent と判明 → 本 entry 起票。
+
+  - 🔗 PRD I-205 (T6-T9 由来、setter accept type を考慮しない実装が symmetric)、I-219 (TypeResolver `resolve_member_type` Spec gap、本 entry の Read context counterpart、cohesive batch 候補)
+
+- **[I-221]** **Top-level Module-level statement uses expression-context dispatch — pre-existing infrastructure gap (PRD I-205 T8/T9 E2E fixture probe 由来、user 確定 2026-04-30)** [**L4** (infra、E2E fixture suboptimal Rust output、functional Tier 1)] — Top-level `obj.x ??= 42;` / `obj.x += v;` 等の statement が `convert_stmt` path ではなく `convert_expr` path 経由で処理される模様 (= TailExpr 付き Block emit、`Stmt::Expr` で discard)。
+
+  **直接症状**: Functional Tier 1 だが Rust output に余分な TailExpr 残存 (suboptimal な Rust code、compile も runtime も問題なし)。Pre-existing (T8 cells 21/27 でも同 pattern 観察)。
+
+  **Trace**:
+  - **コード**: `src/transformer/statements/mod.rs` の top-level Module statement 処理 path。`convert_stmt` 経由で expression-context fallback が発火している模様。
+  - **観察**: T8 cells 21/27 (compound assign) / T9 cells 38/41-d (logical compound、expression context) E2E fixture で確認済。
+
+  **影響範囲**:
+  - `src/transformer/statements/` の top-level Module statement processing
+  - E2E fixture の expected output に余分な block wrapper 残存
+
+  **Resolution direction**:
+  - Fix 1 (本質解決): top-level Module statement processing path で convert_stmt 経由を確認、必要なら expression-context fallback を統一 (statement context では tail expr 不要 = bare statement emit)。
+  - **T14 scope 候補** (E2E fixtures green-ify と cohesive、本 PRD I-205 T14 で fix 検討)。
+
+  **Resolution target**: PRD I-205 T14 (E2E fixtures green-ify) で audit + 必要時 fix 検討。functional Tier 1 のため non-blocking、T14 で fixture expected output 整備時に発覚した時点で escalate。
+
+  **発見経緯**: PRD I-205 T8 (cells 21/27) + T9 (cells 38/41-d) E2E fixture probe で expression-context dispatch による余分な block wrapper を観察 → pre-existing infrastructure gap として TODO 起票 (T14 scope 候補)。
+
+  - 🔗 PRD I-205 (T8/T9 fixture probe 由来、T14 audit candidate)
+
+- **[I-222]** **Constructor body `this.<name> = v` does not distinguish struct field from accessor — generates invalid `Self { <accessor_name>: value }` for B3/B4 cells (PRD I-205 T10 empirical probe 由来、user 確定 2026-05-01)** [**L4** (Localized、constructor with explicit this-assign to accessor、Hono reachability 要 audit)] — `src/transformer/classes/members.rs::convert_constructor_body` (line 190) は constructor body の各 stmt に対し `try_extract_this_assignment` で `this.<name> = <value>` pattern を抽出、`(name, value)` を `Self { ... }` struct-init field に直接 fold する。`<name>` が accessor (B3 setter only / B4 getter+setter pair) で **struct 上の field 名 (`_n` 等) と異なる** 場合、`Self { value: 7.0 }` 等 **invalid struct field** で Rust E0560 compile error。
+
+  **直接症状 (CLI probe で empirical 確認、PRD I-205 T10 work 中 2026-05-01)**: `class Counter { _n: number = 0; get value() {...} set value(v) {...} constructor() { this.value = 7; } }` → 生成 Rust:
+  ```
+  fn new() -> Self {
+      Self { value: 7.0 }  // E0560: no field `value` on struct Counter
+  }
+  ```
+
+  **Trace**:
+  - **コード**: `src/transformer/classes/members.rs:190 convert_constructor_body`、`try_extract_this_assignment` で blind に `(name, value)` を抽出。registry / class.fields / methods registry を参照しないため accessor vs field 区別不可。
+  - **dependency**: PRD I-205 T10 unit test 着手中に発覚、本 entry を pre-existing bug として split (T10 architectural concern = "convert_expr 経由の `this.x` dispatch" と orthogonal、constructor body conversion は別 path)。
+
+  **Pre-T10 / Post-T10 共通**: 本 bug は T10 で導入された defect ではなく、`try_extract_this_assignment` 設計時から存在する pre-existing bug。T10 は影響なし (T10 dispatch は convert_expr 経由、constructor body は bypass)。
+
+  **影響範囲**:
+  - constructor body 内 `this.<accessor-name> = v` (B3 setter only or B4 getter+setter pair)
+  - reachability: TypeScript で constructor 内で setter dispatch を使う pattern。Hono reachability audit で priority 確定。
+
+  **Resolution direction**:
+  - Fix 1 (本質解決、TypeRegistry 連携): `convert_constructor_body` の `try_extract_this_assignment` で抽出した `(name, value)` に対し、class registry を query し:
+    - `name` が struct field (`class.fields` lookup hit) → 現状通り `Self { name: value }` field init
+    - `name` が setter accessor (`MethodSignature.kind == Setter`) → 1) field default values で `Self { ... }` 構築、2) `let mut self_ = Self { ... }; self_.set_<name>(value); self_` 形 emission に拡張
+    - `name` 該当なし (= unknown) → `convert_stmt` path に fallthrough (= T6 dispatch 経由 setter MethodCall emit、ただし constructor は `&mut self` 不在のため `let mut self_ = Self { ... };` pre-init が prerequisite)
+  - **T10 scope 外定義**: T10 architectural concern = "convert_expr 経由の dispatch path 統一"、constructor body の field-init folding は別 architectural concern (= "constructor body field init pattern recognition")。1 PRD = 1 architectural concern 厳格適用。
+
+  **Resolution target**: 別 PRD で取り扱う。reachability audit 後 priority 確定 (Hono 等で reachable なら L3 promote、reachable でないなら L4 残置)。
+
+  **発見経緯**: PRD I-205 T10 unit test 着手中 (2026-05-01) に CLI probe で `class Counter { _n: number; get value(); set value(v); constructor() { this.value = 7; } }` の生成 Rust が `Self { value: 7.0 }` を emit (struct field `value` 不在で E0560) と判明。T10 architectural concern と orthogonal な pre-existing bug として TODO split。
+
+  - 🔗 PRD I-205 (T10 empirical probe 由来、constructor body conversion path は T10 dispatch path と orthogonal)、I-162 (class without explicit constructor → Self::new() auto-synthesis、constructor body conversion 改修と cohesive batch 候補)
+
+- **[I-223]** **Method receiver inference does not detect transitive `&mut self` propagation through method calls — `body_requires_mut_self_borrow` static analysis limitation (PRD I-205 T10 Iteration v17 deep-deep review L3-DD-2 由来、user 確定 2026-05-01)** [**L4** (Localized、reachability audit 後 priority 確定、Hono 等で reachable なら L3 promote 余地)] — `src/transformer/classes/helpers.rs::body_requires_mut_self_borrow` (= I-205 T10 Iteration v16 で `body_has_self_assignment` から structural extension) は **直接** mutation のみ検出 (case (1) self-rooted Assign + case (2) `self.set_<x>(...)` setter dispatch)。一方、**transitive** mutation (`this.helper()` で `helper(&mut self)` メソッドが内部で mutation する場合の caller method への mutation propagation) は検出せず、caller method を `&self` で emit → Rust E0596 "cannot borrow `*self` as mutable, as it is behind a `&` reference"。
+
+  **直接症状 (現時点 reachability audit 未実施)**:
+  ```typescript
+  class Counter {
+    _n: number = 0;
+    helper(): void { this._n = 1; }   // helper itself → &mut self ✓ (case (1) で検出)
+    caller(): void { this.helper(); }  // caller calls &mut self method, requires &mut self
+                                       // BUT my walker only sees `self.helper()` (= regular
+                                       // method call, no `set_` prefix) → returns false →
+                                       // caller emitted as `&self` → E0596
+  }
+  ```
+
+  **Trace**:
+  - **コード**: `src/transformer/classes/helpers.rs::is_self_setter_call` (line 234) は `method.starts_with("set_")` の prefix-based heuristic (= T6/T7/T8/T10 setter dispatch family の structural detection)。Regular method calls (no `set_` prefix) は match せず → caller body の `self.helper()` を mutation source として扱わない。
+  - **Static analysis 限界**: walker に class registry / method signature / receiver mode (`&self` vs `&mut self`) の context なし、recursive method receiver inference は本質的に inter-procedural analysis を要求。
+
+  **影響範囲**:
+  - Class methods 内で `&mut self` 必要 method を呼ぶ caller methods (TypeScript で typically helper / mutator method を caller method 経由で chain する pattern)
+  - Hono reachability: 要 audit (TypeScript で transitive mutation pattern 利用頻度 / Hono codebase での transitive call 統計)
+
+  **Resolution direction**:
+  - Fix 1 (本質解決、structural、別 PRD): **Inter-procedural method receiver inference**:
+    - Phase 1: collect_class_info で各 class method body を `body_requires_mut_self_borrow` で pre-analysis、各 method の `requires_mut_self: bool` を MethodSignature に記録
+    - Phase 2: caller method body 解析時、`self.<method>(...)` MethodCall について class registry から `requires_mut_self` を query、true なら caller も &mut self 要求
+    - Phase 3: 上記 2 phase を **fixed-point iteration** で繰り返す (= cyclic dependencies handle、e.g., `caller calls callee calls caller`)
+    - 実装複雑度: medium (registry に `requires_mut_self` 追加 + Pass 2 解析 + fixed-point loop)
+  - Fix 2 (defensive、quick fix、別 PRD で検討): All non-static class methods を **default `&mut self`** で emit、`body_requires_mut_self_borrow` で読み取り専用と判定された methods のみ `&self` に degrade。Sound (= `&mut self` is strictly more permissive)、false negative impossible、ただし Rust idiom 観点で必要以上に mut を要求 (false positive multiple)。
+  - **本 T10 scope 外定義**: T10 architectural concern = "Internal `this.x` dispatch via T6/T7/T8/T9 helpers + 直接 mutation の `&mut self` 推論"。Transitive method call 経由の mutation propagation は **inter-procedural analysis** の broader concern、別 architectural concern として split (= 1 PRD = 1 architectural concern 厳格適用)。
+
+  **Resolution target**: 別 PRD で取り扱う。reachability audit (Hono codebase で transitive mutation pattern 利用頻度) で priority 確定。reachable なら L3 promote、reachable でないなら L4 残置 + 顕在化時に escalate。Plan η chain 内 PRD 6 (I-048 closure ownership 推論) と complementary (= closure ownership と method receiver inference は両方 inter-procedural analysis)、cohesive batch 候補。
+
+  **発見経緯**: PRD I-205 T10 Iteration v17 (deep-deep review、2026-05-01) Layer 3 (Structural cross-axis) で `body_requires_mut_self_borrow` の限界として発見。Iteration v16 で T6 setter dispatch silent regression を structural fix した際の trade-off analysis で、prefix-based heuristic (`is_self_setter_call`) では transitive mutation を検出できないことが clear、本 entry を separate architectural concern として TODO split。
+
+  - 🔗 PRD I-205 (T10 helper structural extension の boundary 由来)、I-048 (closure ownership 推論、inter-procedural analysis の sister concern)、I-219 / I-220 (TypeResolver class member access の sister analysis、cohesive batch 検討候補)
+
 ---
 
 ## 保留

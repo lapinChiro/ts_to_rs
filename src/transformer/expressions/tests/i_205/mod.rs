@@ -35,5 +35,6 @@ mod compound;
 mod logical_compound;
 mod logical_compound_strategies;
 mod read;
+mod this_dispatch;
 mod update;
 mod write;

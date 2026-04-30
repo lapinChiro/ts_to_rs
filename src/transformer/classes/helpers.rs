@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use swc_ecma_ast as ast;
 
+use crate::ir::visit::{walk_expr, IrVisitor};
 use crate::ir::{
     AssocConst, Expr, Item, Method, RustType, Stmt, StructField, TraitRef, TypeParam, Visibility,
 };
@@ -96,23 +97,162 @@ pub(super) fn resolve_member_visibility(
     }
 }
 
-/// Returns `true` if the method body contains an assignment to `self.field`.
-pub(super) fn body_has_self_assignment(body: &[Stmt]) -> bool {
-    body.iter().any(|stmt| match stmt {
-        Stmt::Expr(Expr::Assign { target, .. }) => is_self_field_access(target),
-        _ => false,
-    })
+/// Returns `true` if the method body requires a `&mut self` receiver.
+///
+/// A method body requires `&mut self` if it contains, **at any depth** within its
+/// statement tree, any operation that mutates state reached through `self`:
+///
+/// 1. **Self-rooted Assign target** (Direct / Index / Deref / nested field): the `target`
+///    of an [`Expr::Assign`] is rooted at the `self` ident via any chain of
+///    [`Expr::FieldAccess`] / [`Expr::Index`] / [`Expr::Deref`] (e.g., `self.x = v`,
+///    `self.arr[i] = v`, `self.x.y = v`, `(*self).x = v`)。pre-T10 emission path 拡張、
+///    Computed `this[i]` / nested struct write も symmetric に handle。
+/// 2. **Setter dispatch on `self`**: `self.set_<x>(...)` (= [`Expr::MethodCall`] whose
+///    `object` is the `self` ident and whose `method` starts with `"set_"`、I-205
+///    T6/T7/T8/T10 setter dispatch family)。
+///
+/// ## Detection methodology and trade-offs
+///
+/// The walker is fully recursive (uses [`IrVisitor`] / [`walk_expr`]) so it correctly
+/// detects mutation buried inside:
+/// - [`Expr::Block`] (compound assign / update setter desugar
+///   `{ let __ts_new = self.x() OP rhs; self.set_x(__ts_new); ... }`)
+/// - control-flow constructs ([`Stmt::If`] / [`Stmt::While`] / [`Stmt::ForIn`] /
+///   [`Stmt::WhileLet`] / [`Stmt::Loop`] / [`Stmt::IfLet`] / [`Stmt::LabeledBlock`])
+/// - [`Expr::Closure`] bodies (mutation inside callbacks captured by `self`)
+/// - [`Expr::Match`] arms / [`Expr::If`] expr branches / nested expressions
+///
+/// **Setter prefix heuristic (case 2)**: detection uses naming convention
+/// (`method.starts_with("set_")`) rather than a class-registry lookup of
+/// [`crate::ir::MethodKind::Setter`] entries. This is a deliberate trade-off:
+///
+/// - **Sound**: false positives (user-written non-setter methods named `set_*`) emit
+///   `&mut self` which is **strictly more permissive than `&self`** (Rust accepts the
+///   widened receiver). No silent semantic divergence.
+/// - **No false negatives for T6/T7/T8/T10 dispatch**: those helpers always emit
+///   `format!("set_{x}")` as the method name, so all framework-emitted setter calls
+///   match the prefix.
+/// - **Out-of-scope**: transitive mutation via non-setter method calls
+///   (`self.helper()` where `helper(&mut self)` mutates) is **not detected** —
+///   tracked in TODO `[I-223]` as a separate "method receiver inference completeness"
+///   architectural concern.
+///
+/// ## I-205 T10 architectural rationale
+///
+/// pre-T10 では internal `this.x = v` は [`Expr::Assign { FieldAccess, value }`]
+/// IR で emit されるため case (1) のみで `&mut self` 推論が成立していた。T6 (Write) /
+/// T7 (Update) / T8 (Compound) / T10 (Internal `this.x` = E2) の setter dispatch 拡張により
+/// IR は [`Expr::MethodCall { self, "set_x", ... }`] (Plain Write) または
+/// [`Expr::Block { Let __ts_new = self.x() OP rhs; self.set_x(__ts_new); ... }`] (Compound /
+/// Update) に変化。case (1) のみでは silent `&self` emit (= Rust E0596 compile error
+/// "cannot borrow `*self` as mutable" 顕在化) となるため、case (2) を加えて structural
+/// symmetry を回復、`this.x = v` 系 Write を含む全 method body で正しく `&mut self` を emit。
+///
+/// Recursive descent + self-rooted target chain detection are themselves structural
+/// improvements over the pre-T10 `body_has_self_assignment` helper, which only inspected
+/// top-level [`Stmt::Expr`] and only matched exactly `Expr::Assign { target: FieldAccess(self,
+/// ..) }`, missing both nested control-flow assignments and Computed [`Expr::Index`] /
+/// nested [`Expr::FieldAccess`] write targets. Now any assign-to-self-rooted-state or
+/// setter-dispatch-on-self at any depth correctly triggers `&mut self`.
+pub(super) fn body_requires_mut_self_borrow(body: &[Stmt]) -> bool {
+    let mut visitor = MutSelfRequirementVisitor { found: false };
+    for stmt in body {
+        if visitor.found {
+            break;
+        }
+        visitor.visit_stmt(stmt);
+    }
+    visitor.found
 }
 
-/// Returns `true` if the expression is `self.field`.
-pub(super) fn is_self_field_access(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::FieldAccess {
-            object,
-            ..
-        } if matches!(object.as_ref(), Expr::Ident(name) if name == "self")
-    )
+/// `IrVisitor` that records whether any visited expression requires `&mut self`.
+///
+/// Once `found = true` is set, subsequent visits short-circuit (no further descent) so the
+/// walker stops as soon as the first mutating operation is identified.
+struct MutSelfRequirementVisitor {
+    found: bool,
+}
+
+impl IrVisitor for MutSelfRequirementVisitor {
+    fn visit_expr(&mut self, expr: &Expr) {
+        if self.found {
+            return;
+        }
+        match expr {
+            // Case (1): assignment to a self-rooted target (FieldAccess / Index / Deref
+            // chain rooted at self) → &mut self required. Covers `self.x = v`,
+            // `self.arr[i] = v`, `self.x.y = v`, `(*self).x = v` symmetrically (= L3-DD-1
+            // Iteration v17 deep-deep review fix、pre-T10 helper の depth + Computed gap
+            // を structural に解消)。
+            Expr::Assign { target, .. } if target_roots_at_self(target) => {
+                self.found = true;
+            }
+            // Case (2): setter MethodCall on self → &mut self required (T6/T7/T8/T10
+            // setter dispatch family、prefix-based heuristic per doc comment trade-offs)。
+            Expr::MethodCall { object, method, .. } if is_self_setter_call(object, method) => {
+                self.found = true;
+            }
+            // All other expression shapes: descend into children to find mutation buried
+            // inside Block / BinaryOp / FnCall args / closure bodies / etc.
+            _ => walk_expr(self, expr),
+        }
+    }
+}
+
+/// Returns `true` if `expr` is the `self` identifier.
+///
+/// Building block for [`target_roots_at_self`] — captures the "self ident" leaf condition
+/// to keep the recursion base thin and DRY.
+fn is_self_ident(expr: &Expr) -> bool {
+    matches!(expr, Expr::Ident(name) if name == "self")
+}
+
+/// Returns `true` if `expr` is rooted at `self` through any chain of [`Expr::FieldAccess`]
+/// / [`Expr::Index`] / [`Expr::Deref`].
+///
+/// Used as the [`Expr::Assign`] `target` predicate by [`MutSelfRequirementVisitor`] to
+/// detect assignments that mutate state reachable through `self` — e.g., `self.x = v`,
+/// `self.arr[i] = v`, `self.x.y = v`, `(*self).x = v`. All such writes require `&mut self`
+/// on the enclosing method receiver.
+///
+/// I-205 T10 Iteration v17 (deep-deep review L3-DD-1 fix): pre-Iteration-v17 helper
+/// matched only the top-level shape `Expr::FieldAccess { object: self, .. }`, missing
+/// Computed `this[i] = v` (= [`Expr::Index`] target) and nested `this.x.y = v` (= nested
+/// [`Expr::FieldAccess`] target). Both of these are valid TS write patterns that require
+/// `&mut self` in Rust; pre-v17 helper missed them, leading to silent `&self` emit and
+/// E0596 compile errors. v17 introduces this recursive helper to restore structural
+/// symmetry — any write rooted at `self` is correctly detected regardless of access path.
+fn target_roots_at_self(expr: &Expr) -> bool {
+    match expr {
+        // Leaf: bare `self` ident (rare as Assign target — would mean `*self = ...`-like
+        // shape, but completes the recursion base)
+        Expr::Ident(_) => is_self_ident(expr),
+        // Recursive cases: chain access through FieldAccess / Index / Deref
+        Expr::FieldAccess { object, .. } => target_roots_at_self(object),
+        Expr::Index { object, .. } => target_roots_at_self(object),
+        Expr::Deref(inner) => target_roots_at_self(inner),
+        // Any other shape (MethodCall return, FnCall, Block expression result, etc.)
+        // does not root at `self` from the writer's perspective — even if the value
+        // happens to be `self` at runtime, the static structure does not statically
+        // identify `self` as the root.
+        _ => false,
+    }
+}
+
+/// Returns `true` if `(object, method)` represents a setter MethodCall on `self` —
+/// i.e., `object == self` and `method` starts with `"set_"`.
+///
+/// I-205 T10: matches the IR emission shape of T6 / T7 / T8 / T10 setter dispatch helpers,
+/// which produce `Expr::MethodCall { object: Expr::Ident("self"), method: format!("set_{x}"),
+/// args: [...] }` for instance setter dispatch.
+///
+/// **Naming-convention heuristic trade-off** (`method.starts_with("set_")`): see the
+/// `Detection methodology and trade-offs` section in [`body_requires_mut_self_borrow`] doc
+/// comment for the rationale. Summary: false positives (user-written non-setter `set_*`
+/// methods) are sound (`&mut self` is strictly more permissive); false negatives for
+/// T6/T7/T8/T10 dispatch are impossible because those helpers always emit `set_<x>` names.
+fn is_self_setter_call(object: &Expr, method: &str) -> bool {
+    is_self_ident(object) && method.starts_with("set_")
 }
 
 /// Pre-scans all interface declarations to collect method names per interface.
@@ -168,4 +308,296 @@ pub(super) fn find_parent_class_names(
         .values()
         .filter_map(|info| info.parent.clone())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for [`body_requires_mut_self_borrow`] (I-205 T10 structural fix for
+    //! `&mut self` inference covering pre-T10 `self.x = value` field assignments,
+    //! T6/T7/T8/T10 setter dispatch `self.set_<x>(...)` MethodCalls, and Iteration v17
+    //! deep-deep review extension for self-rooted Index/Deref/nested FieldAccess Assign
+    //! targets)。
+    //!
+    //! ## Coverage matrix (testing.md compliance、`test_<target>_<condition>_<expected>`
+    //! naming pattern)
+    //!
+    //! All test names follow the `test_body_requires_mut_self_borrow_<condition>_<expected>`
+    //! convention per `.claude/rules/testing.md` (= L1-DD-1 Iteration v17 fix from
+    //! deep-deep review、helper-level lock-in 全 rename)。
+    //!
+    //! ### Case 1 (Self-rooted Assign target) coverage
+    //!
+    //! - Direct `self.x = v` (FieldAccess) → expected `true`
+    //! - `self.arr[i] = v` (Index) → expected `true` (v17 NEW)
+    //! - `self.x.y = v` (nested FieldAccess) → expected `true` (v17 NEW)
+    //! - `(*self).x = v` (Deref) → expected `true` (v17 NEW、rare but structurally covered)
+    //! - Non-self-rooted Assign (e.g., `obj.x = v` / `local = v`) → expected `false`
+    //!
+    //! ### Case 2 (Self setter dispatch) coverage
+    //!
+    //! - Direct `self.set_x(v)` → expected `true`
+    //! - `set_*` prefix non-self (`obj.set_x(v)`) → expected `false` (false-positive guard)
+    //! - Non-setter on self (`self.compute()`) → expected `false` (false-positive guard)
+    //!
+    //! ### Recursive descent coverage
+    //!
+    //! - Block containing setter call → expected `true`
+    //! - If-stmt then_body with setter → expected `true`
+    //! - While loop body with setter → expected `true`
+    //! - Closure body with setter → expected `true` (v17 NEW、IrVisitor walk_expr Closure
+    //!   arm の symmetric verify)
+    //! - Stmt::Let init with setter → expected `true`
+    //!
+    //! ### Read-only / boundary cases
+    //!
+    //! - Empty body → expected `false`
+    //! - Read-only body (return self.x) → expected `false`
+
+    use super::*;
+    use crate::ir::{ClosureBody, Expr};
+
+    fn self_ident() -> Expr {
+        Expr::Ident("self".to_string())
+    }
+
+    fn self_field(field: &str) -> Expr {
+        Expr::FieldAccess {
+            object: Box::new(self_ident()),
+            field: field.to_string(),
+        }
+    }
+
+    fn self_method_call(method: &str, args: Vec<Expr>) -> Expr {
+        Expr::MethodCall {
+            object: Box::new(self_ident()),
+            method: method.to_string(),
+            args,
+        }
+    }
+
+    // =========================================================================
+    // Boundary: empty body
+    // =========================================================================
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_empty_body_returns_false() {
+        assert!(!body_requires_mut_self_borrow(&[]));
+    }
+
+    // =========================================================================
+    // Case 1: Self-rooted Assign target
+    // =========================================================================
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_top_level_self_field_assign_returns_true() {
+        // Pre-T10 case (1) baseline: `self.x = 5` direct field assignment must trigger
+        // &mut self requirement (regression lock-in for Iteration v17 helper rename).
+        let body = vec![Stmt::Expr(Expr::Assign {
+            target: Box::new(self_field("x")),
+            value: Box::new(Expr::NumberLit(5.0)),
+        })];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_self_indexed_assign_returns_true() {
+        // L3-DD-1 fix (Iteration v17、deep-deep review): `self.arr[i] = v` is
+        // `Expr::Assign { target: Index { object: FieldAccess(self, arr), index: i },
+        // value: v }`. Pre-v17 helper missed this (only matched top-level FieldAccess
+        // shape) → silent &self emit → Rust E0596。target_roots_at_self recursive helper
+        // により Index chain rooted at self を検出して structural fix。
+        let body = vec![Stmt::Expr(Expr::Assign {
+            target: Box::new(Expr::Index {
+                object: Box::new(self_field("arr")),
+                index: Box::new(Expr::NumberLit(0.0)),
+            }),
+            value: Box::new(Expr::NumberLit(42.0)),
+        })];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_self_nested_field_assign_returns_true() {
+        // L3-DD-1 fix (Iteration v17): `self.outer.inner = v` は nested FieldAccess
+        // chain。target_roots_at_self の recursive descent through FieldAccess を verify。
+        let body = vec![Stmt::Expr(Expr::Assign {
+            target: Box::new(Expr::FieldAccess {
+                object: Box::new(self_field("outer")),
+                field: "inner".to_string(),
+            }),
+            value: Box::new(Expr::NumberLit(1.0)),
+        })];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_self_deref_field_assign_returns_true() {
+        // L3-DD-1 fix (Iteration v17): `(*self).x = v` (rare、Rust 上 explicit deref
+        // pattern)。target_roots_at_self の Expr::Deref arm を verify。Iterates with
+        // FieldAccess on top of Deref (= `(*self).x` IR shape)。
+        let body = vec![Stmt::Expr(Expr::Assign {
+            target: Box::new(Expr::FieldAccess {
+                object: Box::new(Expr::Deref(Box::new(self_ident()))),
+                field: "x".to_string(),
+            }),
+            value: Box::new(Expr::NumberLit(7.0)),
+        })];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_non_self_assign_returns_false() {
+        // `obj.x = v` (= 別 ident への Assign) — must NOT trigger &mut self
+        // (= false-positive guard for target_roots_at_self の base case)。
+        let body = vec![Stmt::Expr(Expr::Assign {
+            target: Box::new(Expr::FieldAccess {
+                object: Box::new(Expr::Ident("obj".to_string())),
+                field: "x".to_string(),
+            }),
+            value: Box::new(Expr::NumberLit(5.0)),
+        })];
+        assert!(!body_requires_mut_self_borrow(&body));
+    }
+
+    // =========================================================================
+    // Case 2: Self setter dispatch
+    // =========================================================================
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_top_level_self_setter_call_returns_true() {
+        // T10 case (2): `self.set_x(5.0)` — must require &mut self
+        // (Rust setter signature `&mut self`、caller body must propagate)。
+        let body = vec![Stmt::Expr(self_method_call(
+            "set_x",
+            vec![Expr::NumberLit(5.0)],
+        ))];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_setter_call_on_non_self_returns_false() {
+        // `obj.set_x(5)` where `obj != self` — false-positive guard for `is_self_setter_call`
+        // の object check。
+        let other_setter_call = Expr::MethodCall {
+            object: Box::new(Expr::Ident("obj".to_string())),
+            method: "set_x".to_string(),
+            args: vec![Expr::NumberLit(5.0)],
+        };
+        let body = vec![Stmt::Expr(other_setter_call)];
+        assert!(!body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_non_setter_method_call_on_self_returns_false() {
+        // `self.compute()` (no `set_` prefix) — false-positive guard for
+        // `is_self_setter_call` の method prefix check。
+        let body = vec![Stmt::Expr(self_method_call("compute", vec![]))];
+        assert!(!body_requires_mut_self_borrow(&body));
+    }
+
+    // =========================================================================
+    // Recursive descent coverage
+    // =========================================================================
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_block_with_setter_call_returns_true() {
+        // T8 compound assign emit shape: `{ let __ts_new = self.x() + 1; self.set_x(__ts_new); __ts_new }`
+        // Recursive walker must descend into Block.stmts to find the setter call.
+        let block_expr = Expr::Block(vec![
+            Stmt::Let {
+                mutable: false,
+                name: "__ts_new".to_string(),
+                ty: None,
+                init: Some(Expr::BinaryOp {
+                    left: Box::new(self_method_call("x", vec![])),
+                    op: crate::ir::BinOp::Add,
+                    right: Box::new(Expr::NumberLit(1.0)),
+                }),
+            },
+            Stmt::Expr(self_method_call(
+                "set_x",
+                vec![Expr::Ident("__ts_new".to_string())],
+            )),
+            Stmt::TailExpr(Expr::Ident("__ts_new".to_string())),
+        ]);
+        let body = vec![Stmt::Expr(block_expr)];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_if_stmt_with_setter_in_then_returns_true() {
+        // `if cond { self.set_x(5) }` — pre-T10 helper (top-level Expr::Assign-only) missed
+        // even `if cond { self.x = 5 }` due to lack of recursion. Recursive walker fixes
+        // this for both case 1 and case 2.
+        let body = vec![Stmt::If {
+            condition: Expr::BoolLit(true),
+            then_body: vec![Stmt::Expr(self_method_call(
+                "set_x",
+                vec![Expr::NumberLit(5.0)],
+            ))],
+            else_body: None,
+        }];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_while_loop_with_setter_returns_true() {
+        // `while cond { self.set_x(0) }` — recursive descent into Stmt::While.body
+        let body = vec![Stmt::While {
+            label: None,
+            condition: Expr::BoolLit(true),
+            body: vec![Stmt::Expr(self_method_call(
+                "set_x",
+                vec![Expr::NumberLit(0.0)],
+            ))],
+        }];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_closure_body_with_setter_returns_true() {
+        // L3 cross-axis verification (Iteration v17、deep-deep review): closure body
+        // (= `[x].forEach(i => this.set_x(i))` 等の callback) で setter dispatch が発火
+        // した場合、closure 自体は `&mut self` capture を必要とするため outer method も
+        // `&mut self` 必須。`walk_expr` の `Expr::Closure` arm を経由する recursive descent
+        // を verify (= IrVisitor walker の closure 経路 lock-in、subsequent T で closure
+        // 機能拡張時に regression detection)。
+        let closure_expr = Expr::Closure {
+            params: vec![],
+            return_type: None,
+            body: ClosureBody::Expr(Box::new(self_method_call(
+                "set_x",
+                vec![Expr::NumberLit(1.0)],
+            ))),
+        };
+        let body = vec![Stmt::Expr(closure_expr)];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_let_init_with_setter_call_returns_true() {
+        // `let v = self.set_and_get(0);` — setter-like call buried in let-init expression。
+        // Note: `set_and_get` starts with `set_` so it triggers the heuristic. False
+        // positive scenario: a hypothetical `set_and_compute` that doesn't actually mutate
+        // would also trigger, but this is sound (= &mut self is strictly more permissive
+        // than &self).
+        let body = vec![Stmt::Let {
+            mutable: false,
+            name: "v".to_string(),
+            ty: None,
+            init: Some(self_method_call("set_and_get", vec![])),
+        }];
+        assert!(body_requires_mut_self_borrow(&body));
+    }
+
+    // =========================================================================
+    // Read-only / no mutation
+    // =========================================================================
+
+    #[test]
+    fn test_body_requires_mut_self_borrow_read_only_body_returns_false() {
+        // `return self.x;` — read-only body without any mutation
+        let body = vec![Stmt::Return(Some(self_field("x")))];
+        assert!(!body_requires_mut_self_borrow(&body));
+    }
 }
