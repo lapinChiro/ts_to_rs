@@ -2284,25 +2284,25 @@ fn test_e2e_cell_i205_64_internal_increment_borrow_temp() {
 }
 
 #[test]
-#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 70)"]
+#[ignore = "I-205 T12 implementation 完了 (`.clone()` insertion helper + 20 unit tests 全 pass、Iteration v18 2026-05-01)、E2E green は I-162 (class without explicit constructor → `Self::new()` 自動合成) prerequisite で block (`new Profile()` → Rust constructor call、`pub fn init` → `fn main`)、I-162 完了後 T14 で unignore (cell 70)"]
 fn test_e2e_cell_i205_70_getter_body_clone_string() {
     run_cell_e2e_test("i-205", "cell-70-getter-body-clone-string");
 }
 
 #[test]
-#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 71)"]
+#[ignore = "I-205 T12 implementation 完了 (Copy partition no-rewrite verify、20 unit tests 全 pass、Iteration v18)、E2E green は I-162 prerequisite で block、T14 で unignore (cell 71)"]
 fn test_e2e_cell_i205_71_getter_body_copy_no_clone() {
     run_cell_e2e_test("i-205", "cell-71-getter-body-copy-no-clone");
 }
 
 #[test]
-#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 72)"]
+#[ignore = "I-205 T12 implementation 完了 (D5 Vec non-Copy `.clone()` insertion、20 unit tests 全 pass、Iteration v18)、E2E green は I-162 prerequisite で block、T14 で unignore (cell 72)"]
 fn test_e2e_cell_i205_72_getter_body_vec_clone() {
     run_cell_e2e_test("i-205", "cell-72-getter-body-vec-clone");
 }
 
 #[test]
-#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 74)"]
+#[ignore = "I-205 T12 implementation 完了 (D6 Option<non-Copy> `.clone()` insertion、20 unit tests 全 pass、Iteration v18 で fixture rename `Cache` → `OptCache` 適用)、E2E green は I-162 prerequisite で block、T14 で unignore (cell 74)"]
 fn test_e2e_cell_i205_74_getter_body_option_non_copy() {
     run_cell_e2e_test("i-205", "cell-74-getter-body-option-non-copy");
 }

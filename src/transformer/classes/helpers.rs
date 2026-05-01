@@ -255,6 +255,102 @@ fn is_self_setter_call(object: &Expr, method: &str) -> bool {
     is_self_ident(object) && method.starts_with("set_")
 }
 
+/// Returns `true` if `expr` is a single-hop self field access — i.e.,
+/// `Expr::FieldAccess { object: Expr::Ident("self"), field: _ }`.
+///
+/// I-205 T12 (Iteration v18): Used by [`insert_getter_body_clone_if_self_field_access`]
+/// to detect the C1 limited pattern (`return self.field;`) for getter body `.clone()`
+/// insertion.
+///
+/// **Single-hop only**: `self.field.nested` (= nested FieldAccess where the outer
+/// object is itself a FieldAccess) returns `false`. The C1 pattern targets only
+/// direct field reads of `self`; nested member access falls into the C2
+/// comprehensive `.clone()` insertion category (cells 75/76/77/79/80, deferred
+/// to a separate PRD).
+///
+/// Symmetric to [`is_self_ident`] / [`target_roots_at_self`] / [`is_self_setter_call`]
+/// in the "self-rooted expression structural recognition" helper family. Unlike
+/// `target_roots_at_self`'s recursive descent, this helper enforces single-hop
+/// shape by construction (= no recursion).
+fn is_self_single_hop_field_access(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::FieldAccess { object, .. } if is_self_ident(object)
+    )
+}
+
+/// I-205 T12 (Iteration v18): rewrites a Getter body's last statement to insert
+/// `.clone()` when it returns a single-hop self field access (C1 limited pattern).
+///
+/// **Detection**: matches the last [`Stmt`] in `stmts` against
+/// - `Stmt::Return(Some(Expr::FieldAccess { object: Ident("self"), .. }))` → rewrite
+/// - `Stmt::TailExpr(Expr::FieldAccess { object: Ident("self"), .. })` → rewrite
+///
+/// **Rewrite**: replaces the inner expression with
+/// `Expr::MethodCall { object: <FieldAccess>, method: "clone", args: vec![] }`.
+///
+/// **No-op cases** (Decision Table C reference, `backlog/I-205-...md`):
+/// - Empty body (`stmts.is_empty()`): early return, no rewrite
+/// - Last `Stmt` is not `Return(Some(_))` or `TailExpr(_)` (= `Stmt::Return(None)` /
+///   `Let` / `Expr` / `If` / `Match` / `While` / etc.): no rewrite (cells 75/76/77/79/80
+///   系列 = 別 PRD C2 scope)
+/// - Inner `Expr` is not a single-hop self field access (= `self.field.nested` /
+///   `obj.field` non-self / `self.field.clone()` already a MethodCall / computed expr /
+///   etc.): no rewrite
+///
+/// **Caller responsibility** (gate location, `members.rs::build_method_inner`):
+/// invoke this only when `kind == ast::MethodKind::Getter` AND `return_type` is
+/// non-Copy (= `is_copy_type() = false`). The helper itself does not check those
+/// conditions; gate is upstream so that Setter / Method / Copy-type Getter cases
+/// never reach this helper.
+///
+/// **Rule 11 (d-1) compliance**: the `Stmt` enum match enumerates all 14 variants
+/// explicitly without `_ =>` arm. Adding a new `Stmt` variant in the future will
+/// produce a compile error here, forcing explicit treatment.
+///
+/// Takes `&mut [Stmt]` rather than `&mut Vec<Stmt>` because the helper does not
+/// resize the body — only rewrites the last stmt in place via `last_mut()`. Slice
+/// API suffices and is preferred per `clippy::ptr_arg`.
+pub(super) fn insert_getter_body_clone_if_self_field_access(stmts: &mut [Stmt]) {
+    let Some(last) = stmts.last_mut() else {
+        return; // Empty body: no rewrite
+    };
+
+    let inner_slot: &mut Expr = match last {
+        // Rewrite targets:
+        Stmt::Return(Some(expr)) => expr,
+        Stmt::TailExpr(expr) => expr,
+        // Non-target variants — no rewrite (cells 75/76/77/79/80 系列 + others):
+        Stmt::Return(None)
+        | Stmt::Let { .. }
+        | Stmt::If { .. }
+        | Stmt::While { .. }
+        | Stmt::WhileLet { .. }
+        | Stmt::ForIn { .. }
+        | Stmt::Loop { .. }
+        | Stmt::Break { .. }
+        | Stmt::Continue { .. }
+        | Stmt::Expr(_)
+        | Stmt::IfLet { .. }
+        | Stmt::Match { .. }
+        | Stmt::LabeledBlock { .. } => return,
+    };
+
+    if !is_self_single_hop_field_access(inner_slot) {
+        return; // Body shape mismatch — no rewrite
+    }
+
+    // Take ownership of the FieldAccess expr, wrap with .clone() MethodCall.
+    // The placeholder `Expr::Ident(String::new())` is overwritten in the next
+    // statement, so no observable trace remains.
+    let original = std::mem::replace(inner_slot, Expr::Ident(String::new()));
+    *inner_slot = Expr::MethodCall {
+        object: Box::new(original),
+        method: "clone".to_string(),
+        args: vec![],
+    };
+}
+
 /// Pre-scans all interface declarations to collect method names per interface.
 ///
 /// Used by `implements` processing to determine which class methods belong to

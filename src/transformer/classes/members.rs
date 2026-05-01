@@ -3,7 +3,10 @@
 use anyhow::{anyhow, Result};
 use swc_ecma_ast as ast;
 
-use super::helpers::{body_requires_mut_self_borrow, resolve_member_visibility};
+use super::helpers::{
+    body_requires_mut_self_borrow, insert_getter_body_clone_if_self_field_access,
+    resolve_member_visibility,
+};
 use crate::ir::{
     sanitize_field_name, AssocConst, Expr, Method, Param, RustType, Stmt, StructField, Visibility,
 };
@@ -328,6 +331,17 @@ impl<'a> Transformer<'a> {
                     stmts.extend(sub_t.convert_stmt(stmt, return_type.as_ref())?);
                 }
                 convert_last_return_to_tail(&mut stmts);
+                // I-205 T12 (Iteration v18): Class Method Getter body `.clone()` 自動挿入
+                // (C1 limited pattern). Gate = Getter kind + non-Copy return_type. Body shape
+                // detection (= last stmt is `Stmt::Return(Some(self.field))` or
+                // `Stmt::TailExpr(self.field)`) is performed inside the helper. See
+                // [`insert_getter_body_clone_if_self_field_access`] doc comment for full
+                // Decision Table C reference.
+                if kind == ast::MethodKind::Getter
+                    && return_type.as_ref().is_some_and(|t| !t.is_copy_type())
+                {
+                    insert_getter_body_clone_if_self_field_access(&mut stmts);
+                }
                 Some(stmts)
             }
             None => None,
