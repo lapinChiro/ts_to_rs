@@ -29,6 +29,12 @@
 
 ### 進行中作業
 
+**案 β 採用 (2026-05-01)**: I-205 T14 着手判定調査で 3 系統 prerequisite (universal infra: I-224 = B2 fn main mechanism / I-225 = B3 class field literal type inference / I-162 = constructor synthesis) を発見、`1 PRD = 1 architectural concern` 厳格適用 + Universal infra leverage maximization で **案 β (Universal infra leverage first + L1 mid-priority)** を user 承認。星取表 20/24 で 4 案中最良判定。詳細は本 entry 後 chain section 参照。
+
+**次着手: PRD α-1 (I-224 = B2) Spec stage 起動** — Top-level executable script の Rust emission で `fn main()` 自動生成 (universal e2e infra、L3、全 future PRD verification benefit)。spec stage matrix-driven、`spec-stage-adversarial-checklist.md` 13-rule self-applied verify 必須。
+
+**I-205 status**: Implementation Stage T1〜T13 完了 (2026-05-01)、T11 削除済。**T14-T16 は案 β Phase 1-A (I-224 → I-225 → I-162) 完了後に再開**。I-205 architectural concern (= class member access dispatch with getter/setter framework) は **unit tests + CLI manual probes で functional 完成**、E2E green-ify (T14) は universal infra prerequisite block により待機中。
+
 **PRD 2.7 (I-198 + I-199 + I-200 cohesive batch) 完了 (2026-04-27)** — Implementation stage T1〜T15 全 task + formal `/check_job` 4-layer review + 9 課題本質 fix (F1〜F10) 完了。詳細は下記「直近の完了作業」table 参照。
 
 **Spec stage 完了 (2026-04-28): I-205 v7 final (Class member access dispatch with getter/setter methodology framework)**。
@@ -44,7 +50,9 @@ PRD 2.8 (I-201-A) Spec stage 検討中に **既存 class Method Getter/Setter ca
 
 **進行中: I-205 Implementation Stage Tasks T14〜T16 (T1-T13 完了 2026-05-01、T11 削除 2026-05-01 で新 PRD I-A / I-B へ migrate、Iteration v9 から user 指示で「T を一つ完了するごとに `/check_job` 4-layer review + 徹底見直し + commit」運用に transition)**。
 
-~~T1 (doc update)~~ ✓ → ~~T2 (MethodSignature/TsMethodInfo kind field)~~ ✓ → ~~T3 (collect_class_info propagate + Rule 11 d-1 fix)~~ ✓ → ~~T4 (TsTypeLit kind propagate)~~ ✓ → ~~T5 (Read context dispatch + B7 traversal helper + extends 登録 Spec gap fix Iteration v9)~~ ✓ → ~~T6 (Write context dispatch via dispatch_member_write helper、Iteration v10、Spec gap = Mapping table Read/Write symmetric 化 fix)~~ ✓ → ~~T7 (UpdateExpr setter desugar、Iteration v11、Spec gap = TypeResolver Update.arg 未再帰 fix)~~ ✓ → ~~T8 (compound assign desugar + INV-3 1-evaluate compliance + T7 helpers IIFE back-port + DRY refactor + member_dispatch.rs 6-file split、Iteration v12、Spec gap = TypeResolver compound assign Member.obj 未再帰 fix)~~ ✓ → ~~T9 (logical compound `??= &&= ||=` integration、Iteration v13、Spec gap = matrix LHS type variants test lock-in + Implementation gap = ??= non-Option LHS Tier 2 honest gate)~~ ✓ → ~~T10 (Internal `this.x` dispatch、Iteration v16 + v17、Implementation gap 4 = T6 setter dispatch silent regression `&self`/`&mut self` inference fix via `body_requires_mut_self_borrow` recursive walker + setter MethodCall detection + L1-DD-1 helper test naming convention + L3-DD-1 `target_roots_at_self` Index/Deref/nested FieldAccess structural extension + L4-DD-1 doc completeness + Spec gap = T9 logical compound internal lock-in test 追加 + Review insight 2 = constructor body bug 別 TODO `[I-222]` + transitive mut method calls 別 TODO `[I-223]` 起票 + TODO doc-sync 5 entries `[I-219]`〜`[I-223]`)~~ ✓ → ~~T11 (static accessor dispatch + matrix expansion)~~ **削除 (2026-05-01)、新 PRD I-A / I-B へ migrate、`note.after.md` archive 参照** → ~~T12 (Getter body .clone() 自動挿入、C1 pattern、Iteration v19、20 unit tests + helper additions in classes/helpers.rs + build_method_inner gate + E2E ignore reason update T14 defer + Iteration v18 sub-iteration v18.1 で T14 scope re-partition、4-layer review 0 findings + Defect Classification 全 0 + Review insight 1 = T16 + 別 PRD I-D split で対応)~~ ✓ → ~~T13 (B6/B7 corner cells Tier 2 reclassify lock-in verify + INV-5 visibility consistency invariant Option B 採用 audit + 5 NEW integration tests + 3 NEW registry-level boundary value tests、Iteration v20、Hono empirical reachability=0 で Option A overengineering 回避、production code 0 LOC change、4-layer review = Layer 3 finding 1 件 = INV-5 setter symmetric probe 不在を本 T13 内 fix + Implementation gap 1 + Review insight 1 = INV-5 (b)/(c) wording を Option B 反映 doc 更新済)~~ ✓ → **T14 (E2E fixtures green-ify、Depends on T1-T10/T12/T13、I-162 prerequisite block 明示)** ← 次着手 → T15 (`/check_job` 4-layer review + 13-rule self-applied verify) → **T16 (Task-ID-based naming → semantic naming refactor + 実装分割再考、I-205 scope 内 cleanup task、user 指示 2026-05-01 由来 + Option 3 split で別 PRD I-D = framework rule integration 切り出し)** → I-205 close。
+~~T1 (doc update)~~ ✓ → ~~T2 (MethodSignature/TsMethodInfo kind field)~~ ✓ → ~~T3 (collect_class_info propagate + Rule 11 d-1 fix)~~ ✓ → ~~T4 (TsTypeLit kind propagate)~~ ✓ → ~~T5 (Read context dispatch + B7 traversal helper + extends 登録 Spec gap fix Iteration v9)~~ ✓ → ~~T6 (Write context dispatch via dispatch_member_write helper、Iteration v10、Spec gap = Mapping table Read/Write symmetric 化 fix)~~ ✓ → ~~T7 (UpdateExpr setter desugar、Iteration v11、Spec gap = TypeResolver Update.arg 未再帰 fix)~~ ✓ → ~~T8 (compound assign desugar + INV-3 1-evaluate compliance + T7 helpers IIFE back-port + DRY refactor + member_dispatch.rs 6-file split、Iteration v12、Spec gap = TypeResolver compound assign Member.obj 未再帰 fix)~~ ✓ → ~~T9 (logical compound `??= &&= ||=` integration、Iteration v13、Spec gap = matrix LHS type variants test lock-in + Implementation gap = ??= non-Option LHS Tier 2 honest gate)~~ ✓ → ~~T10 (Internal `this.x` dispatch、Iteration v16 + v17、Implementation gap 4 = T6 setter dispatch silent regression `&self`/`&mut self` inference fix via `body_requires_mut_self_borrow` recursive walker + setter MethodCall detection + L1-DD-1 helper test naming convention + L3-DD-1 `target_roots_at_self` Index/Deref/nested FieldAccess structural extension + L4-DD-1 doc completeness + Spec gap = T9 logical compound internal lock-in test 追加 + Review insight 2 = constructor body bug 別 TODO `[I-222]` + transitive mut method calls 別 TODO `[I-223]` 起票 + TODO doc-sync 5 entries `[I-219]`〜`[I-223]`)~~ ✓ → ~~T11 (static accessor dispatch + matrix expansion)~~ **削除 (2026-05-01)、新 PRD I-A / I-B へ migrate、`note.after.md` archive 参照** → ~~T12 (Getter body .clone() 自動挿入、C1 pattern、Iteration v19、20 unit tests + helper additions in classes/helpers.rs + build_method_inner gate + E2E ignore reason update T14 defer + Iteration v18 sub-iteration v18.1 で T14 scope re-partition、4-layer review 0 findings + Defect Classification 全 0 + Review insight 1 = T16 + 別 PRD I-D split で対応)~~ ✓ → ~~T13 (B6/B7 corner cells Tier 2 reclassify lock-in verify + INV-5 visibility consistency invariant Option B 採用 audit + 5 NEW integration tests + 3 NEW registry-level boundary value tests、Iteration v20、Hono empirical reachability=0 で Option A overengineering 回避、production code 0 LOC change、4-layer review = Layer 3 finding 1 件 = INV-5 setter symmetric probe 不在を本 T13 内 fix + Implementation gap 1 + Review insight 1 = INV-5 (b)/(c) wording を Option B 反映 doc 更新済)~~ ✓ → **T14-T16 は案 β Phase 1-A (I-224 = B2 → I-225 = B3 → I-162) 完了後に再開、I-205 architectural concern は T1-T13 で functional 完成済 (unit tests + CLI manual probe で verify 済)、universal infra prerequisite block により待機中 (2026-05-01 案 β user 承認)**。
+
+**案 β Phase 1-A の最初の prerequisite = PRD α-1 (I-224 = B2) Spec stage 起動が次着手**。詳細は本 plan.md の chain section + `次の作業` section 参照。
 
 **T11 削除根拠 (2026-05-01 user 確定)**: T11 sub-tasks (11-b/c/d/e/f) は subsequent review iteration で発見された **orthogonal な追加 architectural concern** であり、I-205 本来の concern (= "Class member access dispatch with getter/setter framework"、cells 9/18 の Tier 1 化 + 全 dispatch context での symmetric coverage) と別軸。元 T11 (11-a) Static accessor dispatch は T5/T6 で完了済 (cells 9/18 Tier 1 lock-in)、(11-e) Static setter Write も T6 で完了済。残 sub-tasks (11-b/c/d/f) は 2 つの新 PRD として独立起票 (1 PRD = 1 architectural concern 厳格適用、scope creep 認識):
 - **新 PRD I-A "Method static-ness IR field propagation"** (= 元 11-b、`MethodSignature.is_static` field 追加 + Rule 9 (c-1) Field Addition Symmetric Audit、61 site)
@@ -156,7 +164,14 @@ PRD 7 (I-201-B): Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor +
 
 **優先順位は [`.claude/rules/todo-prioritization.md`](.claude/rules/todo-prioritization.md) (L1 > L2 > L3 > L4) および [`.claude/rules/ideal-implementation-primacy.md`](.claude/rules/ideal-implementation-primacy.md) (silent semantic change を最優先) に従う。**
 
-### 実行順序 (prerequisite chain、Plan η 確定 2026-04-26 + Step 1.5 + 2.5 挿入後)
+### 実行順序 (prerequisite chain、案 β 確定 2026-05-01 = Universal infra leverage first + L1 mid-priority)
+
+**案 β 採用根拠 (2026-05-01 user 承認、星取表 20/24 で最良判定)**:
+- **Leverage 最大化**: B2/B3 を最先で fix → 全 future PRD の e2e verification + class field 変換が **構造的に正しく** なる
+- **Methodology infra 早期 codify**: I-D (framework rule integration) を I-205 close 直後に整備 → 後続 PRD spec stage が第 1 反復で完成可能
+- **L1 Tier 0 (I-177) 中盤投入**: I-D 完了直後 = framework v2.x 安定後で I-177 spec stage の re-iteration risk 圧縮
+- **L1 silent (I-201-B) は I-201-A foundation 後**: decorator framework は AutoAccessor を leverage するため class dispatch group 完了が prerequisite
+- **代替案比較**: 案 α (Strict serial: 14/24)、案 γ (L1 first: 14/24、spec drift risk 高)、案 δ (Family batches: 18/24)。詳細は本 commit `[I-205 T14 着手判定 + 案 β 採用]` 議論 log 参照
 
 ```
 [PRD 1: I-177-D — TypeResolver suppression scope refactor、案 C] (完了 2026-04-26)
@@ -174,25 +189,76 @@ PRD 7 (I-201-B): Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor +
 [PRD 2.7: I-198 + I-199 + I-200 cohesive batch — framework Rule 改修 (Rule 3/4/10/11/12) + TypeResolver coverage extension + ast-variants.md Prop/PropOrSpread/Decorator section 新規追加 + audit scripts CI 化] (完了 2026-04-27)
        │
        ▼
-[PRD 2.75: I-205 — Class member access dispatch with getter/setter methodology framework (PRD 2.8/2.9/I-201-B prerequisite、Tier 2 broken framework → Tier 1 完全変換、L2、Spec stage v7 final 完了 2026-04-28、Implementation Stage T1〜T10 完了 2026-05-01、T11 削除 2026-05-01、T12 完了 2026-05-01 (Iteration v19 = Class Method Getter body `.clone()` 自動挿入)、T13 完了 2026-05-01 (Iteration v20 = B6/B7 lock-in verify + INV-5 Option B audit + 5 NEW integration tests + 3 NEW boundary value tests、production 0 LOC change)、T14 (E2E fixtures green-ify、Depends on T1-T10/T12/T13、I-162 prerequisite block 明示) ← **次着手** → T15 → **T16 (Task-ID-based naming → semantic naming refactor + 実装分割再考、I-205 scope 内 cleanup last task)** → I-205 close)]
+[PRD 2.75: I-205 — Class member access dispatch with getter/setter methodology framework (Spec stage v7 final 完了 2026-04-28、Implementation Stage T1〜T13 完了 2026-05-01、T11 削除 2026-05-01)、**T14-T16 は案 β Phase 1-A 完了後に再開**]
        │
        ▼
-[新 PRD I-D: Framework rule integration cohesive batch (D-1 task-ID-based 命名禁止 + D-2 Iteration v18 framework 改善 4 件 + D-3 T7/T8 連続 framework 失敗 signal Rule 10 axis 昇格 + D-4 T5 Iteration v9 lessons = Rule 9 (c) 拡張 + INV-7 候補 + Rule 9 (a) 拡張) + audit script auto verify (元 I-205 T16 と相補的、別 architectural concern = "framework rule level structural enforcement of I-205 lesson source candidates")] (L4、user 承認 2026-05-01 + 拡張案 2026-05-01 Iteration v19 light review)
+═══════════════════════════════════════════════════════════════════════════════
+   案 β Phase 1-A: I-205 T14 prerequisite (3 PRD 逐次起票、universal infra)
+═══════════════════════════════════════════════════════════════════════════════
        │
        ▼
-[PRD 2.76: I-A — Method static-ness IR field propagation (元 I-205 T11 (11-b)、`MethodSignature.is_static` field 追加 + Rule 9 (c-1) Field Addition Symmetric Audit、61 site、新 PRD 起票予定)] (L3、user 承認 2026-05-01)
+[PRD α-1 (新規): I-224 (B2) — Top-level executable script の Rust emission で `fn main()` 自動生成 (universal e2e infra、L3、全 future PRD verification benefit、即時 leverage 大)] **← 次着手 (案 β Phase 1-A の最初)**
        │
        ▼
-[PRD 2.77: I-B — Class TypeName context detection unification (元 I-205 T11 (11-d) + (11-f) + I-214 統合、TypeResolver `RustType::ClassConstructor(String)` type marker + 全 Ident match sites unification + `Expr::AssociatedConst` 新 IR variant、新 PRD 起票予定)] (L3、user 承認 2026-05-01)
+[PRD α-2 (新規): I-225 (B3) — Class field の literal-only initializer (annotation 無) で type inference 完成 (universal class field infra、L3 + `type-fallback-safety.md` 該当 L1 silent risk あり)]
        │
        ▼
-[PRD 2.8: I-201-A — AutoAccessor 単体 Tier 1 化 (decorator なし subset、I-205 + I-A + I-B framework leverage)] (L3、user 承認 2026-04-27)
+[PRD α-3 (新規): I-162 — Constructor synthesis `Self::new()` for no-explicit-constructor classes (L3、既 TODO entry)]
+       │
+       ▼
+═══════════════════════════════════════════════════════════════════════════════
+   案 β Phase 1-B: I-205 close (T14 → T15 → T16)
+═══════════════════════════════════════════════════════════════════════════════
+       │
+       ▼
+[I-205 T14: E2E fixtures green-ify (B2/B3/I-162 verified end-to-end、34 cells)]
+       │
+       ▼
+[I-205 T15: /check_job 4-layer review + 13-rule self-applied verify]
+       │
+       ▼
+[I-205 T16: Task-ID-based naming → semantic naming refactor + I-205 implementation 範囲内の `unwrap()` cleanup integrate]
+       │
+       ▼
+═══════════════════════════════════════════════════════════════════════════════
+   案 β Phase 1-C: Methodology infra codify
+═══════════════════════════════════════════════════════════════════════════════
+       │
+       ▼
+[新 PRD I-D: Framework rule integration cohesive batch (D-1 task-ID-based 命名禁止 + D-2 Iteration v18 framework 改善 4 件 + D-3 T7/T8 連続 framework 失敗 signal Rule 10 axis 昇格 + D-4 T5 Iteration v9 lessons + 案 β B2/B3/I-162 lessons integrate) + audit script auto verify] (L4、user 承認 2026-05-01)
+       │
+       ▼
+═══════════════════════════════════════════════════════════════════════════════
+   案 β Phase 2: L1 Tier 0 priority (silent semantic change の最優先解消)
+═══════════════════════════════════════════════════════════════════════════════
+       │
+       ▼
+[PRD 3: I-177 mutation propagation 本体 (Tier 0 silent semantic change、L1) — F1/F3 body mutation、案 A vs 案 B 確定] **← L1 を I-A/I-B/I-201-A より先行 (案 β / 案 γ の良いところ吸収)**
+       │
+       ▼
+═══════════════════════════════════════════════════════════════════════════════
+   案 β Phase 3: Class dispatch group → L1 silent decorator
+═══════════════════════════════════════════════════════════════════════════════
+       │
+       ▼
+[PRD 2.76: I-A — Method static-ness IR field propagation (元 I-205 T11 (11-b)、`MethodSignature.is_static` field 追加 + Rule 9 (c-1) Field Addition Symmetric Audit、61 site)] (L3、user 承認 2026-05-01)
+       │
+       ▼
+[PRD 2.77: I-B — Class TypeName context detection unification (元 I-205 T11 (11-d) + (11-f) + I-214 統合、TypeResolver `RustType::ClassConstructor(String)` type marker + 全 Ident match sites unification + `Expr::AssociatedConst` 新 IR variant)] (L3、user 承認 2026-05-01)
+       │
+       ▼
+[PRD 2.8: I-201-A — AutoAccessor 単体 Tier 1 化 (decorator なし subset、I-205 + I-A + I-B + B3 framework leverage)] (L3、user 承認 2026-04-27)
        │
        ▼
 [PRD 2.9: I-202 — Object literal Prop::Method/Getter/Setter Tier 1 化 (Transformer 完全 emission)] (L3、user 承認 2026-04-27)
        │
        ▼
-[PRD 3: I-177 mutation propagation 本体 (Tier 0 silent semantic change、L1) — F1/F3 body mutation、案 A vs 案 B 確定]
+[PRD 7: I-201-B — Decorator framework 完全変換 (TC39 Stage 3、L1 silent semantic change)] (user 承認 2026-04-27、I-201-A foundation leverage、案 β で Phase 4 narrow refinements より先 = L1 先行)
+       │
+       ▼
+═══════════════════════════════════════════════════════════════════════════════
+   案 β Phase 4: Narrow refinements (post-L1 cleanup)
+═══════════════════════════════════════════════════════════════════════════════
        │
        ▼
 [PRD 4: I-177-A — else_block_pattern Let-wrap (+ I-194 typeof if-block elision 拡張可)]
@@ -204,10 +270,7 @@ PRD 7 (I-201-B): Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor +
 [PRD 6: I-048 — closure ownership 推論 (T7-3 完全 GREEN-ify)]
        │
        ▼
-[PRD 7: I-201-B — Decorator framework 完全変換 (TC39 Stage 3、L1 silent semantic change)] (user 承認 2026-04-27、PRD 3 後の next-priority L1 = reachability 軸 + I-201-A foundation leverage)
-       │
-       ▼
-I-162 → Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
+Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 ```
 
 **PRD 凝集度原則 (2026-04-26 user 確定)**: 凝集度高 + 適切な粒度。1 PRD = 1 architectural concern。

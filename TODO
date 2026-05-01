@@ -68,6 +68,83 @@ OBJECT_LITERAL_NO_TYPE 全体で 28件（2026-04-21 T6-6 後 bench 実測、I-14
 - **[I-018]** **Hono クリーンファイルのコンパイルテスト CI 化** — 回帰検出自動化。現在 `.github/workflows/ci.yml` に Hono ステップなし
 - **[I-019]** **三項演算子 callee パターン** — CALL_TARGET（4件）。一時変数束縛 + 呼び出し
 
+- **[I-224]** **Top-level executable script の Rust emission で `fn main()` 自動生成なし — `pub fn init()` のみ emit、Rust E0601 `main function not found` で compile fail (PRD I-205 T14 prerequisite block 由来、user 確定 2026-05-01)** [**L3** (universal e2e infra blocker、全 future PRD verification benefit、即時 leverage 大)] — TS source の module body に top-level expression statements (例: `console.log(c.value); const c = new Counter();`) があり、かつ user 定義 `function main(): void { ... }` が存在しない場合、`src/transformer/mod.rs::transform_module` (line 308-323) は `Stmt::Expr` のみ収集して `build_init_fn` (line 702) で `Item::Fn { name: "init", vis: Public }` を emit、**`fn main()` を生成しない**。e2e harness の `tests/e2e_test.rs::reset_single_file_main` は transpile 出力を runner main.rs に直接書き込むため、`pub fn init()` のみで `fn main()` 不在 → cargo run が E0601 で compile fail。
+
+  **直接症状 (empirical 2026-05-01、cell-09-static-getter で probe)**: `class Config { static get version(): string { return "1.0.0"; } }; console.log(Config.version);` → 生成 Rust:
+  ```rust
+  struct Config {}
+  impl Config { fn version() -> String { "1.0.0".to_string() } }
+  pub fn init() {
+      println!("{}", Config::version());
+  }
+  ```
+  `cargo build` → `error[E0601]: \`main\` function not found in crate`。
+
+  **Reachability**: 全 e2e fixture (= 全 future PRD verification flow 経由)。empirical: 既存 passing e2e fixtures 全 159 件は `function main(): void { ... }` を user-side で定義することで回避、I-205 fixtures 34 件 + multi/import_basic/math.ts 1 件のみが top-level statement form 使用。**今後 PRD 著者が `function main()` 規約を意識し続ける必要がある = 構造的 prevention 不在 = ideal-implementation-primacy 違反。**
+
+  **影響範囲 (I-205 T14 + 全 future PRD)**:
+  - I-205 T14 (E2E green-ify 34 fixtures) を直接 block — 1/34 cell も pass せず
+  - 全 future PRD で top-level statement を使う e2e fixture 作成時、author 側に `function main()` wrap を obligate
+  - cell-09 (static-only、no `new`) は I-162 unrelated だが本 defect で block — つまり B2 単独で 34 fixtures 全 block
+
+  **Trace**:
+  - **コード**: `src/transformer/mod.rs::transform_module` line 308-323 (top-level Stmt::Expr 収集)、`build_init_fn` line 702-713 (Item::Fn { name: "init", vis: Public } emission)
+  - **観察**: `cargo run --release -- tests/e2e/scripts/i-205/cell-09-static-getter.ts` → 出力 main.rs を `cargo build` で E0601 (2026-05-01 直接 empirical 確認)
+  - **既存規約**: TS source に `function main(): void { ... }` を書くと既存 `transform_module_item` 経由で `fn main()` emit (default_params.ts 等で確認)
+
+  **Resolution direction (Spec stage で確定)**:
+  - **Fix 1 (本質解決、推奨 ideal)**: `transform_module` で top-level executable mode 検出 (= top-level Stmt::Expr が存在 + user 定義 `main` fn 不在) → `Item::Fn { name: "main", ... }` を emit (= `init` 廃止、または `fn main() { init() }` synthesis)。Spec stage で 「executable mode 判定の正確な criteria」「library mode (= module-load 用 init 保持) との切り分け」「user 定義 main との conflict 防止」を matrix-driven で確定
+  - **Fix 2 (workaround、不採用)**: 全 I-205 fixture を `function main()` 形式に rewrite — universal infra defect 残存のため ideal-implementation-primacy 違反、不採用
+
+  **Spec stage matrix axes (preliminary)**:
+  - module body shape: top-level Stmt::Expr only / decl + Stmt::Expr / decl only / user `function main()` 定義 / user `main` symbol 衝突 / async top-level / import side-effects only
+  - emission strategy: `fn main() { ... }` direct / `fn main() { init(); }` wrap / `pub fn init()` only (library mode preserve) / Tier 2 honest error (user main 衝突)
+
+  **Resolution target**: I-205 T14 の最初の prerequisite として独立 PRD 起票 (案 β Phase 1-A、user 承認 2026-05-01)。spec stage matrix-driven、`spec-stage-adversarial-checklist.md` 13-rule self-applied verify 必須。
+
+  **発見経緯**: PRD I-205 T14 着手判定調査 (2026-05-01) で empirical 確認、I-205 PRD T12 ignore message が `pub fn init` → `fn main` を「I-162 prerequisite」と annotate していたが、I-162 entry の修正方針 (`src/transformer/classes/generation.rs` constructor synthesis) には本 defect 修正含まれない → 別 architectural concern として分離 + TODO 起票。
+
+  - 🔗 PRD I-205 T14 (本 entry の direct beneficiary)、I-225 (class field type inference、I-205 T14 sister prerequisite)、I-162 (constructor synthesis、I-205 T14 sister prerequisite)、I-221 (top-level Module-level statement expression-context dispatch、本 entry と隣接 area の独立 sub-defect)
+
+- **[I-225]** **Class field の literal-only initializer (annotation 無) で type inference 失敗 — `_n = 0` が `serde_json::Value` fallback (PRD I-205 T14 prerequisite block 由来、user 確定 2026-05-01)** [**L3** (compile-error blocker for I-205 T14、ただし `serde_json::Value` の Display/PartialEq trait impl 経由で **L1 silent semantic change risk あり** = `type-fallback-safety.md` 該当)] — TypeResolver / TypeCollector の class field handling 経路で、`class A { _n = 0; }` のように **annotation 無 + literal initializer 有** の field declaration 時、literal 型推論が走らず field type が `RustType::Any` (= `serde_json::Value` emit) に fallback する。同条件で annotation 有 (`_n: number = 0`) または annotation のみ (`_n: number;`) の場合は正しく `f64` 推論成功 (empirical 2026-05-01 で 3 variants 比較 confirm)。
+
+  **直接症状 (empirical 2026-05-01、3 variants probe で root cause confirm)**:
+  ```ts
+  class A { _n = 0; }                                              // → struct A { _n: serde_json::Value } ✗ defective
+  class B { _n: number = 0; }                                      // → struct B { _n: f64 } ✓ correct
+  class C { _n: number; constructor() { this._n = 0; } }           // → struct C { _n: f64 } + Self::new() ✓ correct
+  ```
+  variant A (annotation 無 + initializer 有) のみ defective。
+
+  **L1 silent semantic change risk (`type-fallback-safety.md` 該当)**: `serde_json::Value` は `impl Display` (JSON 文字列出力)、`impl PartialEq` (JSON 構造比較) 等の trait impl を持つため、type-specific でない context では silent に compile pass する場合あり。例: `console.log(a._n)` → `println!("{}", a._n)` は `Display` 経由で compile 成功するが、`Value::Number(0)` の Display は `"0"` であって TS の `String(0) === "0"` と偶然一致するケース vs ズレるケースが mixed (= silent semantic change の隠れ risk)。`a._n + 1` は Rust 上で type mismatch で compile fail (E0277 `cannot add `{integer}` to `serde_json::Value``)。Tier 分類は context dependent: arithmetic context = Tier 2 (compile fail-loud)、Display/PartialEq context = Tier 1 (silent semantic loss risk)。
+
+  **Reachability (要 audit)**: TS class field の annotation-omit + initializer 形式は idiomatic な書き方 (`class C { count = 0; name = ""; items: [] = []; }` 等)。Hono codebase での頻度未測定だが、I-205 fixtures 34 件中 **大多数が本 pattern 使用** (cell-02 `_n = 0`、cell-13 `_v = 0` 等)。一般 TS code でも頻度高想定。
+
+  **Trace (root cause 仮説、Spec stage で empirical 確定)**:
+  - **コード候補**: `src/pipeline/type_collector/` または `src/pipeline/type_resolver/visitors.rs::visit_class_body` 経路で、`ast::ClassMember::ClassProp` の handling で `value` (`Box<Expr>`) からの literal type inference が skip されている可能性。または `register_class_field` 系 helper で type_ann が None の場合 Any fallback している可能性
+  - **観察 method (Spec stage Discovery)**: (a) `ClassProp` 構造の AST trace + 該当 visitor / collector path 特定、(b) annotation 有り経路と無し経路の divergence 箇所 identify、(c) literal type inference helper が他 context (例: variable decl `let x = 0`) で動作している実装を class field path に application 可能か audit
+  - **既存 `let x = 0` との対比**: `let x = 0;` (statement scope) は `f64` 推論成功 (B variant 同等)。class field path のみで failure するため、class field-specific path に literal inference 連結漏れと推定
+
+  **影響範囲 (I-205 T14 + future class-using PRDs)**:
+  - I-205 T14 (E2E green-ify) を直接 block — `_n = 0` 系 fixture 大半で field 型不整合 → impl method body で E0277 / E0308 cascade
+  - 全 future class-field-using e2e fixture (PRD I-201-A AutoAccessor / I-202 Object literal 等) で同症状残存 = universal class infra defect
+  - silent risk: 一般 TS user code で `class C { _n = 0; toString() { ... } }` 等 Display 経由 use の場合、Rust compile pass + 出力文字列の偶発一致で silent semantic loss が混入する可能性
+
+  **Resolution direction (Spec stage で確定)**:
+  - **Fix 1 (本質解決、推奨)**: `ClassProp` handling で `type_ann == None && value.is_some()` 時、value expression の literal 型推論を実行し field type に bind。既存 statement-scope literal inference helper を class field path に reuse。Spec stage で各 literal kind (Number / String / Bool / Null / Undefined / Array / Object / Template / Regex) に対する ideal output 確定 + tsc observation で TS narrowing semantic と byte-exact 比較
+  - **Fix 2 (workaround、不採用)**: 全 I-205 fixture を `_n: number = 0` 形式に rewrite — universal infra defect 残存、ideal-implementation-primacy 違反、`type-fallback-safety.md` 違反 (= L1 silent semantic change risk 残存) のため不採用
+
+  **Spec stage matrix axes (preliminary)**:
+  - field declaration shape: annotation only / annotation + initializer / **initializer only (本 defect)** / no-annotation no-initializer / static field / private field / accessor (B6 = autoaccessor)
+  - initializer literal kind: NumberLit (`0` / `0.5` / `0n` BigInt) / StringLit (`""` / `"hello"`) / BoolLit / NullLit / UndefinedIdent / ArrayLit (empty / non-empty) / ObjectLit / Tpl literal / Regex / NewExpr (`= new C()`) / CallExpr (`= f()`) / Ident reference
+  - inference fallback: 推奨 ideal (literal 型 inference) / Any fallback (現状)
+
+  **Resolution target**: I-205 T14 の 2 番目 prerequisite として独立 PRD 起票 (案 β Phase 1-A、I-224 完了後 = 逐次 user 承認 2026-05-01)。spec stage matrix-driven、`type-fallback-safety.md` 3-step safety analysis 必須 (= 各 fallback site で silent semantic change 不在を verify)。
+
+  **発見経緯**: PRD I-205 T14 着手判定調査 (2026-05-01) で 3 variants empirical probe (`/tmp/b3-probe.ts`、`/tmp/b3-probe2.ts`) で root cause confirm (variant A のみ defective、B/C 正常)。I-205 PRD T12 ignore message が「I-162 prerequisite」と annotate していたが、I-162 entry の修正方針 (constructor synthesis) には本 defect 修正含まれない → 別 architectural concern として分離 + TODO 起票。
+
+  - 🔗 PRD I-205 T14 (本 entry の direct beneficiary)、I-224 (top-level fn main mechanism、I-205 T14 sister prerequisite)、I-162 (constructor synthesis、I-205 T14 sister prerequisite)、I-201-A (AutoAccessor Tier 1 化、本 entry と field type inference の architectural concern overlap、I-201-A spec stage で本 entry の completion を leverage 可能)、`type-fallback-safety.md` (Any/Value fallback 安全性分析)
+
 ---
 
 ## Tier 2: L3 残り + L4（修正コスト小）
