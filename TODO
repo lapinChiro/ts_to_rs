@@ -104,7 +104,35 @@ OBJECT_LITERAL_NO_TYPE 全体で 28件（2026-04-21 T6-6 後 bench 実測、I-14
 
   **発見経緯**: PRD I-205 T14 着手判定調査 (2026-05-01) で empirical 確認、I-205 PRD T12 ignore message が `pub fn init` → `fn main` を「I-162 prerequisite」と annotate していたが、I-162 entry の修正方針 (`src/transformer/classes/generation.rs` constructor synthesis) には本 defect 修正含まれない → 別 architectural concern として分離 + TODO 起票。
 
-  - 🔗 PRD I-205 T14 (本 entry の direct beneficiary)、I-225 (class field type inference、I-205 T14 sister prerequisite)、I-162 (constructor synthesis、I-205 T14 sister prerequisite)、I-221 (top-level Module-level statement expression-context dispatch、本 entry と隣接 area の独立 sub-defect)
+  - 🔗 PRD I-205 T14 (本 entry の direct beneficiary)、I-225 (class field type inference、I-205 T14 sister prerequisite)、I-162 (constructor synthesis、I-205 T14 sister prerequisite)、I-221 (top-level Module-level statement expression-context dispatch、本 entry と隣接 area の独立 sub-defect)、I-226 (test harness ESM support + top-level await Tier 1、本 entry の Axis C1 cells defer 先)
+
+- **[I-226]** **Test harness ESM support + top-level await Tier 1 化 (PRD I-224 spec stage TS-1 empirical evidence 由来、user 確定 2026-05-01)** [**L4** (test infra defect + future Tier 1 upgrade、本 entry なしでも I-205 T14 / I-224 完了に影響なし、defer 可能)] — `scripts/observe-tsc.sh` の tsx invocation が tsconfig `"module": "ES2022"` 設定でも tsx 内部で cjs format に transform、`Error: Top-level await is currently not supported with the "cjs" output format` で **TS oracle observation empirical verify 不能**。PRD I-224 spec stage TS-1 で cells 14-18/30 (top-level await Axis C1 全 cells) の `.expected` が 0 bytes record (= TS runtime stdout 取得不能) で発覚 (2026-05-01)。
+
+  **直接症状**: PRD I-224 で top-level await を含む cells を **Out of Scope (= I-226 defer)** に narrow せざるを得ない、I-224 完成後も top-level await 含む TS source は ts_to_rs で **Tier 2 honest error or silent loss** の状態残存。
+
+  **修正方針 (Spec stage で確定、cohesive batch)**:
+  - **Fix 1 (本質解決、推奨)**: test harness を ESM mode に upgrade (`scripts/observe-tsc.sh` で `.mts` 拡張 / tsconfig `"module": "ESNext"` + tsx ESM CLI option / temp dir に `package.json {"type": "module"}` 配置 等)、top-level await fixture が tsx で execute 可能化。同時に I-224 framework の `#[tokio::main] async fn main()` synthesis で top-level await を Tier 1 完全変換 (= I-224 cells 14-18/30 を本 PRD で green 化、Axis C1 全 cells)。
+  - **Fix 2 (workaround)**: top-level await を async IIFE pattern (`(async () => { await ... })();`) に rewrite して回避 — ECMAScript spec の "top-level await is module top-level" semantic は preserve せず、async IIFE は別 architectural concern (function scope await)。**不採用** (= I-224 architectural concern と分離、ideal-implementation-primacy 違反)。
+
+  **Spec stage matrix axes (preliminary)**:
+  - Test harness layer: tsx invocation mode (cjs / esm) × file extension (`.ts` / `.mts`) × tsconfig module (ES2022 / ESNext / ESModule)
+  - Transpiler layer: top-level await trigger detection × async fn main synthesis × tokio runtime dispatch × Decl::Var with `await` init capture into fn main body
+  - I-224 cells 14-18/30 を本 PRD scope に integrate (= Axis C1 全 cells を Tier 1 完全変換)
+
+  **影響範囲**:
+  - `scripts/observe-tsc.sh` (tsx invocation logic 改修)
+  - `tests/e2e_test.rs` runner (ESM mode runner template 配置)
+  - `tests/e2e/rust-runner/` の Cargo project skeleton (tokio runtime 依存追加)
+  - `src/transformer/main_synthesis.rs` (= I-224 で新設予定の module、top-level await detection + async fn main wrap synthesis 拡張)
+
+  **Resolution direction (本 PRD 起票時)**:
+  - 起票 timing: I-224 close 後 (= I-224 cells 9/10/11/12/13/21/22/23/24/27b/28/29/31 全 green 化 + I-224 architectural concern 完成 + framework rule integration codify が prerequisite)
+  - cohesive batch: test harness ESM upgrade (test infra) + top-level await Tier 1 (transpiler) を 1 architectural concern = "Top-level await full coverage (test harness + transpiler)" として cohesive 解決
+  - 完了 criteria: I-224 cells 14-18/30 全 fixture green pass、Hono bench Tier-transition compliance、新規 top-level await fixture が e2e harness で execute 可能
+
+  **発見経緯**: PRD I-224 spec stage TS-1 (2026-05-01) で cells 14-18/30 fixture 作成 + `scripts/record-cell-oracle.sh` 実行時に tsx エラー empirical 確認。test harness 改修は I-224 architectural concern (= fn main mechanism) と orthogonal、別 PRD で cohesive batch 化 = 1 PRD = 1 architectural concern 厳格適用。
+
+  - 🔗 PRD I-224 (本 entry の cells 14-18/30 defer 先 = direct beneficiary)、I-180 (E2E harness async-main multi-execution、test infra defect、本 entry と peer)、I-205 T14 (I-224 完了後 access、本 entry は I-205 T14 と orthogonal = direct dependency なし)
 
 - **[I-225]** **Class field の literal-only initializer (annotation 無) で type inference 失敗 — `_n = 0` が `serde_json::Value` fallback (PRD I-205 T14 prerequisite block 由来、user 確定 2026-05-01)** [**L3** (compile-error blocker for I-205 T14、ただし `serde_json::Value` の Display/PartialEq trait impl 経由で **L1 silent semantic change risk あり** = `type-fallback-safety.md` 該当)] — TypeResolver / TypeCollector の class field handling 経路で、`class A { _n = 0; }` のように **annotation 無 + literal initializer 有** の field declaration 時、literal 型推論が走らず field type が `RustType::Any` (= `serde_json::Value` emit) に fallback する。同条件で annotation 有 (`_n: number = 0`) または annotation のみ (`_n: number;`) の場合は正しく `f64` 推論成功 (empirical 2026-05-01 で 3 variants 比較 confirm)。
 

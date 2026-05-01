@@ -31,7 +31,28 @@
 
 **案 β 採用 (2026-05-01)**: I-205 T14 着手判定調査で 3 系統 prerequisite (universal infra: I-224 = B2 fn main mechanism / I-225 = B3 class field literal type inference / I-162 = constructor synthesis) を発見、`1 PRD = 1 architectural concern` 厳格適用 + Universal infra leverage maximization で **案 β (Universal infra leverage first + L1 mid-priority)** を user 承認。星取表 20/24 で 4 案中最良判定。詳細は本 entry 後 chain section 参照。
 
-**次着手: PRD α-1 (I-224 = B2) Spec stage 起動** — Top-level executable script の Rust emission で `fn main()` 自動生成 (universal e2e infra、L3、全 future PRD verification benefit)。spec stage matrix-driven、`spec-stage-adversarial-checklist.md` 13-rule self-applied verify 必須。
+**進行中: PRD α-1 (I-224 = B2) Spec stage v3 必要 (2026-05-01、第三者 `/check_job` review で Spec stage v2 approval 不適切と判定)** — `backlog/I-224-top-level-fn-main-mechanism.md` (727 行) は iteration v2 self-applied 13-rule verify で Critical=0 / High=0 と self-claim したが、第三者 review で **Critical 4 件 + High 8 件 + Medium 4 件 + Review insights 5 件 = 計 21 件 actions** を発見。**Implementation stage 移行 block 状態**、Spec stage iteration v3 で全 fix 必要。
+
+**Spec stage v3 review handoff doc**: `report/I-224-spec-stage-v3-review-handoff.md` に詳細記録 (経緯 + 16 findings + 5 review insights + Option α/β/γ 設計判断 + iteration v3 work breakdown + /start 再開手順)。**`/start` 実行時は本 handoff doc を読んで議論をそのまま継続**。
+
+**主要発見 (Critical findings 抜粋)**:
+- C-1: Rule 1 (1-2) Cartesian product 完全 enumerate 違反 (31/70 cells、~39 cells silent omission、audit script 未検出 = R-1 framework gap signal)
+- C-2: Rule 3 (3-2) NA cells 6/7/8 SWC parser empirical 必須の I-226 defer = Spec stage 違反 (test harness ESM 改修と orthogonal、本 PRD scope で実施可能)
+- C-3: Cell 5 fixture content が cell spec (A0 = no execution) に違反 (fixture に `__ts_main();` call 含む = A1 dispatch test に degrade)
+- C-4: Cell 27 が A5 sub-cells (Empty + Debugger) を 1 row merge = Rule 1 (1-2) 違反
+
+**user 判断必要点 (= H-2、Option α/β/γ)**: cells 14-18/30 Out of Scope rationale が Rule 12 (e-3) Permitted reasons 不在。第三者 review 推奨 = **Option β (B2 + I-226 cohesive batch 化、test harness ESM 改修を本 PRD scope に integrate)**。詳細は handoff doc Section 4.1 参照。
+
+**次着手 (`/start` 再開時)**:
+1. `report/I-224-spec-stage-v3-review-handoff.md` を読んで議論経緯 + 16 findings + Option α/β/γ 把握
+2. user 判断確認 (= H-2 Option β 推奨)
+3. iteration v3 着手 (= 16 件 fix + 5 件 action items 全 resolve)
+4. iteration v3 self-review pass + audit-prd-rule10-compliance.py PASS で Spec stage 真の完了判定 → user 承認 → Implementation stage T1-T6 (Option β なら T1-T9) 移行
+
+**plan.md chain への影響 (Option 別)**:
+- Option α 採用時: 現状 chain (B2 close → B3 → I-162 → ... → I-D → I-177 → ... → I-226 別 PRD として後続) 維持
+- Option β 採用時: I-224 scope に I-226 統合 = chain から I-226 entry 削除、TODO の I-226 entry も削除予定
+- Option γ 採用時: framework rule update を含むため I-D scope 拡張 + I-226 維持 (= I-D + I-226 + B2 cohesive、scope creep リスク)
 
 **I-205 status**: Implementation Stage T1〜T13 完了 (2026-05-01)、T11 削除済。**T14-T16 は案 β Phase 1-A (I-224 → I-225 → I-162) 完了後に再開**。I-205 architectural concern (= class member access dispatch with getter/setter framework) は **unit tests + CLI manual probes で functional 完成**、E2E green-ify (T14) は universal infra prerequisite block により待機中。
 
@@ -164,6 +185,16 @@ PRD 7 (I-201-B): Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor +
 
 **優先順位は [`.claude/rules/todo-prioritization.md`](.claude/rules/todo-prioritization.md) (L1 > L2 > L3 > L4) および [`.claude/rules/ideal-implementation-primacy.md`](.claude/rules/ideal-implementation-primacy.md) (silent semantic change を最優先) に従う。**
 
+### **`/start` 再開時の最優先 reference doc (2026-05-01 第三者 `/check_job` review 由来)**
+
+**B2 PRD (I-224) Spec stage iteration v3 必要状態**: `report/I-224-spec-stage-v3-review-handoff.md` に詳細記録。
+
+`/start` 実行時の手順:
+1. **本 handoff doc を読む** = 議論経緯 + 16 findings + 5 review insights + H-2 Option α/β/γ 設計判断点 把握
+2. **user 判断確認** (= Option α 現状維持 / **Option β cohesive batch 推奨** / Option γ framework rule update のどれを採用するか)
+3. **iteration v3 着手** = handoff doc Section 4.2 の work breakdown (Critical 4 + High 8 + Medium 4 + Review insights 5 = 21 件 actions) を順次 resolve
+4. iteration v3 self-review pass + `audit-prd-rule10-compliance.py` PASS で Spec stage 真の完了判定
+
 ### 実行順序 (prerequisite chain、案 β 確定 2026-05-01 = Universal infra leverage first + L1 mid-priority)
 
 **案 β 採用根拠 (2026-05-01 user 承認、星取表 20/24 で最良判定)**:
@@ -221,11 +252,14 @@ PRD 7 (I-201-B): Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor +
        │
        ▼
 ═══════════════════════════════════════════════════════════════════════════════
-   案 β Phase 1-C: Methodology infra codify
+   案 β Phase 1-C: Methodology infra codify + Test harness ESM upgrade
 ═══════════════════════════════════════════════════════════════════════════════
        │
        ▼
-[新 PRD I-D: Framework rule integration cohesive batch (D-1 task-ID-based 命名禁止 + D-2 Iteration v18 framework 改善 4 件 + D-3 T7/T8 連続 framework 失敗 signal Rule 10 axis 昇格 + D-4 T5 Iteration v9 lessons + 案 β B2/B3/I-162 lessons integrate) + audit script auto verify] (L4、user 承認 2026-05-01)
+[新 PRD I-D: Framework rule integration cohesive batch (D-1 task-ID-based 命名禁止 + D-2 Iteration v18 framework 改善 4 件 + D-3 T7/T8 連続 framework 失敗 signal Rule 10 axis 昇格 + D-4 T5 Iteration v9 lessons + 案 β B2/B3/I-162 lessons + B2 Spec stage v2 改善 candidates v2-1/v2-2 integrate) + audit script auto verify] (L4、user 承認 2026-05-01)
+       │
+       ▼
+[新 PRD I-226: Test harness ESM support + top-level await Tier 1 (B2 = I-224 spec stage v2 で発覚、Axis C 全 cells = ✗ cells 14-18/30 + NA cells 6/7/8 を cohesive batch で empirical 解決、L4)] (user 確定 2026-05-01)
        │
        ▼
 ═══════════════════════════════════════════════════════════════════════════════
