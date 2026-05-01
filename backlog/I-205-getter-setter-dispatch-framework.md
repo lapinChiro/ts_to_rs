@@ -775,12 +775,13 @@ test fixture site (`src/registry/tests/`、`src/transformer/*/tests/`、`src/pip
 - **(c) Verification method**: Integration test (`tests/i205_invariants_test.rs::test_invariant_4_kind_propagation_lossless`)、Propagation chain test (各 stage で kind が intermediate state に preserve される事を probe)、`Default::default()` fallthrough を可能にする default value 不在 verify (= field add 時に compile error 強制 / explicit init enforcement)
 - **(d) Failure detectability**: silent semantic divergence (kind = Method default で fallthrough → field access fallback で broken pattern 再発)
 
-### INV-5: Visibility consistency (private accessor 外部 access 不能)
+### INV-5: Visibility consistency (private accessor 外部 access 不能、Option B 採用 2026-05-01)
 
 - **(a) Property statement**: `private get x() {}` / `private set x(v) {}` (TS keyword `private` 修飾 accessor) を持つ class の external `obj.x` access は **必ず Tier 2 honest error reclassify** (Rust visibility = `pub` 不在で external invocation 不能、TS の private は runtime で type-checker のみ enforcement で Rust と semantic 一致しない)
 - **(b) Justification**: TS private は runtime に influence せず type-checker のみ。Rust visibility は runtime に厳格適用。両者の semantic divergence を Rust で reproduce 不能 = Tier 2 honest error が ideal。INV-5 違反 = external `obj.x` で private getter `Foo::x` を call 試行 → Rust E0624 compile error (= Tier 2 自動 surface) だが、これを silent ignore (visibility 削除) すると TS private の semantic 違反 + Rust idiom 違反
-- **(c) Verification method**: Integration test (`tests/i205_invariants_test.rs::test_invariant_5_private_accessor_external_access_tier2`)、Probe で `private get x()` を持つ class の external `obj.x` 変換を実行、`UnsupportedSyntaxError::new("access to private accessor", span)` が emit される事を verify
+- **(c) Verification method (T13 (13-c) で Option B fill-in 完了 2026-05-01)**: Integration test `tests/i205_invariants_test.rs::test_invariant_5_private_accessor_external_access_tier2` (getter) + `test_invariant_5_private_setter_external_write_tier2` (setter symmetric counterpart、Layer 3 cross-axis completeness)。Probe で `private get x()` / `private set x(v)` を持つ class の transpile 出力 Rust source を assert: (1) private accessor 生成 method に `pub` modifier 不在、(2) public accessor は `pub` modifier 存在、(3) external `obj.x` / `obj.x = v` access は cell 2 / cell 14 dispatch fires regardless of accessibility (= MethodCall emit 一貫)。Rust E0624 surface は separate consumer module compile context が必要 (本 transpile output のみでは観測不能) のため、**生成側 visibility marker preservation** を proxy として検証
 - **(d) Failure detectability**: silent semantic change if visibility is dropped (TS private が Rust pub になる = encapsulation 緩和)、または compile error if visibility preserved without honest error (= Tier 2 但し user に not transparent)
+- **Option A vs Option B reachability audit (T13 (13-b) 2026-05-01)**: Hono codebase 284 TS files 全件で `private get` / `private set` 0 件 (= reachability = 0)。Option A (= `MethodSignature.accessibility` field 追加 + 50+ site Rule 9 (c) Field-addition symmetric audit + dispatch arm で `UnsupportedSyntaxError::new("access to private accessor", _)` emit) は 0 件 reachability の concern に対し overengineering、recurring problem evidence (I-383 T8' / I-205 T2 で latent kind drop 2 度連続) を考慮し **Option B (status quo) を採用**。Option B mechanism: `resolve_member_visibility(Some(Private), _)` → `Visibility::Private` (= no `pub` modifier) は既に implementation 済 (`src/transformer/classes/helpers.rs:89`)、Rust visibility は runtime に厳格適用 → external invocation で E0624 自動 surface (= Tier 2 honest error 自動成立、no production code change needed)
 
 ### INV-6: Scope boundary preservation (`this.x` ↔ external `obj.x` semantic distinction)
 
@@ -3107,6 +3108,223 @@ T12 (Class Method Getter body `.clone()` 自動挿入、C1 limited pattern) impl
   entry に migration mapping record)
 - **Iteration v19 完了 = T12 task close ready**、次 iteration = T13 (B6/B7 corner cells
   reclassify + INV-5 verification + boundary value test 拡充) 単独 commit へ進む
+
+### Iteration v20 (2026-05-01) = T13 単独 commit 完了 (B6/B7 corner cells verify + INV-5 Option B + boundary value 拡充)
+
+T13 implementation (B6/B7 corner cells lock-in verify + INV-5 reachability audit + boundary
+value test 拡充) 完了 + 4-layer review 1 finding (Layer 3 cross-axis = INV-5 setter symmetric
+probe 不在) 本 T13 内 fix + Defect Classification 5 category trace。**Production code change 0
+LOC、Test code addition only**。
+
+#### T13 implementation summary (本 v20 commit)
+
+- **(13-a) Cells 7/8 Tier 2 honest error reclassify lock-in verify**: T5 で実装済の
+  cells 7 (B6 `method-as-fn-reference (no-paren)`) / 8 (B7 `inherited accessor access`)
+  既存 lock-in test 確認 (`src/transformer/expressions/tests/i_205/read.rs:172` /
+  `read.rs:200`、Decision Table A `Some + is_inherited=true` / `Some + Method` arm 準拠)。
+  追加 production / test 不要、(13-a) verify 完了。
+- **(13-b) INV-5 reachability audit + Option A vs B 判定**: Hono codebase 284 TS files
+  全件 `grep -rEn "private get \w|private set \w"` で **0 件 hit** (= reachability = 0)。
+  Option A (`MethodSignature.accessibility` field 追加 + 50+ site Rule 9 (c) Field-addition
+  symmetric audit + dispatch arm で `UnsupportedSyntaxError::new("access to private
+  accessor", _)` emit) は 0 件 reachability の concern に対し overengineering、recurring
+  problem evidence (I-383 T8' / I-205 T2 で latent kind drop 2 度連続) を考慮し **Option B
+  (status quo) を採用**。Empirical verification: `src/transformer/classes/helpers.rs:89`
+  `resolve_member_visibility(Some(Private), _)` → `Visibility::Private` 既存 mechanism で
+  生成 method に `pub` modifier 不在 → Rust E0624 visibility error が consumer module 経由
+  で **Tier 2 honest error 自動 surface** (no production code change needed)。`## Invariants`
+  INV-5 (b)/(c)(d) wording を Option B 採用 audit 結果 reflect、INV-5 (c) Verification
+  method を更新。
+- **(13-c) INV-5 integration test green-ify**: `tests/i205_invariants_test.rs::
+  test_invariant_5_private_accessor_external_access_tier2` を fill-in、`#[ignore]` 解除。
+  Test contract: (1) private getter 生成 method に `pub` modifier 不在 (`fn x(&self)`
+  form)、(2) public getter は `pub` 存在、(3) external `obj.x` access は cell 2 dispatch
+  fires regardless of accessibility (= MethodCall emit 一貫)。Layer 3 cross-axis review で
+  Setter symmetric counterpart 不在を発見、`test_invariant_5_private_setter_external_write_tier2`
+  追加 fill-in (cell 14 setter dispatch + `set_x` visibility marker preservation probe)、
+  本 T13 内 cross-axis completeness 達成。
+- **(13-d) Multi-step inheritance test N>=3 + cycle corner test**: 既存 T5 で N=2 step
+  cover を boundary value analysis 観点で N>=3 step + partial cycle に拡張、3 件 NEW unit
+  test 追加 (`src/transformer/expressions/tests/i_205/read.rs`):
+  - `test_b7_traversal_n3_step_inheritance_returns_inherited_flag`: A → B → C → D の 4-class
+    chain で D has getter `q`、A から N=3 step propagation で `is_inherited = true` verify
+  - `test_b7_traversal_partial_cycle_with_intermediate_method_returns_inherited_flag`:
+    A → B → C → A partial cycle、method on C のみ。method が cycle 前に存在する case で
+    visited HashSet が cycle に到達せず正しく terminate する事を verify
+  - `test_b7_traversal_partial_cycle_no_method_terminates`: A → B → C → A degenerate cycle
+    で全 class missing_field 不在、deeper cycle (depth=3) でも cycle prevention が機能
+    し infinite loop なく None return 検証 (`test_b7_traversal_cycle_does_not_infinite_loop`
+    の depth=3 拡張版)
+- **Helper integration stubs fill-in (Spec stage F-deep-deep-4 commitment 完成)**:
+  `tests/i205_helper_test.rs` の 4 stubs を **integration-level transpile probe** として
+  fill-in、`#[ignore]` 解除。Layered test design (registry-level unit = `read.rs::
+  test_b7_traversal_*` で cycle / direct / single-step / multi-step N=2 / N>=3 / partial
+  cycle 計 7 件 + integration-level = 本 file 4 件 = `transpile` API 経由 end-to-end
+  probe) で B7 dispatch arm が unit / integration 両 level で symmetric verify 達成:
+  - `test_lookup_method_kind_single_level_inherited_getter`: `Sub extends Base` end-to-end
+    で `Err("inherited accessor access")` Tier 2 honest error fire verify
+  - `test_lookup_method_kind_multi_level_inherited_getter`: `Sub extends Mid extends Base`
+    N=2 step で同様 verify
+  - `test_lookup_method_kind_circular_inheritance_prevention`: `A extends B / B extends A`
+    の degenerate input を `transpile` が panic / infinite loop なく処理する safety probe
+    (registry-level cycle prevention は unit test で別途 verify 済)
+  - `test_lookup_method_kind_direct_vs_inherited_disambiguation`: `Foo { get x() } + f.x`
+    direct (B2) で `Ok` + `f.x()` MethodCall emit verify (B1 vs B7 disambiguation の
+    direct hit path integration probe)
+
+#### Production code: 0 LOC change
+
+T13 は **verify + boundary value extension + INV-5 audit-driven test contract fill-in** の
+test-only commit。Production code は Option B 採用判断により unchanged。
+
+#### `/check_job` 4-layer review (Iteration v20)
+
+- **Layer 1 (Mechanical)**: 0 findings
+  - Test name pattern (`test_<target>_<condition>_<expected>`) 全件準拠
+  - Assertion message に context string + got value 含む
+  - bug-affirming test 不在 (全 assertion が ideal output 固定)
+  - clippy 0 warning / fmt 0 diff / check-file-lines OK (read.rs 756 < 1000 / helper 115 / invariants 229)
+- **Layer 2 (Empirical)**: 0 findings
+  - INV-5 Option B mechanism を CLI probe で empirical verify (`/tmp/probe_inv5b.ts`、
+    `/tmp/probe_priv_setter.ts`) → `private get/set` → no `pub` modifier、`public get/set`
+    → `pub` modifier 存在、external access → MethodCall emit (cell 2 / cell 14 dispatch)
+  - 7 traversal helper unit tests + 4 helper integration tests + 2 INV-5 integration
+    tests 全 green
+  - Production code change 0 LOC = Hono Preservation 確実 (no regression possible at
+    conversion logic level)
+- **Layer 3 (Structural cross-axis)**: 1 finding → 本 T13 内 fix
+  - **Finding**: INV-5 initial fill-in は getter 軸のみ probe (cell 2 dispatch)、Setter
+    symmetric counterpart (cell 14 dispatch) 不在 = Decision Table A / B の symmetric pair
+    invariant 観点で orthogonal axis 漏れ
+  - **Fix**: `test_invariant_5_private_setter_external_write_tier2` 追加 (`set_x` visibility
+    marker + `f.set_x(5.0)` MethodCall + `pub fn set_y` 存在 probe)、本 T13 内 cross-axis
+    completeness 達成
+  - Spec gap 否 (本 review iteration 内で発見 + fix = framework operating as designed)
+- **Layer 4 (Adversarial trade-off)**: 0 findings
+  - **Pre/post matrix**: cells 7/8 (✓ T5 lock-in preserved) / cells 17/26/35-c/41-c/45-dc
+    (✓ T6/T7/T8/T9 lock-in preserved) / N>=3 step + partial cycle (NEW boundary value
+    coverage) / INV-5 getter + setter (NEW Option B test contract)。No regression cell
+  - **Trade-off statement**: Option B 採用 vs Option A trade-off は (13-b) audit で
+    explicit justify。Trade = less informative error message (E0624 vs explicit
+    `UnsupportedSyntaxError`)、Gain = avoid 50+ site Rule 9 (c) symmetric audit cost +
+    recurring problem prevention。Justification = Hono empirical reachability = 0
+  - **Patch vs Structural fix**: pure addition of tests + boundary value extension、
+    no production code change、no patch、no interim placeholder
+
+#### Defect Classification 5 Category
+
+| Category | Count | Action |
+|----------|-------|--------|
+| Grammar gap | 0 | (無し、`TsAccessibility` / Stmt / Expr 全 ast-variants.md 既 record) |
+| Oracle gap | 0 | (無し、Hono codebase empirical audit で reachability = 0 確定) |
+| Spec gap | 0 | (Layer 3 finding は本 review iteration 内で発見 + fix = framework operating、Spec への逆戻り発生なし) |
+| Implementation gap | 1 | (Layer 3 INV-5 setter symmetric probe initial 不在、本 T13 内 fix 済) |
+| Review insight | 1 | (PRD doc INV-5 (b)/(c) wording が Option A spec のままだった = Option B 採用 audit 結果と乖離 → 本 v20 commit で doc 更新済) |
+
+#### Iteration v20 deep deep review (本 T13 内 second-iteration、user 指示 2026-05-01)
+
+Initial 4-layer review pass 後 user 指示で `/check_job deep deep` adversarial second
+iteration を実施。**Layer 1 (Mechanical) で 4 件 finding 追加発見**、**Layer 3 (Structural
+cross-axis) で 3 件 Review insight 追加発見**、本 v20 commit 内 全件本質 fix or 明示
+Review insight として record。
+
+##### Layer 1 deep deep findings (本 v20 内 fix)
+
+- **L1-DD-1**: `test_lookup_method_kind_circular_inheritance_prevention` の assertion
+  message が "should not panic / infinite loop" と書きつつ実際は `is_ok()` assertion =
+  misleading wording。Err 化 silent regression が起きた場合、test failure message が
+  曖昧。Fix: assertion message を "regression lock-in、empty method bodies での registry
+  construction cycle resilience" に refine、empirical observation に基づく Ok expected
+  rationale を明示
+- **L1-DD-2**: `test_lookup_method_kind_direct_vs_inherited_disambiguation` doc が
+  "B1/B2 vs B7 disambiguation" と謳いつつ direct path のみ probe (inherited path は test
+  1 別 fixture)。**Disambiguation の binary 対比が single test 内で完結していない**。
+  Fix: test を both direct + inherited path probe に拡張、single fixture file 内で
+  symmetric pair として disambiguation 対比を completion (test 1 と independent な
+  lock-in、registry-level の `test_b7_traversal_direct_hit_*` / `test_b7_traversal_single_step_*`
+  pair の end-to-end version)
+- **L1-DD-3**: `tests/i205_invariants_test.rs` file-level doc が「Implementation Stage
+  T15 で各 stub に actual probe code を fill in」と書かれたまま、T13 で INV-5 fill-in
+  済の事実と乖離 = doc out of sync。Fix: file-level doc に "Fill-in 状態 (2026-05-01
+  post T13)" sub-section を author、INV-5 = T13 fill-in 完了 / INV-1〜4/6 = T15 defer
+  の現状を明示
+- **L1-DD-4**: INV-5 tests の TS source string literal で `\x20   ` escape sequence
+  (= 4 spaces) を使用、codebase 既存 conventional pattern (`src/transformer/expressions/
+  tests/i_205/compound.rs` 等で `"...\<newline>...\n\..."` 純 line continuation 形式) と
+  乖離。TS は whitespace-insensitive なので indent preservation 不要、コード readability
+  劣化のみ。Fix: 一行 form `"...{ ... } ... { ... }"` に refactor、codebase convention
+  align
+
+##### Layer 3 deep deep findings (Review insight、本 v20 内 record + 一部 deferred)
+
+- **L3-DD-1 (Review insight、defer 不要)**: TS `protected get/set` accessor (→ Rust
+  `pub(crate)` mapping) visibility invariant の **INV-7 candidate** axis。INV-5 (private)
+  と直交する visibility level (`Protected`)、`resolve_member_visibility(Some(Protected),
+  _)` → `Visibility::PubCrate` 既 implementation、external `obj.x` access は consumer
+  module が異なる crate 経由なら Rust E0603 visibility error で **Tier 2 honest error
+  自動 surface** = INV-5 と structural symmetric。Hono codebase audit (T13 内追加):
+  `grep -rEn "protected get \w|protected set \w" /tmp/hono-src/src` で **0 件 hit** =
+  reachability = 0、Option B 適用 sound。INV-7 を separate invariant として記述する
+  cost より、INV-5 の **structural symmetric argument** (= visibility marker
+  preservation を test contract として固定済、protected も同 mechanism で uniform 動作)
+  で記録するのが ideal。Separate TODO / 独立 INV 起票は **不要**、本 v20 entry に
+  記録のみ
+- **L3-DD-2 (Review insight、defer with empirical justification)**: Multiple inheritance via
+  interface extends (`interface A extends B, C, D { ... }` の multiple parents) における
+  `lookup_method_sigs_in_inheritance_chain` の **first-match order-dependent semantic**。
+  class は single extends のみだが interface は multiple extends 可能、registry も
+  `TypeDef::Struct { is_interface: true }` で同 helper を経由するため、`for parent_name
+  in extends` の iteration 順序が Vec insertion order に依存し first-found signature
+  return される behavior は class / interface 両者に適用される。**Spec correction (本
+  /check_problem で発見)**: TS spec は interface accessor signature 宣言 (`interface IFoo
+  { get x(): number; set x(v: number): void; }` 等) を valid に support、ECMAScript class
+  implementation の type signature 用途で reachable な axis。本 axis は T13 / 既存 T5
+  で untested。**Defer rationale (empirical-grounded)**: Hono empirical comprehensive
+  audit (本 /check_problem で実施、`grep` + Python parse 経由): total interfaces=105、
+  multi-extends interfaces=1、interfaces with accessor signatures=0、intersection
+  (multi-extends × accessor signature)=**0**。intersection reachability=0 で Option B
+  symmetric argument (= INV-5 (private) / INV-7 candidate (protected) と同 pattern)
+  適用、本 v20 内 production 修正不要。**Future revisit trigger**: 別 codebase で
+  intersection reachability が non-zero 観測された場合は order-dependent semantic を
+  spec として明記 + test 追加 (= 別 PRD で audit、本 v20 では Review insight として
+  empirical-grounded rationale で record のみ)
+- **L3-DD-3 (Review insight、structural argument で defer 不要)**: INV-5 cross-axis cell
+  coverage は cells 2 (B2 instance Read) + cell 14 (B4 instance Write) の **2 cells のみ
+  test contract** を author。残 cells (cell 5 = B4 Read getter+setter / cell 9 = B8
+  static Read / cell 13 = B2 Write / cell 18 = B7 Write inherited / 等) は untested。
+  **Structural argument**: visibility resolution (`resolve_member_visibility`) は dispatch
+  arm logic と直交し method definition phase (`build_method`) で uniform 適用、cell 2 +
+  cell 14 が pass すれば structural symmetric argument で他 cells も holds。Test contract
+  として cell 5/9/13/18 を追加すると redundant lock-in cost が線形増加、empirical 観点で
+  net negative。**INV-5 の 2-cell test contract で sufficient**、無闇な expansion を
+  避ける judgment call
+
+##### Defect Classification 5 Category (deep deep iteration final)
+
+| Category | Count | Action |
+|----------|-------|--------|
+| Grammar gap | 0 | (無し) |
+| Oracle gap | 0 | (無し、Hono empirical で reachability audit 済 = INV-5 (private) 0 / INV-7 candidate (protected) 0) |
+| Spec gap | 0 | (Layer 1 deep deep findings は本 review iteration 内で発見 + fix = framework operating、Spec への逆戻り発生なし) |
+| Implementation gap | 5 | (initial Layer 3 INV-5 setter symmetric + L1-DD-1/2/3/4、全件本 v20 内 fix 済) |
+| Review insight | 4 | (initial 1 = INV-5 PRD doc wording Option B 反映 + L3-DD-1/L3-DD-2/L3-DD-3、L3-DD-1/3 は structural argument で defer 不要、L3-DD-2 は別 PRD audit 候補) |
+
+#### Iteration v20 完了判定
+
+- T13 architectural concern (= "B6/B7 corner cells Tier 2 honest error reclassify verify
+  + INV-5 visibility consistency invariant lock-in + boundary value coverage 拡充") を
+  unit + integration 両 level で達成 ✓
+- INV-5 reachability audit (Option A vs B) を Hono empirical で確定、Option B 採用 ✓
+- INV-7 candidate (protected accessor) reachability も Hono empirical で 0 件確認、
+  INV-5 と structural symmetric argument で coverage 達成 ✓
+- Quality gate (fmt 0 diff / clippy 0 warning / file-lines OK / test 全 pass) ✓
+- 4-layer review **initial pass + deep deep iteration 累積**: Layer 2/4 = 0 findings、
+  Layer 1 = 4 findings (L1-DD-1〜4)、Layer 3 = 1 finding initial + 3 findings deep deep
+  (L3-DD-1〜3) ✓ 全件本 v20 内 fix or 明示 Review insight 化
+- Defect Classification (cumulative): Grammar/Oracle/Spec gap = 0、Implementation gap 5
+  (Layer 3 + L1-DD-1〜4、本 v20 内 fix 済)、Review insight 4 (PRD doc + L3-DD-1〜3)
+- **Iteration v20 完了 = T13 task close ready**、次 iteration = T14 (E2E fixtures
+  green-ify、Depends on T1-T10/T12/T13、I-162 prerequisite block 明示)
 
 ---
 

@@ -501,6 +501,179 @@ fn test_b7_traversal_direct_hit_returns_not_inherited() {
     assert!(!is_inherited, "direct hit must mark as not inherited");
 }
 
+// -----------------------------------------------------------------------------
+// Multi-step inheritance N>=3: A extends B extends C extends D, D has method
+// (Boundary value extension beyond N=2、T13 (13-d) Iteration v9 second-review #2 source)
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_b7_traversal_n3_step_inheritance_returns_inherited_flag() {
+    // Direct registry-level test: 4-class chain A → B → C → D で D has getter `q`、A から
+    // lookup すると **N=3 step propagation** を経由して is_inherited = true を返す。
+    // Boundary value analysis (testing.md "Recursive Function Termination" + "Boundary
+    // Value Analysis"): single-step (N=1) と N=2 と N>=3 step は recursive depth が
+    // 異なるため独立 test 必須。深い chain で visited HashSet が早期 hit せず正しく
+    // descend する事を verify (cycle prevention と orthogonal な depth boundary)。
+    let mut reg = TypeRegistry::new();
+    let mut d_methods = std::collections::HashMap::new();
+    d_methods.insert(
+        "q".to_string(),
+        vec![MethodSignature {
+            params: vec![],
+            return_type: Some(RustType::Bool),
+            has_rest: false,
+            type_params: vec![],
+            kind: MethodKind::Getter,
+        }],
+    );
+    reg.register(
+        "D".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: d_methods,
+            constructor: None,
+            call_signatures: vec![],
+            extends: vec![],
+            is_interface: false,
+        },
+    );
+    for (child, parent) in [("C", "D"), ("B", "C"), ("A", "B")] {
+        reg.register(
+            child.to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![],
+                methods: std::collections::HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![parent.to_string()],
+                is_interface: false,
+            },
+        );
+    }
+    let (sigs, is_inherited) = reg
+        .lookup_method_sigs_in_inheritance_chain("A", "q")
+        .expect("expected hit on great-grand-parent (N=3 step) getter");
+    assert!(
+        is_inherited,
+        "N=3 step inheritance must mark as inherited (= great-grand-parent class)"
+    );
+    assert_eq!(sigs.len(), 1, "must return single signature");
+    assert_eq!(
+        sigs[0].kind,
+        MethodKind::Getter,
+        "must preserve MethodKind::Getter from D through C → B → A"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Partial cycle in middle of chain: A → B → C → A (with method on intermediate C)
+// (T13 (13-d) Iteration v9 second-review #2 source、cycle prevention boundary)
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_b7_traversal_partial_cycle_with_intermediate_method_returns_inherited_flag() {
+    // Direct registry-level test: cycle が中間にある degenerate chain
+    // A extends B / B extends C / C extends A、method on C のみ。
+    // A から lookup → A.methods 不在 → B traverse → B.methods 不在 → C traverse →
+    // C.methods で hit (`q`) → is_inherited = true return。cycle (C → A) が hit する前に
+    // method 発見、visited HashSet が cycle に到達せず正しく terminate する事を verify。
+    // test_b7_traversal_cycle_does_not_infinite_loop (= method 不在で全 cycle traverse)
+    // と orthogonal: 本 test は **method が cycle 前に存在** する partial cycle case。
+    let mut reg = TypeRegistry::new();
+    let mut c_methods = std::collections::HashMap::new();
+    c_methods.insert(
+        "q".to_string(),
+        vec![MethodSignature {
+            params: vec![],
+            return_type: Some(RustType::F64),
+            has_rest: false,
+            type_params: vec![],
+            kind: MethodKind::Getter,
+        }],
+    );
+    reg.register(
+        "A".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: std::collections::HashMap::new(),
+            constructor: None,
+            call_signatures: vec![],
+            extends: vec!["B".to_string()],
+            is_interface: false,
+        },
+    );
+    reg.register(
+        "B".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: std::collections::HashMap::new(),
+            constructor: None,
+            call_signatures: vec![],
+            extends: vec!["C".to_string()],
+            is_interface: false,
+        },
+    );
+    reg.register(
+        "C".to_string(),
+        TypeDef::Struct {
+            type_params: vec![],
+            fields: vec![],
+            methods: c_methods,
+            constructor: None,
+            call_signatures: vec![],
+            extends: vec!["A".to_string()],
+            is_interface: false,
+        },
+    );
+    let (sigs, is_inherited) = reg
+        .lookup_method_sigs_in_inheritance_chain("A", "q")
+        .expect("expected hit on C through A → B → C (partial cycle, method before cycle close)");
+    assert!(
+        is_inherited,
+        "method found via traversal must mark as inherited (= via parent chain)"
+    );
+    assert_eq!(sigs.len(), 1, "must return single signature");
+    assert_eq!(
+        sigs[0].kind,
+        MethodKind::Getter,
+        "must preserve MethodKind::Getter from C through A → B → C"
+    );
+}
+
+#[test]
+fn test_b7_traversal_partial_cycle_no_method_terminates() {
+    // Direct registry-level test: cycle がある chain で method が **どこにも存在しない**
+    // case。A extends B / B extends C / C extends A、全 class に missing_field 不在。
+    // A から lookup → 全 chain を visited HashSet が track しつつ traverse → cycle で
+    // None return、infinite loop なし。test_b7_traversal_cycle_does_not_infinite_loop
+    // (= 直接 cycle A↔B) の depth=3 拡張版、deeper cycle でも cycle prevention が機能
+    // する事を verify。
+    let mut reg = TypeRegistry::new();
+    for (name, parent) in [("A", "B"), ("B", "C"), ("C", "A")] {
+        reg.register(
+            name.to_string(),
+            TypeDef::Struct {
+                type_params: vec![],
+                fields: vec![],
+                methods: std::collections::HashMap::new(),
+                constructor: None,
+                call_signatures: vec![],
+                extends: vec![parent.to_string()],
+                is_interface: false,
+            },
+        );
+    }
+    let result = reg.lookup_method_sigs_in_inheritance_chain("A", "missing_field");
+    assert!(
+        result.is_none(),
+        "deeper cycle (A→B→C→A) with no method must return None, got: {result:?}"
+    );
+}
+
 // =============================================================================
 // Read defensive dispatch arms (matrix cell 化なし、Iteration v10 second-review C1 補完)
 // =============================================================================
