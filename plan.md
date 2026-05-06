@@ -9,13 +9,13 @@
 
 ---
 
-## 現在の状態 (2026-05-01 post I-205 T13 Iteration v20 完了 = B6/B7 corner cells Tier 2 honest error reclassify lock-in verify + INV-5 visibility consistency invariant Option B 採用 audit + 5 NEW integration tests + 3 NEW registry-level boundary value tests、production code 0 LOC change)
+## 現在の状態 (2026-05-06 post I-224 T1-1 完了 = TS_MAIN_RENAME constant + I-154 namespace doc 整備 + label-form prefix lock-in test 1 件追加、no behavioral change)
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | **111/158 (70.3%)** = T7/T8/T9/T10/T12 baseline と同一 (Preservation、production code 0 LOC change のため確実に no regression) |
+| Hono bench clean | **111/158 (70.3%)** = T7/T8/T9/T10/T12 baseline と同一 (Preservation、production code 0 LOC behavioral change のため確実に no regression) |
 | Hono bench errors | **63** (T7/T8/T9/T10/T12 baseline と同一、no new compile errors、本 PRD scope 外への regression 0 件) |
-| cargo test (lib) | 3358 pass / 0 fail / 0 ignored (I-205 T13 = 3355 T12 baseline + 3 T13 NEW = `test_b7_traversal_n3_step_inheritance_returns_inherited_flag` + `test_b7_traversal_partial_cycle_with_intermediate_method_returns_inherited_flag` + `test_b7_traversal_partial_cycle_no_method_terminates`) |
+| cargo test (lib) | 3359 pass / 0 fail / 0 ignored (I-224 T1-1 = 3358 baseline + 1 NEW = `i154_labeled_break_rejects_ts_main_prefix`) |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
 | cargo test (E2E) | 159 pass + 70 `#[ignore]` |
@@ -57,7 +57,7 @@
 
 | Phase | Sub-commits | Status |
 |---|---|---|
-| T1: `__ts_` namespace + collision detection | T1-1 / T1-2 / T1-3 (= INV-5 fill-in + 4-layer review) | 🔜 **次着手 (T1-1)** |
+| T1: `__ts_` namespace + collision detection | ~~T1-1~~ ✓ / T1-2 / T1-3 (= INV-5 fill-in + 4-layer review) | 🔜 **次着手 (T1-2)** |
 | T2: IR enums + helper | T2-1 / T2-2 / T2-3 (= INV-3 partial + INV-6 + 4-layer review) | 未着手 |
 | T3: fn main synthesis + rename + substitute + Axis B/E probes | T3-1 / T3-2 / T3-3 / T3-4 (= Axis E + A5a probes + 4-layer review) | 未着手 |
 | T4: transform_module refactor + pub fn init 廃止 | T4-1 / T4-2 / T4-3 (= INV-4 + 4-layer review) | 未着手 |
@@ -67,10 +67,12 @@
 | T8: Top-level await synthesis logic | T8-1 / T8-2 / T8-3 (= INV-3 full coverage + 4-layer review) | 未着手 |
 | T9: Axis C1 cells e2e green + Hono bench verify | T9-1 / T9-2 (= **`[CLOSE]` PRD 完了**) | 未着手 |
 
-**次の `/start` で着手する task = T1-1 (TS_MAIN_RENAME constant + I-154 namespace doc 整備、infrastructure、no behavioral change)**:
-- **Work**: `src/transformer/expressions/mod.rs:57-98` に `TS_MAIN_RENAME: &str = "__ts_main"` constant 追加 + doc comment + I-154 namespace reservation rule doc 内 `__ts_main` 追記
-- **Quality gate**: cargo check pass + I-154 namespace test 拡張 (existing `__ts_old`/`__ts_new`/`__ts_recv` test pattern を踏襲して `__ts_main` test ケース追加)
-- **Commit message**: `[WIP] I-224 T1-1: TS_MAIN_RENAME constant + I-154 namespace doc 整備 (no behavioral change、constant + doc 追加のみ)`
+**T1-1 完了 (2026-05-06)**: `src/transformer/expressions/mod.rs` に `TS_MAIN_RENAME: &str = "__ts_main"` constant 追加 (`#[allow(dead_code)]` で T3 consume 待ち forward declaration、`TS_OLD_BINDING` cross-reference 経由 I-154 namespace reservation rationale 共有) + `src/transformer/statements/mod.rs:27-46` の I-154 doc を 4 category (labels / value bindings / rename target) 構造化更新 + `src/transformer/statements/tests/loops.rs:263-281` の I-154 lint section doc list を同 4 category 化 + `i154_labeled_break_rejects_ts_main_prefix` test (label-form prefix lint が `__ts_main` を cover することの regression 保護) 追加。**Quality gate**: cargo check pass / cargo test --lib 3359 pass (3358 + 1 NEW) / cargo fmt 0 diff / cargo clippy 0 warning。**Commit (proposed)**: `[WIP] I-224 T1-1: TS_MAIN_RENAME constant + I-154 namespace doc 整備 (no behavioral change、constant + doc 追加のみ)`。
+
+**次の `/start` で着手する task = T1-2 (`__ts_main` collision validator + Tier 2 honest error reject、value-binding side の module-level scan)**:
+- **Work**: `src/transformer/statements/mod.rs:39-48` の既存 `check_ts_internal_label_namespace` validator と symmetric な `check_ts_internal_fn_name_namespace(fn_name: &str, span: Span) -> Result<()>` 新規 validator 追加 + module-level scan で `function __ts_main()` / `const __ts_main = ...` 等 collision detection + `UnsupportedSyntaxError::new("`__ts_main` is reserved for transpiler-internal use; user must rename", span)` emission path 追加
+- **Quality gate**: matrix # 9/19/20 fixture が Tier 2 honest error reject 出力 + collision-merged cells 29/39/40/49/59/69/79/80 で同 dispatch path 共通 invariant 確認
+- **Commit message**: `[WIP] I-224 T1-2: __ts_main collision validator + Tier 2 honest error reject (matrix # 9/19/20 + collision-merged 29/39/40/49/59/69/79/80)`
 - **Co-Authored-By**: `Claude Opus 4.7 (1M context) <noreply@anthropic.com>`
 
 **plan.md chain 影響**: Option β 採用で I-226 entry を chain から削除済 (= 本 plan.md の chain section)、I-224 scope は Axis C0 + Axis C1 cohesive batch (T1-T9 sequence、計 23 sub-commits)。

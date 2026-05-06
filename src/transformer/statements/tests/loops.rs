@@ -262,10 +262,17 @@ fn test_convert_stmt_for_loop_multiple_declarators() {
 
 // ============ I-154 T6: `__ts_` prefix label namespace lint tests ============
 //
-// User labels starting with `__ts_` are reserved for ts_to_rs internal emission
-// (`__ts_switch`, `__ts_try_block`, `__ts_do_while`, `__ts_do_while_loop`).
+// User labels starting with `__ts_` are reserved for ts_to_rs internal emission.
+// Currently reserved internal identifiers (single source of truth: doc on
+// `check_ts_internal_label_namespace` in src/transformer/statements/mod.rs):
+//   - labels:         `__ts_switch`, `__ts_try_block`, `__ts_do_while`,
+//                     `__ts_do_while_loop`
+//   - value bindings: `__ts_old`, `__ts_new`, `__ts_recv`
+//   - rename target:  `__ts_main` (user `main` rename target — see
+//                     `TS_MAIN_RENAME` in src/transformer/expressions/mod.rs)
 // The lint fires at 3 entry points: labeled stmt declaration, labeled break,
-// labeled continue.
+// labeled continue. The mechanism is `label.sym.starts_with("__ts_")` —
+// shared across all 3 entry points, all reserved names.
 
 #[test]
 fn i154_labeled_stmt_rejects_ts_internal_prefix() {
@@ -314,6 +321,29 @@ fn i154_labeled_continue_rejects_ts_internal_prefix() {
             }
         },
         "expected UnsupportedSyntaxError for `continue __ts_do_while;`, got {result:?}"
+    );
+}
+
+#[test]
+fn i154_labeled_break_rejects_ts_main_prefix() {
+    // `__ts_main` is the user-`main` rename target reserved by the namespace
+    // (see `TS_MAIN_RENAME` in src/transformer/expressions/mod.rs). This
+    // regression test locks in that the prefix-based label lint covers
+    // `__ts_main` — exercised at the `break` entry point as a representative,
+    // since the lint mechanism (`label.sym.starts_with("__ts_")`) is shared
+    // across all 3 entry points (declaration / break / continue) and adding
+    // a new reserved name does not change which entry points fire.
+    let src = "function f() { for (;;) { break __ts_main; } }";
+    let result = crate::transpile_collecting(src);
+    assert!(
+        result.is_err() || {
+            if let Ok((_rust, unsupported)) = &result {
+                unsupported.iter().any(|u| u.kind.contains("__ts_"))
+            } else {
+                false
+            }
+        },
+        "expected UnsupportedSyntaxError for `break __ts_main;`, got {result:?}"
     );
 }
 

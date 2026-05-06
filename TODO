@@ -880,6 +880,25 @@ block しない** latent imprecision として TODO 化する。
 - **[I-124]** E2E: 高度なクラス機能
 - **[I-125]** E2E: 既存スクリプトのエッジケース
 
+### Test framework refactor (parameterize / table-driven matrix coverage)
+
+- **[I-227]** **I-154 namespace lint test の parameterize refactor: full (reserved-name × entry-point) matrix coverage への拡張 (PRD I-224 T1-1 `/check_problem` 由来、2026-05-06 起票)** [**L4** (defect detection 力は equivalence-class 観点で sufficient、本 refactor なしでも regression risk negligible、cleanliness 観点での structural improvement)] — `src/transformer/statements/tests/loops.rs:263-355` の I-154 lint test 群 (現在 4 tests = 3 prefix-rejecting + 1 sanity + 本 PRD T1-1 で追加した `i154_labeled_break_rejects_ts_main_prefix`、計 5 tests) は **「1 representative reserved name × 1 entry point per test」 の diagonal pattern** で coverage を提供している。Reserved name 列 (現状 4 = `__ts_switch` / `__ts_do_while` / `__ts_main` / `__ts_foo` (test-only sample)) × Entry-point 列 (3 = `Stmt::Labeled` 宣言 / labeled break / labeled continue) の **full 12-cell matrix のうち diagonal 4 cells のみ exercised**、残 8 cells は uncovered。
+  - **現状 mechanism**: `check_ts_internal_label_namespace` (`src/transformer/statements/mod.rs:55`) の lint は `label.sym.starts_with("__ts_")` 1 行 — entry point / 名前から独立。equivalence-class 観点では 1 cell coverage で defect detection 力 sufficient だが、mechanism share 前提が将来破れた場合 (例: hardcoded list dispatch への切り替え) は uncovered cells で silent regression が発生する theoretical possibility あり。
+  - **現状 coverage gap (8 cells)**:
+    - `__ts_switch` × {Stmt::Labeled 宣言, continue}
+    - `__ts_do_while` × {Stmt::Labeled 宣言, break}
+    - `__ts_main` × {Stmt::Labeled 宣言, continue}
+    - `__ts_foo` × {break, continue}
+  - **修正方針 (structural、3 案)**:
+    - **案 A (table-driven 1 monolithic test)**: `#[test] fn i154_label_lint_full_matrix()` で `let cases = [(name, entry_point), ...]` の 12 + 1 (sanity = non-prefixed name) cells を for-loop iterate。Pros: DRY、新 reserved name 追加で自動拡張。Cons: 1 cell failure で test 全体停止 (sub-case isolation 欠如)、failure message での cell identify が手作り。
+    - **案 B (rstest crate 導入 + parameterized test)**: `#[rstest]` `#[case(...)]` macro で 12 + 1 cells を独立 test 化。Pros: cell-level isolation 維持 + DRY、failure に case label 自動 attach。Cons: dependency 追加 (rstest crate)、本 codebase は rstest 未使用 = ecosystem 拡張が他 test にも波及する判断。
+    - **案 C (paste! macro による code generation)**: `paste::paste!` macro で 12 + 1 個別 `#[test] fn` を生成。Pros: 個別 test isolation + DRY、外部 crate 不要 (paste は既に std-likely)。Cons: macro debugging tooling 弱、failure stack trace が less readable。
+  - **本 T1-1 で deferred 理由**: T1-1 architectural concern は「`__ts_main` を namespace に追加し、reserved として lock-in」、本 refactor は **I-154 lint test framework 全体の coverage philosophy 改修** に相当 (= 既存 4 tests も含む structural rewrite、`1 PRD = 1 architectural concern` 観点で別 concern)。本 PRD I-224 scope に integrate すると scope creep。
+  - **影響範囲**: `src/transformer/statements/tests/loops.rs:263-355` (~100 LOC) のみ。本 framework refactor は I-154 lint mechanism 自体は touch せず、test layer のみ改修。Production code 0 LOC change、Hono bench 影響 0、defect risk negligible (test redundancy elimination のみ、coverage は強化方向のみ)。
+  - **着手要件 (Spec stage)**: 案 A/B/C の比較 (cohesion + DRY + isolation + tooling 4 軸 trade-off matrix)、Phase B 系 priority 観点での後続 PRD と統合 cohesive batch 判定 (例: 本 PRD I-D の framework rule integration cohesive batch に sibling integrate 可能性 — `audit-prd-rule10-compliance.py` の test pattern 検出 audit script 化候補と同 framework refactor として cohesion 良好)、reserved name 列 enumeration の single source of truth 化 (= constants-list import + dynamic test generation で `__ts_*` constants 追加時 test 自動拡張)。
+  - **Resolution target**: framework / test refactor PRD として discrete 起票、または PRD I-D (framework rule integration cohesive batch) に sibling integrate 検討。発見経緯: PRD I-224 T1-1 `/check_problem` 振り返り (2026-05-06) で T1-1 で追加した `__ts_main` × `break` 1 cell test の symmetric coverage 不在を identify、Option 1 (defer) 採用判断時に本 entry 起票。
+  - 🔗 PRD I-D (framework rule integration cohesive batch、本 entry を sibling integrate 候補)、I-154 (namespace lint mechanism 本体、本 entry は I-154 の test layer のみ touch)
+
 ### `.claude/rules/` corpus optimization 後続 (I-178 + I-183 batch close 由来 2026-04-25)
 
 - **[I-184]** `.claude/rules/INDEX.md` 新設 — 21 rule の俯瞰 meta-doc。各 rule の (a) 1-line summary, (b) when-to-apply key trigger, (c) layer (L0/L1/L2/L3) を一覧化することで rule corpus の hierarchy 可視化、新規参加者の onboarding 時間短縮、rule 重複検出を構造化。Layer 区分: L0 = `ideal-implementation-primacy`、L1 = PRD framework (problem-space-analysis / spec-first-prd / spec-stage-adversarial-checklist / check-job-review-layers / post-implementation-defect-classification / prd-completion / prd-design-review / design-integrity)、L2 = priority/TODO (todo-prioritization / todo-entry-standards / conversion-correctness-priority / conversion-feasibility / type-fallback-safety)、L3 = workflow/hygiene (incremental-commit / pre-commit-doc-sync / bulk-edit-safety / command-output-verification / dependencies / pipeline-integrity / testing)。**Resolution target**: 後続 PRD で対応可、新規参加者導入時に着手推奨

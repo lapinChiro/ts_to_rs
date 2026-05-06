@@ -24,11 +24,29 @@ use crate::transformer::{extract_pat_ident_name, TypePosition, UnsupportedSyntax
 use mutability::mark_mutated_vars;
 use nullish_assign::fuse_nullish_assign_shadow_lets;
 
-/// I-154: The `__ts_` prefix namespace is reserved for ts_to_rs internal label
-/// emission (`__ts_switch`, `__ts_try_block`, `__ts_do_while`, `__ts_do_while_loop`).
+/// I-154: The `__ts_` prefix namespace is reserved for ts_to_rs internal
+/// emission. Reserved identifiers (single source of truth):
+///
+/// - **Labels** (T6): `__ts_switch`, `__ts_try_block`, `__ts_do_while`,
+///   `__ts_do_while_loop`
+/// - **Value bindings** (T7, expressions/mod.rs): `__ts_old`
+///   ([`super::expressions::TS_OLD_BINDING`]), `__ts_new`
+///   ([`super::expressions::TS_NEW_BINDING`]), `__ts_recv`
+///   ([`super::expressions::TS_RECV_BINDING`])
+/// - **Function rename target** (I-224 T1, expressions/mod.rs): `__ts_main`
+///   ([`super::expressions::TS_MAIN_RENAME`]) — used to rename a user-defined
+///   top-level `main` so the synthesized `fn main` entry point can occupy the
+///   `main` symbol
+///
 /// User labels starting with `__ts_` are rejected at all 3 label-introducing /
 /// label-referencing sites (`Stmt::Labeled` declaration, labeled `Stmt::Break`,
 /// labeled `Stmt::Continue`) to prevent silent collision with internal labels.
+/// (Symmetric enforcement for user-defined function/value names that collide
+/// with the rename target `__ts_main` is provided by a sibling module-level
+/// validator added in a follow-up implementation step — until that validator
+/// lands, the reservation of `__ts_main` here is documentation-only at the
+/// fn-name level; the label-side prefix lint already covers any
+/// `__ts_`-prefixed label, including `__ts_main`.)
 ///
 /// SWC parser accepts `break undefined_label;` (tsx catches it with "Undefined label"
 /// syntax error, but SWC does not). Without lint on labeled break/continue, user

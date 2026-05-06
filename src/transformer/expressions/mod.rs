@@ -48,12 +48,17 @@ pub(crate) use binary::convert_binary_op;
 /// ## I-154 namespace reservation extension
 ///
 /// The `__ts_` prefix namespace is reserved for ts_to_rs internal emission per
-/// the [I-154 rule](crate::transformer::statements) (originally for labels:
-/// `__ts_switch`, `__ts_try_block`, `__ts_do_while`, `__ts_do_while_loop`).
-/// T7 (Iteration v11) extends the reservation from labels (statement-level) to
-/// **value bindings** (expression-level) — user TS code containing identifiers
-/// like `_old` / `_new` cannot collide with this emission inside the inner
-/// block scope, ensuring hygiene without case-by-case collision check.
+/// the [I-154 rule](crate::transformer::statements) (the
+/// [`crate::transformer::statements::check_ts_internal_label_namespace`] doc
+/// holds the canonical list of reserved identifiers across all extensions).
+/// Originally introduced for labels (`__ts_switch`, `__ts_try_block`,
+/// `__ts_do_while`, `__ts_do_while_loop`); T7 (Iteration v11) extends the
+/// reservation from labels (statement-level) to **value bindings**
+/// (expression-level) — user TS code containing identifiers like `_old` /
+/// `_new` cannot collide with this emission inside the inner block scope,
+/// ensuring hygiene without case-by-case collision check. I-224 T1 further
+/// extends the reservation to the user-`main` rename target
+/// ([`TS_MAIN_RENAME`]).
 pub(super) const TS_OLD_BINDING: &str = "__ts_old";
 
 /// Binding name for prefix UpdateExpr / compound assign **new-value**
@@ -96,6 +101,36 @@ pub(super) const TS_NEW_BINDING: &str = "__ts_new";
 /// Single source of truth for the IIFE receiver binding name (see
 /// [`TS_OLD_BINDING`] for the I-154 namespace reservation extension rationale).
 pub(super) const TS_RECV_BINDING: &str = "__ts_recv";
+
+/// Identifier name used to **rename a user-defined top-level `main`** when
+/// ts_to_rs synthesizes its own `fn main` from top-level executable code
+/// (I-224 = B2 fn main mechanism).
+///
+/// In TypeScript a top-level user function `main()` is just an ordinary
+/// callable; in Rust, however, `fn main` must be reserved for the synthesized
+/// program entry point. To preserve the user's `main` semantics (callable,
+/// referenced from other call sites — see INV-2) without colliding with the
+/// synthesized entry, the user's `main` is renamed to `__ts_main` and all
+/// in-source `main()` call sites are substituted accordingly.
+///
+/// Used by I-224 T3 (synthesize / rename / substitute) and downstream
+/// dispatch — kept as a single source of truth so the rename target cannot
+/// drift across emission sites.
+///
+/// ## I-154 namespace reservation extension
+///
+/// `__ts_main` joins the `__ts_` prefix namespace already reserved for
+/// transpiler-internal emission ([`TS_OLD_BINDING`], [`TS_NEW_BINDING`],
+/// [`TS_RECV_BINDING`] for value bindings; `__ts_switch`, `__ts_try_block`,
+/// `__ts_do_while`, `__ts_do_while_loop` for labels). The canonical list of
+/// reserved identifiers is maintained at
+/// [`crate::transformer::statements::check_ts_internal_label_namespace`].
+/// Reservation rationale is recorded in [`TS_OLD_BINDING`].
+#[allow(dead_code)] // Consumed by I-224 T1-2 (collision-validator error wording) and
+                    // T3 (synthesize_fn_main / rename / substitute); declared in T1-1
+                    // as the single source of truth for the rename target so neither
+                    // consumer can drift from the literal.
+pub(super) const TS_MAIN_RENAME: &str = "__ts_main";
 
 impl<'a> Transformer<'a> {
     /// Converts an SWC [`ast::Expr`] into an IR [`Expr`].
