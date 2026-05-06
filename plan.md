@@ -51,9 +51,29 @@
 
 **handoff doc archive note**: `report/I-224-spec-stage-v3-review-handoff.md` (557 行) は iteration v3 開始時点の議論経緯 + 16 findings + 5 review insights + Option α/β/γ 設計判断記録、本 doc は iteration v3 完了で **archive 候補** (= `report/archive/I-224-spec-stage-v3-review-handoff-archived.md` へ move、iteration v3 完了後の post-mortem reference として preserve)。
 
-**次着手 (Implementation stage T1-T9)**: user 承認後 Implementation stage 移行可能。
+**次着手 (Implementation stage T1-T9、user 確定 2026-05-01 で 23 sub-commits decomposition 採用)**: 各 T を 2-4 sub-commits に decompose、各 sub-commit で cargo check / cargo test (該当 scope) / cargo fmt / cargo clippy 全 pass + commit message format `[WIP] I-224 T<N>-<sub>: <single-focus deliverable>` (中間) / `[WIP] I-224 T<N> 完了: <T-level summary> + 4-layer review pass` (T-完了) / `[CLOSE] I-224 PRD 完了: ...` (T9-2 final)。
 
-**plan.md chain 影響**: Option β 採用で I-226 entry を chain から削除済 (= 本 plan.md の chain section)、I-224 scope は Axis C0 + Axis C1 cohesive batch (T1-T9 sequence)。
+**Implementation stage progress chain (23 sub-commits、PRD doc Implementation Stage Tasks section の Sub-commits 一覧 table 参照)**:
+
+| Phase | Sub-commits | Status |
+|---|---|---|
+| T1: `__ts_` namespace + collision detection | T1-1 / T1-2 / T1-3 (= INV-5 fill-in + 4-layer review) | 🔜 **次着手 (T1-1)** |
+| T2: IR enums + helper | T2-1 / T2-2 / T2-3 (= INV-3 partial + INV-6 + 4-layer review) | 未着手 |
+| T3: fn main synthesis + rename + substitute + Axis B/E probes | T3-1 / T3-2 / T3-3 / T3-4 (= Axis E + A5a probes + 4-layer review) | 未着手 |
+| T4: transform_module refactor + pub fn init 廃止 | T4-1 / T4-2 / T4-3 (= INV-4 + 4-layer review) | 未着手 |
+| T5: E2E green-ify (existing C0) + I-205 cell-09 unblock | T5-1 / T5-2 (= NEW C0 + INV-7 + 4-layer review) | 未着手 |
+| T6a: I-154 doc + audit script CI integration | T6a (single sub-commit、4-layer review 内包) | 未着手 |
+| T7: Test harness ESM upgrade permanent integration | T7-1 / T7-2 (= --esm CI flow + 4-layer review) | 未着手 |
+| T8: Top-level await synthesis logic | T8-1 / T8-2 / T8-3 (= INV-3 full coverage + 4-layer review) | 未着手 |
+| T9: Axis C1 cells e2e green + Hono bench verify | T9-1 / T9-2 (= **`[CLOSE]` PRD 完了**) | 未着手 |
+
+**次の `/start` で着手する task = T1-1 (TS_MAIN_RENAME constant + I-154 namespace doc 整備、infrastructure、no behavioral change)**:
+- **Work**: `src/transformer/expressions/mod.rs:57-98` に `TS_MAIN_RENAME: &str = "__ts_main"` constant 追加 + doc comment + I-154 namespace reservation rule doc 内 `__ts_main` 追記
+- **Quality gate**: cargo check pass + I-154 namespace test 拡張 (existing `__ts_old`/`__ts_new`/`__ts_recv` test pattern を踏襲して `__ts_main` test ケース追加)
+- **Commit message**: `[WIP] I-224 T1-1: TS_MAIN_RENAME constant + I-154 namespace doc 整備 (no behavioral change、constant + doc 追加のみ)`
+- **Co-Authored-By**: `Claude Opus 4.7 (1M context) <noreply@anthropic.com>`
+
+**plan.md chain 影響**: Option β 採用で I-226 entry を chain から削除済 (= 本 plan.md の chain section)、I-224 scope は Axis C0 + Axis C1 cohesive batch (T1-T9 sequence、計 23 sub-commits)。
 
 **I-205 status**: Implementation Stage T1〜T13 完了 (2026-05-01)、T11 削除済。**T14-T16 は案 β Phase 1-A (I-224 → I-225 → I-162) 完了後に再開**。I-205 architectural concern (= class member access dispatch with getter/setter framework) は **unit tests + CLI manual probes で functional 完成**、E2E green-ify (T14) は universal infra prerequisite block により待機中。
 

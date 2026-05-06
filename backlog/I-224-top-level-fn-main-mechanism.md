@@ -1215,87 +1215,201 @@ INV-5 で `__ts_main` reservation rule の structural enforcement を保証す�
 
 (TDD 順: RED → GREEN → REFACTOR、Spec stage 完了 + user 承認後着手。iteration v3 Option β cohesive batch で T7/T8/T9 追加 + T6 split per third-party review H-8。Tier-transition compliance = broken-fix PRD)
 
-### T1: `__ts_` namespace reservation extension + collision detection
+### Commit policy (こまめに commit、user 確定 2026-05-01 post-Spec-stage closure)
 
-- **Work**: I-154 の `__ts_` reserved list に `__ts_main` 追加 (= `src/transformer/expressions/mod.rs:57-98` に `TS_MAIN_RENAME: &str = "__ts_main"` constant 追加)、user identifier validation で `__ts_main` を reject (= `src/transformer/statements/mod.rs:39-48` 参照の既存 `check_ts_internal_label_namespace` validator と symmetric な `check_ts_internal_fn_name_namespace` 新規追加)、matrix # 9/19/20 用 `UnsupportedSyntaxError::new("`__ts_main` is reserved for transpiler-internal use; user must rename", span)` emission path 追加
-- **Completion criteria**: I-154 namespace test 拡張で `__ts_main` reserved verify、matrix # 9/19/20 fixture が Tier 2 honest error reject 出力 + collision-merged cells 29/39/40/49/59/69/79/80 で同 dispatch path 共通 invariant 確認 (third-party adversarial re-review (3rd round) High 3 fix で cell 40 を本 list に追加)
-- **Depends on**: TS-1〜TS-7
+各 T (T1〜T9) を **2-4 sub-commits** に decompose、合計 **23 sub-commits** で Implementation を完遂。各 sub-commit は以下の単一焦点 deliverable + commit-time invariants を満たす:
 
-### T2: `MainStmt` IR + `UserMainKind` enum + `collect_top_level_executions` helper
+- **単一焦点 deliverable**: 1 sub-commit = 1 architectural change category (constant 追加 / validator 新規 / IR enum 追加 / dispatch tree 統合 / refactor / e2e green-ify / etc.)
+- **Quality gate per commit**: cargo check + cargo test (該当 scope) + cargo fmt --all --check + cargo clippy --all-targets -- -D warnings 全 pass
+- **Commit message format** (per `incremental-commit.md`): `[WIP] I-224 T<N>-<sub>: <single-focus deliverable>` (中間 sub-commits) / `[WIP] I-224 T<N> 完了: <T-level summary> + 4-layer review pass` (T-完了 commit、`/check_job` 4-layer review post-fix を含む) / `[CLOSE] I-224 PRD 完了: ...` (T9-2 final commit のみ)
+- **`/check_job` 4-layer review timing**: 各 T 完了 commit (= 各 T の最後の sub-commit) で実施、Layer 1-4 全 0 findings or 全 fix 後に commit
 
-- **Work**: 新 `MainStmt` enum (variants: Expr (sync) / ExprAwait (top-await Stmt::Expr) / Let / LetAwait (top-await Decl::Var) / Debugger reclassify error)、`UserMainKind` enum (None / FnSync / FnAsync / NonFn / Collision)、`collect_top_level_executions(module: &Module) -> (Vec<MainStmt>, UserMainKind, IsAsyncRequired)` shared helper を新規 module `src/transformer/main_synthesis.rs` に実装。Decl::Var dual-path classifier `classify_decl_var_path(var: &VarDecl, is_executable_mode: bool) -> DeclVarPath` (= LibraryMode / ToplevelConst / FnMainBodyCapture) も同 module 内
-- **Completion criteria**: helper unit test (= 80 cell input variation の representative cells × expected (MainStmt vec, UserMainKind, is_async_required) tuple、orthogonality-merged cells は representative dispatch verify)、INV-6 verify (= TypeResolver layer touch なし)、INV-3 sync/async dispatch トリガー条件の boundary value test (= Trigger 1 (B2) only / Trigger 2 (C1) only / Trigger 1+2 combined / no trigger)
-- **Depends on**: T1
+### T1: `__ts_` namespace reservation extension + collision detection (3 sub-commits)
 
-### T3: fn main synthesis + user main rename + main() substitution + Axis B/E orthogonality probe
+#### T1-1: TS_MAIN_RENAME constant + I-154 namespace doc 整備 (infrastructure、no behavioral change)
 
-- **Work**: `Transformer::synthesize_fn_main(main_stmts: Vec<MainStmt>, user_main: UserMainKind, is_async: bool) -> Vec<Item>` 実装、user main rename (B1a/B1b/B1c forms 全 → `__ts_main` 変名、Axis B B1 orthogonality merge legitimacy lock-in)、convert_expr の Call arm に `Ident("main")` → `Ident("__ts_main")` substitute logic 追加 (Transformer state field `user_main_substitution: bool`、async case では `__ts_main().await` への substitute)。Axis E orthogonality probe `test_axis_e_export_preserve_symmetric` も追加 (= representative cells 11/13/31 から E1 form を probe で `pub` modifier preserve verify)
-- **Completion criteria**: 
-  - representative in-scope cells (matrix # 11-20, 31-40, 71-80 のうち non-orthogonality-merged) の dispatch logic を unit test で verify (cell-by-cell の expected IR token-level assert)
-  - `test_axis_b_b1a_b_c_rename_dispatch_symmetric` (B1 3 forms 全 → `__ts_main` rename + main() substitute symmetric) 追加
-  - `test_axis_e_export_preserve_symmetric` (E1 form で `pub` modifier preserve) 追加
-  - Multi-call boundary value test (= cell-31 fixture probe で全 call sites substituted) (INV-2 verification)
-- **Depends on**: T2
+- **Work**: `src/transformer/expressions/mod.rs:57-98` に `TS_MAIN_RENAME: &str = "__ts_main"` constant 追加 + doc comment で B2 architectural concern (= user main rename target identifier) 記録 + I-154 namespace reservation rule doc 内 `__ts_main` 追記 + reservation rationale 記載
+- **Completion criteria**: cargo check pass、I-154 namespace test 拡張で `__ts_main` reserved 認識 verify (= existing `__ts_old`/`__ts_new`/`__ts_recv` test pattern を踏襲して `__ts_main` test ケース追加)
+- **Commit**: `[WIP] I-224 T1-1: TS_MAIN_RENAME constant + I-154 namespace doc 整備 (no behavioral change、constant + doc 追加のみ)`
+- **Depends on**: TS-1〜TS-7 (Spec stage approved)
 
-### T4: `transform_module` / `transform_module_collecting` refactor + `pub fn init` 廃止
+#### T1-2: check_ts_internal_fn_name_namespace validator + module-level collision scan + Tier 2 reject emission
 
-- **Work**: `transform_module` / `transform_module_collecting` の logic を T2 helper + T3 synthesis 経由に refactor、`init_stmts` → `main_stmts` rename、`build_init_fn` 削除、`build_main_fn` 新規追加。`transform_module_item` の `_ => Err` を expand (ModuleItem 全 variant explicit enumerate、Rule 11 d-1 compliance)、A4 (control-flow) cells で wording 改善 (`UnsupportedSyntaxError::new("ControlFlow at top-level requires fn main wrapping; lift to a named function or use I-203 future expansion", span)`)、A5b (Debugger) cells で wording 改善 (`UnsupportedSyntaxError::new("`debugger` statement has no Rust equivalent (= compile-time `panic!()` or `std::dbg!()` を user 自身で選択)", span)`)
-- **Completion criteria**: cargo test 全 pass (`pub fn init` 言及の test は新 form に migrate)、`audit-ast-variant-coverage.py --files src/transformer/mod.rs` で `_` arm violation 0 件 (本 PRD scope file)、CI script `scripts/audit-no-pub-fn-init.sh` で codebase 0 hits
-- **Depends on**: T3
+- **Work**: `src/transformer/statements/mod.rs:39-48` 参照の既存 `check_ts_internal_label_namespace` validator と symmetric な `check_ts_internal_fn_name_namespace(fn_name: &str, span: Span) -> Result<()>` 新規 validator 追加 + module-level scan で `function __ts_main()` / `const __ts_main = ...` 等 collision detection + `UnsupportedSyntaxError::new("`__ts_main` is reserved for transpiler-internal use; user must rename", span)` emission path 追加
+- **Completion criteria**: matrix # 9/19/20 fixture が Tier 2 honest error reject 出力 + collision-merged cells 29/39/40/49/59/69/79/80 で同 dispatch path 共通 invariant 確認 (third-party adversarial re-review (3rd round) High 3 fix で cell 40 を本 list に追加)
+- **Commit**: `[WIP] I-224 T1-2: __ts_main collision validator + Tier 2 honest error reject (matrix # 9/19/20 + collision-merged 29/39/40/49/59/69/79/80)`
 
-### T5: E2E fixture green-ify + NEW fixtures creation + I-205 cell-09 unblock
+#### T1-3: INV-5 invariants test fill-in + 4-layer review
 
-- **Work**: 
-  - TS-3 で red 状態だった既存 fixture (i-224 配下) を green 化
-  - NEW fixtures (cells 32/34/36/38/40/41/72/74/75/77/78/79/80) を `tests/e2e/scripts/i-224/cell-NN-*.ts` で作成 + `scripts/record-cell-oracle.sh --esm --no-auto-main` (or appropriate flags) で expected output 記録
-  - I-205 cell-09 (static-only、本 PRD のみ依存) を green 化、`#[ignore]` 解除
-  - Tier-transition compliance verify (= existing Tier 2 errors transition Tier 1 = improvement、no new compile errors)
-- **Completion criteria**: `cargo test --test e2e_test` 全 pass (本 PRD scope cells)、Hono bench Tier-transition compliance ("Improvement" or "Preservation" 結果、新 compile errors 0 件)、cell-09 の `#[ignore]` 解除
-- **Depends on**: T4
+- **Work**: `tests/i224_invariants_test.rs::test_invariant_5_ts_main_namespace_reservation_with_collision_priority` の `#[ignore]` 解除 + fill-in (全 reachable B4 cells で transpile → Err with collision wording assert + INV-5 collision priority arm が A/C 軸 dispatch より先行 reject 確認、cells 49/59/69 の A4/A5a/A5b + B4 cases も同 wording で reject) + `/check_job` 4-layer review
+- **Completion criteria**: `test_invariant_5_*` green (`#[ignore]` 解除)、Layer 1-4 全 0 findings (or 全 fix 後 0 findings)
+- **Commit**: `[WIP] I-224 T1 完了: INV-5 collision priority structural lock-in (invariants test fill-in) + 4-layer review pass`
 
-### T6a: I-154 namespace doc + audit script CI integration (B2 scope、third-party review H-8 fix で T6 split)
+### T2: `MainStmt` IR + `UserMainKind` enum + `collect_top_level_executions` helper (3 sub-commits)
 
-- **Work**: 
-  - I-154 namespace doc に `__ts_main` 追記 + reservation rationale (= 本 PRD source) 記載
-  - `scripts/audit-no-pub-fn-init.sh` (TS-7 で新規作成) を CI workflow `.github/workflows/ci.yml` に integrate
-- **Completion criteria**: I-154 doc update PR、CI step 追加 PR、`scripts/audit-no-pub-fn-init.sh` が CI で 0 hits invariant lock-in
+#### T2-1: IR enums + predicates 新規 (src/transformer/main_synthesis.rs 新規 module)
+
+- **Work**: 新規 module `src/transformer/main_synthesis.rs` 作成 + `MainStmt` enum (variants: `Expr(IrExpr)` / `ExprAwait(IrExpr)` / `Let { name, init }` / `LetAwait { name, init }`) + `UserMainKind` enum (None / FnSync / FnAsync / NonFn / Collision) + `InitKind` enum (Lit / SideEffect / AwaitInit) + `DeclVarPath` enum (LibraryMode / ToplevelConst / FnMainBodyCapture) + `classify_init_kind` / `has_side_effect_init` / `classify_decl_var_path` predicates 実装 + `is_executable_mode(module: &Module) -> bool` predicate 実装 (Stmt 全 variants explicit enumerate per Rule 11 (d-1) self-applied compliance、PRD doc Design section #3 spec を踏襲)
+- **Completion criteria**: cargo check pass、`audit-ast-variant-coverage.py --files src/transformer/main_synthesis.rs` で `_` arm violation 0 件 (Rule 11 (d-1) self-applied)、まだ呼び出し不在で behavioral change なし
+- **Commit**: `[WIP] I-224 T2-1: IR enums (MainStmt/UserMainKind/InitKind/DeclVarPath) + predicates (Rule 11 (d-1) self-applied compliant)`
+
+#### T2-2: collect_top_level_executions shared helper + 80-cell representative unit tests
+
+- **Work**: `collect_top_level_executions(module: &Module) -> (Vec<MainStmt>, UserMainKind, bool /* has_top_level_await */)` shared helper 実装、80 cells representative input variation × expected (MainStmt vec, UserMainKind, has_top_level_await) tuple unit test (orthogonality-merged cells は representative dispatch verify) + `tests/i224_helper_test.rs::test_dispatch_arm_one_to_one_mapping_per_in_scope_cell` の `#[ignore]` 解除 + fill-in
+- **Completion criteria**: helper unit test 全 pass + 80-cell coverage、`test_dispatch_arm_one_to_one_mapping_per_in_scope_cell` green
+- **Commit**: `[WIP] I-224 T2-2: collect_top_level_executions shared helper + 80-cell coverage helper unit test (Rule 9 (a) 1-to-1 mapping lock-in)`
+
+#### T2-3: INV-3 + INV-6 invariants test fill-in + 4-layer review
+
+- **Work**: `test_invariant_3_sync_async_dispatch_consistency_4_subcases` (4 sub-cases boundary value、ただし C1 cells は T8 fill-in で完成、本 sub-commit では C0 cells のみ覆う partial fill-in) + `test_invariant_6_type_resolver_layer_unaffected` の `#[ignore]` 解除 + fill-in + `/check_job` 4-layer review
+- **Completion criteria**: 2 invariants test green、`cargo test --lib pipeline::type_resolver::` 全 pass、Layer 1-4 全 0 findings (or 全 fix 後 0 findings)
+- **Commit**: `[WIP] I-224 T2 完了: INV-3 (sync/async dispatch C0 partial) + INV-6 (TypeResolver layer separation) invariants test fill-in + 4-layer review pass`
+
+### T3: fn main synthesis + user main rename + main() substitution + Axis B/E orthogonality probe (4 sub-commits)
+
+#### T3-1: synthesize_fn_main impl (3-tuple match dispatch tree、Rule 9 (a) 1-to-1 mapping)
+
+- **Work**: `Transformer::synthesize_fn_main(main_stmts: Vec<MainStmt>, user_main: UserMainKind, has_top_level_await: bool) -> Vec<Item>` 実装 = 3-tuple match dispatch tree per Rule 9 (a) 1-to-1 mapping table (PRD doc Design section #2 + mapping table 参照)、各 leaf の Rust IR Item 生成 (sync `fn main` / `#[tokio::main] async fn main` / library mode no fn main / collision Tier 2 reject)
+- **Completion criteria**: synthesize_fn_main unit test (in-scope reachable cells representative coverage、12 dispatch arms 各々で 1 representative cell の expected IR token-level assert)
+- **Commit**: `[WIP] I-224 T3-1: synthesize_fn_main impl (3-tuple match dispatch tree、Rule 9 (a) 1-to-1 mapping、12 reachable arms unit test)`
+
+#### T3-2: User main rename logic (B1 3 forms common dispatch) + Axis B orthogonality probe test fill-in
+
+- **Work**: User function `main` (B1a function decl / B1b const arrow / B1c const fn expr) detection 後 `Item::Fn { name: "__ts_main", ... }` rename emit logic + `tests/i224_helper_test.rs::test_axis_b_b1a_b_c_rename_dispatch_symmetric` の `#[ignore]` 解除 + fill-in (3 forms 共通 dispatch unit test)
+- **Completion criteria**: 3 forms 共通 `__ts_main` rename + Axis B orthogonality probe test green
+- **Commit**: `[WIP] I-224 T3-2: User main rename logic (B1 3 forms common dispatch) + Axis B orthogonality probe test fill-in`
+
+#### T3-3: main() call substitution + INV-2 multi-call boundary value test fill-in
+
+- **Work**: `convert_expr` の `Call` arm に `Ident("main")` → `Ident("__ts_main")` substitute logic 追加 + Transformer state field `user_main_substitution: bool` + async case では `__ts_main().await` への substitute (T8 で full coverage、本 sub-commit は sync substitute 中心) + `tests/i224_invariants_test.rs::test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase` の `#[ignore]` 解除 + fill-in (cell-31 multi-call boundary value で全 main() call sites substituted)
+- **Completion criteria**: INV-2 invariants test green + cell-31 fixture probe で全 main() call sites substituted
+- **Commit**: `[WIP] I-224 T3-3: main() call substitution (sync) + INV-2 multi-call boundary value (cell-31) invariants test fill-in`
+
+#### T3-4: Axis E orthogonality probe + A5a compositional probe + 4-layer review
+
+- **Work**: `tests/i224_helper_test.rs::test_axis_e_export_preserve_symmetric` (Axis E E1 form で `pub` modifier preservation rule + `__ts_main` rename target は private = INV-5 整合) + `test_axis_a5a_compositional_orthogonality_with_b_axis` (cells 51/53/55/57/59 orthogonal composition probe) の `#[ignore]` 解除 + fill-in + `/check_job` 4-layer review
+- **Completion criteria**: 2 helper test green、Layer 1-4 全 0 findings (or 全 fix 後 0 findings)
+- **Commit**: `[WIP] I-224 T3 完了: Axis E `pub` modifier preservation + A5a compositional orthogonality test fill-in + 4-layer review pass`
+
+### T4: `transform_module` / `transform_module_collecting` refactor + `pub fn init` 廃止 (3 sub-commits)
+
+#### T4-1: transform_module + transform_module_collecting refactor (collect_top_level_executions integration + 3-tuple dispatch tree match)
+
+- **Work**: `transform_module` / `transform_module_collecting` の logic を T2 helper (`collect_top_level_executions`) + T3 synthesis (`synthesize_fn_main`) 経由に refactor、`init_stmts` → `main_stmts` rename、shared helper で DRY 解消 (= 既存 transform_module / transform_module_collecting 重複 logic を `collect_top_level_executions` 経由 unified path に集約)
+- **Completion criteria**: cargo test 全 pass (本 sub-commit 時点 `pub fn init` 言及 test は temporarily 残存、T4-2 で migrate)、cells 9-31 in-scope representative dispatch verify
+- **Commit**: `[WIP] I-224 T4-1: transform_module refactor (collect_top_level_executions + 3-tuple dispatch tree integration、pub fn init 削除前)`
+
+#### T4-2: transform_module_item _ arm refactor (Rule 11 d-1) + Tier 2 wording 改善 + build_init_fn 削除 + build_main_fn 新規
+
+- **Work**: `transform_module_item` の `_ => Err` を expand (ModuleItem 全 variant explicit enumerate、Rule 11 (d-1) compliance) + A4 (control-flow) cells で wording 改善 (`UnsupportedSyntaxError::new("ControlFlow at top-level requires fn main wrapping; lift to a named function or use I-203 future expansion", span)`) + A5b (Debugger) cells で wording 改善 (`UnsupportedSyntaxError::new("`debugger` statement has no Rust equivalent (= compile-time `panic!()` or `std::dbg!()` を user 自身で選択)", span)`) + `build_init_fn` helper 削除 + `build_main_fn` 新規追加 + 既存 `pub fn init` 言及 test を新 form (= fn main synthesis) に migrate
+- **Completion criteria**: cargo test 全 pass、`audit-ast-variant-coverage.py --files src/transformer/mod.rs` で `_` arm violation 0 件 (本 PRD scope file)、`scripts/audit-no-pub-fn-init.sh` exit=0 (= INV-4 codebase invariant 達成)
+- **Commit**: `[WIP] I-224 T4-2: transform_module_item _ arm refactor (Rule 11 d-1) + Tier 2 wording 改善 + build_init_fn 削除 (audit-no-pub-fn-init.sh exit=0)`
+
+#### T4-3: INV-4 invariants test fill-in + 4-layer review
+
+- **Work**: `tests/i224_invariants_test.rs::test_invariant_4_no_pub_fn_init_in_codebase_post_t4` の `#[ignore]` 解除 + fill-in (subprocess invoke で `scripts/audit-no-pub-fn-init.sh` exit=0 assert + Rust source 内 `pub fn init` 0 hits grep verify) + `/check_job` 4-layer review
+- **Completion criteria**: INV-4 test green、Layer 1-4 全 0 findings
+- **Commit**: `[WIP] I-224 T4 完了: INV-4 (pub fn init 廃止 codebase invariant lock-in) invariants test fill-in + 4-layer review pass`
+
+### T5: E2E fixture green-ify (existing C0) + I-205 cell-09 unblock (2 sub-commits)
+
+#### T5-1: Existing C0 cells green-ify + I-205 cell-09 unblock + INV-1 source-order invariants test fill-in
+
+- **Work**: 既存 C0 fixtures (cell-09/10/11/12/13/21-24/28/29/31) を `cargo test --test e2e_test` で green 化 (= ts_to_rs 出力が tsx oracle と byte-exact match) + I-205 cell-09 (static-only、本 PRD のみ依存) を green 化、`tests/e2e_test.rs` の `#[ignore]` 解除 + `tests/i224_invariants_test.rs::test_invariant_1_ts_rust_execution_order_byte_exact` の `#[ignore]` 解除 + fill-in (representative C0 cells で TS stdout vs cargo run stdout byte-exact match)
+- **Completion criteria**: `cargo test --test e2e_test` で本 PRD scope C0 cells (cells 9/11/13/15/17/19/21/23/25/27/31/33/35/37/71/73/77 等) 全 pass + I-205 cell-09 unblocked + INV-1 test green
+- **Commit**: `[WIP] I-224 T5-1: Existing C0 cells e2e green-ify + I-205 cell-09 unblock + INV-1 source-order invariants test fill-in`
+
+#### T5-2: NEW C0 fixtures green + INV-7 audit test fill-in + 4-layer review
+
+- **Work**: NEW C0 fixtures (cell-41 control-flow Tier 2 + cell-75 + cell-77 + cell-79) を green 化 + `tests/i224_invariants_test.rs::test_invariant_7_pub_fn_init_external_api_audit_post_t4` の `#[ignore]` 解除 + fill-in (post-T4 state で `init()` call site 0 件 + Hono bench Tier-transition compliance result classification = Improvement or Preservation を確認) + `/check_job` 4-layer review
+- **Completion criteria**: NEW C0 cells (matrix # 41/75/77/79) e2e green + INV-7 test green + Hono bench Tier-transition compliance pass、Layer 1-4 全 0 findings
+- **Commit**: `[WIP] I-224 T5 完了: NEW C0 fixtures e2e green + INV-7 external API audit invariants test fill-in + 4-layer review pass`
+
+### T6a: I-154 namespace doc + audit script CI integration (B2 scope、third-party review H-8 fix で T6 split) (1 sub-commit)
+
+#### T6a: I-154 doc update + audit-no-pub-fn-init.sh CI integration + 4-layer review
+
+- **Work**: I-154 namespace doc (`.claude/rules/` 配下 or 該当 doc location) に `__ts_main` 追記 + reservation rationale (= 本 PRD source) 記載 + `scripts/audit-no-pub-fn-init.sh` (Spec stage TS-7 で新規作成済) を CI workflow `.github/workflows/ci.yml` に integrate (= PR merge gate として動作) + `/check_job` 4-layer review
+- **Completion criteria**: I-154 doc update、CI step 追加、`scripts/audit-no-pub-fn-init.sh` が CI で 0 hits invariant lock-in 動作確認、Layer 1-4 全 0 findings
+- **Commit**: `[WIP] I-224 T6a 完了: I-154 namespace doc update + scripts/audit-no-pub-fn-init.sh CI integration + 4-layer review pass`
 - **Depends on**: T5
-- **Note**: 旧 T6 に含まれていた `audit-prd-rule10-compliance.py` reinforce task は本 task から除外、framework rule integration は **別 PRD I-D scope** へ migrate (= R-1 + R-5 と統合、Rule 1/12 framework 改善 candidate)
+- **Note**: 旧 T6 に含まれていた `audit-prd-rule10-compliance.py` reinforce task は本 task から除外、framework rule integration は **別 PRD I-D scope** へ migrate (= R-1〜v6-2 計 13 candidates、Rule 1/12 framework 改善)
 
-### T7: Test harness ESM upgrade permanent integration (Option β cohesive batch infra)
+### T7: Test harness ESM upgrade permanent integration (Option β cohesive batch infra) (2 sub-commits)
 
-- **Work**: 
-  - TS-5 trial implementation を CI 化 (= `scripts/observe-tsc.sh --esm --no-auto-main` を CI workflow から正式 invoke)
-  - `tests/e2e/rust-runner/Cargo.toml` に tokio runtime 依存追加 (= `tokio = { version = "1", features = ["macros", "rt-multi-thread"] }` 等、`#[tokio::main]` macro 用)
-  - `tests/e2e_test.rs` runner template を ESM-mode に拡張 (= top-await を含む Rust binary を build / cargo run で execute、tokio runtime context で正しく実行)
-- **Completion criteria**: 
-  - `tests/e2e/rust-runner/` で cells 12/14/16/18/20/32/34/36/38/40/72/74/76/78/80 (Axis C1 in-scope cells) の Rust 出力が `#[tokio::main] async fn main()` で wrap、cargo run 成功 + tsc stdout と byte-exact match
-  - CI で `--esm` mode が default for top-await fixtures (cells 14-18/30 + NEW Axis C1 cells)
-- **Depends on**: T6a
+#### T7-1: rust-runner tokio dependency + e2e_test.rs ESM-mode runner template
 
-### T8: Top-level await synthesis logic implementation (Option β cohesive batch transpiler)
+- **Work**: `tests/e2e/rust-runner/Cargo.toml` に `tokio = { version = "1", features = ["macros", "rt-multi-thread"] }` 等の runtime 依存追加 (= `#[tokio::main]` macro 用) + `tests/e2e_test.rs` runner template を ESM-mode に拡張 (= top-await を含む Rust binary を build / cargo run で execute、tokio runtime context で正しく実行) + 既存 e2e harness が新 ESM-mode template と互換動作することを verify
+- **Completion criteria**: `tests/e2e/rust-runner/` で `#[tokio::main] async fn main()` wrap が build pass + cargo run 成功 (本 sub-commit 時点 cells 12/14 等 representative C1 で probe)
+- **Commit**: `[WIP] I-224 T7-1: rust-runner tokio dependency + e2e_test.rs ESM-mode runner template`
 
-- **Work**: 
-  - INV-3 wording revise を実装 (= sync/async dispatch trigger を `is_user_main_async || has_top_level_await` に拡張)
-  - `Stmt::Expr(Expr::Await)` capture into `MainStmt::ExprAwait` IR variant、Rust 側 `expr.await;` emission
-  - `Decl::Var with Expr::Await init` capture into `MainStmt::LetAwait` IR variant、Rust 側 `let v = init.await;` emission
-  - Sync user main + top-await mixed case の non-await call wrapping (= cell 14 で sync `__ts_main()` を async fn から非 await call で invoke、INV-3 (c) edge case verification)
-  - cells 12/14/16/18/20 + 32-40 + 72-80 (Axis C1 in-scope cells) の dispatch logic 完成
-- **Completion criteria**: 
-  - Axis C1 in-scope cells の unit test pass (T2 helper unit test 拡張)
-  - INV-3 (c) 4 sub-cases (Trigger 1 only / Trigger 2 only / Trigger 1+2 combined / no trigger) full coverage
-- **Depends on**: T7
+#### T7-2: scripts/observe-tsc.sh --esm permanent CI flow + 4-layer review
 
-### T9: Axis C1 cells e2e fixture green-ify (Option β cohesive batch verification)
+- **Work**: `scripts/observe-tsc.sh --esm --no-auto-main` を CI workflow から正式 invoke (= Spec stage TS-5 trial implementation の permanent integration) + `--esm` mode が default for top-await fixtures (cells 14-18/30 + NEW Axis C1 cells) + `/check_job` 4-layer review
+- **Completion criteria**: CI で Axis C1 fixtures が ESM mode で正しく oracle observation 取得、Layer 1-4 全 0 findings
+- **Commit**: `[WIP] I-224 T7 完了: scripts/observe-tsc.sh --esm permanent CI flow + 4-layer review pass`
 
-- **Work**: 
-  - 既存 fixture cells 14-18/30 (旧 numbering、新 matrix # 12/14/16/18/20/76) の e2e green-ify
-  - NEW fixtures (matrix # 32/34/36/38/40/72/74/78/80) の e2e green-ify
-  - Tier-transition compliance: 全 Axis C1 cells が pre-PRD broken (compile fail in cjs context) → post-PRD Tier 1 (compile-pass + tsc runtime stdout 一致 in ESM mode)
-- **Completion criteria**: 
-  - `cargo test --test e2e_test` で全 Axis C1 in-scope fixtures green
-  - Hono bench Tier-transition compliance verify (Hono 内 top-await 使用 reachability TBD、empirical scan で 0 件確認 or improvement)
-- **Depends on**: T8
+### T8: Top-level await synthesis logic implementation (Option β cohesive batch transpiler) (3 sub-commits)
+
+#### T8-1: INV-3 sync/async dispatch trigger 拡張 + Stmt::Expr(Expr::Await) MainStmt::ExprAwait emission
+
+- **Work**: sync/async dispatch trigger を `is_user_main_async || has_top_level_await` に拡張 (= INV-3 wording revise 実装) + `Stmt::Expr(Expr::Await)` capture into `MainStmt::ExprAwait` IR variant + Rust 側 `expr.await;` emission (= cells 12/14/16/18/72/74/76/78 で `#[tokio::main] async fn main()` body 内 await emission)
+- **Completion criteria**: Axis C1 cells with Stmt::Expr-form await の unit test pass (T2 helper unit test 拡張で Trigger 2 only sub-case coverage)
+- **Commit**: `[WIP] I-224 T8-1: INV-3 sync/async dispatch trigger 拡張 (has_top_level_await) + Stmt::Expr(Expr::Await) MainStmt::ExprAwait emission`
+
+#### T8-2: Decl::Var(await init) MainStmt::LetAwait emission + cell 14/34/74 sync user main + top-await mixed wrapping
+
+- **Work**: `Decl::Var with Expr::Await init` capture into `MainStmt::LetAwait` IR variant + Rust 側 `let v = init.await;` emission (= cells 32/34/36/38) + Sync user main + top-await mixed case の non-await call wrapping (= cell 14/34/74 で sync `__ts_main()` を async fn main 内から非 await call で invoke、INV-3 (c) edge case verification)
+- **Completion criteria**: cells 32/34/36/38 で `let v = init.await;` emission 確認 + cell 14/34/74 で `__ts_main()` 非 await call from async fn main 確認
+- **Commit**: `[WIP] I-224 T8-2: Decl::Var(await init) MainStmt::LetAwait emission + cell 14/34/74 sync user main + top-await mixed wrapping (INV-3 (c) edge case)`
+
+#### T8-3: INV-3 invariants test full coverage (4 sub-cases + Edge sub-case) + 4-layer review
+
+- **Work**: `tests/i224_invariants_test.rs::test_invariant_3_sync_async_dispatch_consistency_4_subcases` の T2-3 で partial fill-in 状態を **full coverage** に拡張 (= Trigger 1 only / Trigger 2 only / Trigger 1+2 combined / Sync no-trigger 4 sub-cases + Edge sub-case (cells 14/34/74) を全て assert) + `/check_job` 4-layer review
+- **Completion criteria**: INV-3 test green for all 4 sub-cases + Edge sub-case、Layer 1-4 全 0 findings
+- **Commit**: `[WIP] I-224 T8 完了: INV-3 invariants test full coverage (4 sub-cases + Edge sub-case for cells 14/34/74) + 4-layer review pass`
+
+### T9: Axis C1 cells e2e fixture green-ify + Hono bench verify (Option β cohesive batch verification) (2 sub-commits)
+
+#### T9-1: Axis C1 cells (existing + NEW) e2e fixture green-ify
+
+- **Work**: 既存 C1 fixtures (cell-14/15/16/17/18/30) + NEW C1 fixtures (cell-32/34/36/38/40 + cell-72/74/78/80) を green 化 (`cargo test --test e2e_test` で全 Axis C1 in-scope cells が ts_to_rs 出力 + cargo run + tsc/tsx stdout の byte-exact match)
+- **Completion criteria**: `cargo test --test e2e_test` で全 Axis C1 in-scope fixtures green
+- **Commit**: `[WIP] I-224 T9-1: Axis C1 cells (existing + NEW、計 14 fixtures) e2e green-ify`
+
+#### T9-2: Hono bench Tier-transition compliance verify + final 4-layer review + PRD close
+
+- **Work**: Hono bench Tier-transition compliance verify (`./scripts/hono-bench.sh` 実行 + `analyze-bench.py` 出力で Improvement or Preservation 判定 + 新 compile errors 0 件 verify) + final `/check_job` 4-layer review + 13-rule self-applied verify final pass + PRD close handling (= TODO entry 削除 + plan.md 「直近の完了作業」table 追加 + backlog file archive marker)
+- **Completion criteria**: Hono bench Improvement or Preservation 結果、final review 全 0 findings、PRD I-224 close、Implementation stage T1-T9 全 sub-commits 累積で genuine PRD completion
+- **Commit**: `[CLOSE] I-224 PRD 完了: Top-level executable script の Rust emission に fn main 自動生成 mechanism + Option β cohesive batch (test harness ESM upgrade + top-await Tier 1) + 計 23 sub-commits 累積 + 全 Quality gate / 4-layer review / 13-rule verify pass + Hono bench Tier-transition compliance`
+
+### Sub-commits 一覧 (実行順、計 23 sub-commits)
+
+| # | Sub-commit | T parent | Quality gate per commit | 4-layer review timing |
+|---|---|---|---|---|
+| 1 | T1-1 | T1 | cargo check | (T1 完了 commit で実施) |
+| 2 | T1-2 | T1 | cargo test (cells 9/19/20) | (T1 完了 commit で実施) |
+| 3 | T1 完了 (= INV-5 fill-in + 4-layer review) | T1 | full test suite | T1-3 commit で実施 |
+| 4 | T2-1 | T2 | cargo check + audit-ast-variant-coverage | (T2 完了 commit で実施) |
+| 5 | T2-2 | T2 | helper unit test + Rule 9 (a) mapping | (T2 完了 commit で実施) |
+| 6 | T2 完了 (= INV-3 partial + INV-6 fill-in + 4-layer review) | T2 | full test suite | T2-3 commit で実施 |
+| 7 | T3-1 | T3 | synthesize_fn_main unit test | (T3 完了 commit で実施) |
+| 8 | T3-2 | T3 | Axis B B1 orthogonality probe test | (T3 完了 commit で実施) |
+| 9 | T3-3 | T3 | INV-2 multi-call boundary value test | (T3 完了 commit で実施) |
+| 10 | T3 完了 (= Axis E + A5a probes + 4-layer review) | T3 | full test suite | T3-4 commit で実施 |
+| 11 | T4-1 | T4 | cargo test (existing + new dispatch path) | (T4 完了 commit で実施) |
+| 12 | T4-2 | T4 | audit-ast-variant-coverage 0 件 + audit-no-pub-fn-init exit=0 | (T4 完了 commit で実施) |
+| 13 | T4 完了 (= INV-4 fill-in + 4-layer review) | T4 | full test suite | T4-3 commit で実施 |
+| 14 | T5-1 | T5 | C0 cells e2e green + INV-1 fill-in | (T5 完了 commit で実施) |
+| 15 | T5 完了 (= NEW C0 + INV-7 fill-in + 4-layer review) | T5 | full e2e + Hono bench Tier-transition | T5-2 commit で実施 |
+| 16 | T6a 完了 (= I-154 doc + CI integrate + 4-layer review) | T6a | CI step verify | T6a commit で実施 (single sub-commit) |
+| 17 | T7-1 | T7 | rust-runner build + cargo run | (T7 完了 commit で実施) |
+| 18 | T7 完了 (= --esm CI flow + 4-layer review) | T7 | CI Axis C1 ESM mode verify | T7-2 commit で実施 |
+| 19 | T8-1 | T8 | Stmt::Expr(Expr::Await) emission unit test | (T8 完了 commit で実施) |
+| 20 | T8-2 | T8 | Decl::Var(await init) emission + cell 14 edge | (T8 完了 commit で実施) |
+| 21 | T8 完了 (= INV-3 full coverage + 4-layer review) | T8 | full test suite | T8-3 commit で実施 |
+| 22 | T9-1 | T9 | C1 cells e2e green | (T9 完了 commit で実施) |
+| 23 | **[CLOSE] T9 完了** = PRD close | T9 | Hono bench Tier-transition + final 4-layer review + 13-rule verify | T9-2 commit で実施 (`[CLOSE]` PRD 完了) |
 
 ## Spec Review Iteration Log (Rule 13 (13-2) hard-code)
 
