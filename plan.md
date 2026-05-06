@@ -31,28 +31,29 @@
 
 **案 β 採用 (2026-05-01)**: I-205 T14 着手判定調査で 3 系統 prerequisite (universal infra: I-224 = B2 fn main mechanism / I-225 = B3 class field literal type inference / I-162 = constructor synthesis) を発見、`1 PRD = 1 architectural concern` 厳格適用 + Universal infra leverage maximization で **案 β (Universal infra leverage first + L1 mid-priority)** を user 承認。星取表 20/24 で 4 案中最良判定。詳細は本 entry 後 chain section 参照。
 
-**進行中: PRD α-1 (I-224 = B2) Spec stage v3 必要 (2026-05-01、第三者 `/check_job` review で Spec stage v2 approval 不適切と判定)** — `backlog/I-224-top-level-fn-main-mechanism.md` (727 行) は iteration v2 self-applied 13-rule verify で Critical=0 / High=0 と self-claim したが、第三者 review で **Critical 4 件 + High 8 件 + Medium 4 件 + Review insights 5 件 = 計 21 件 actions** を発見。**Implementation stage 移行 block 状態**、Spec stage iteration v3 で全 fix 必要。
+**進行中: PRD α-1 (I-224 = B2) Spec stage iteration v6 minor 完了 (2026-05-01、genuine convergence 達成 = 5 rounds adversarial review iteration 全反映 + Critical=0 初達成)** — `backlog/I-224-top-level-fn-main-mechanism.md` (1771 行) を iteration v3 で大規模 rewrite + iteration v3〜v6 adversarial review 順次 fix で 52 件 actions 全 resolve。
 
-**Spec stage v3 review handoff doc**: `report/I-224-spec-stage-v3-review-handoff.md` に詳細記録 (経緯 + 16 findings + 5 review insights + Option α/β/γ 設計判断 + iteration v3 work breakdown + /start 再開手順)。**`/start` 実行時は本 handoff doc を読んで議論をそのまま継続**。
+**iteration v3 + v4 + v5 + v6 minor 主要成果 (旧 21 件 + iteration v3 11 件 + iteration v4 5 件 + iteration v5 13 件 + iteration v6 minor 2 件 = 計 52 件 actions 全 resolve、convergence pattern 21→11→5→13→2 = 84% reduction Critical=0 達成)**:
 
-**主要発見 (Critical findings 抜粋)**:
-- C-1: Rule 1 (1-2) Cartesian product 完全 enumerate 違反 (31/70 cells、~39 cells silent omission、audit script 未検出 = R-1 framework gap signal)
-- C-2: Rule 3 (3-2) NA cells 6/7/8 SWC parser empirical 必須の I-226 defer = Spec stage 違反 (test harness ESM 改修と orthogonal、本 PRD scope で実施可能)
-- C-3: Cell 5 fixture content が cell spec (A0 = no execution) に違反 (fixture に `__ts_main();` call 含む = A1 dispatch test に degrade)
-- C-4: Cell 27 が A5 sub-cells (Empty + Debugger) を 1 row merge = Rule 1 (1-2) 違反
+- **Matrix 拡張**: 31 cells → 80 cells full Cartesian product (Axis A 8 × Axis B 5 × Axis C 2、Axis A5 split into A5a/A5b、Axis E orthogonality merge declaration、third-party review C-1/C-4/M-2 fix)
+- **Option β cohesive batch (user 承認)**: 旧 cells 14-18/30 + 6/7/8 (Out of Scope = I-226 defer 設計) を **In Scope migration**、I-226 PRD 起票撤回 (= TODO + plan.md chain から I-226 references 削除)、test harness ESM upgrade を本 PRD scope に integrate (TS-5/TS-6 + T7/T8/T9 新 task 追加、third-party review H-2 fix)
+- **SWC parser empirical lock-in test 完成**: `tests/swc_parser_top_level_await_test.rs` 4 tests passing で Axis A vs C1 mutual exclusion (25 NA cells) 構造的 lock-in (third-party review C-2 fix)
+- **`scripts/observe-tsc.sh` 拡張**: `--esm` flag (top-await 用 ESM mode) + `--no-auto-main` flag (Spec stage fidelity) を追加、Spec stage で trial 実装完了
+- **Cell-05 fixture fidelity 修正 + Cell 27 split (cell-27a 新規作成)**: third-party review C-3/C-4 fix
+- **Axis B B1 / Axis E orthogonality merge structural verify**: `## Problem Space > Axis B B1 Orthogonality Verification` + `## Problem Space > Axis E Orthogonality Probe` sub-sections 追加 (third-party review H-1/M-2 fix)、Axis E `pub` modifier preservation rule 明示 (`__ts_main` rename target は private = INV-5 整合、third-party review High #2 fix)
+- **Design dispatch tree rewrite (iteration v3 → v4 進化)**: iteration v3 で 4-tuple match (`is_executable_mode`, `user_main_kind`, `is_async_required`, `has_lit_top_level_const`) + collision arm 最優先 + unreachable!() defensive lock-in を導入 → iteration v4 で third-party re-review が axis-tuple ↔ definition mismatch (cells #5/#25 fall to unreachable!()) + A6 cells double-claim 発見、**3-tuple match** (`is_executable_mode`, `user_main_kind`, `has_top_level_await`) に simplify + `has_lit_top_level_const` を per-item runtime decision に移行、Rule 9 (a) 1-to-1 mapping table を Design section 内に hard-code (third-party review Critical #2 fix → iteration v4 Critical 1 + Medium 1 + High 1 fix)
+- **INV 拡張**: INV-3 wording revise (Axis C1 in-scope trigger 反映 + B1+C1 sync edge cells 14/34/74 exhaustive 列挙) + INV-6 (TypeResolver unaffected、R-3 fix) + INV-7 (`pub fn init` external API audit、R-2 fix) 追加
+- **Pre-Implementation Audit Findings section 追加**: `__ts_main` user code grep (R-4 fix、`src/`/`tests/`/`tools/` で 0 hits = INV-5 reachability prerequisite 満たす) + `pub fn init` definition/call site grep (R-2 fix、call site 0 件 = breaking change reachable surface 不在 = INV-7 verify) + `scripts/audit-no-pub-fn-init.sh` 新規作成 (M-3 fix、CI integrate target T6a)
+- **Spec Review Iteration Log v3 entry**: 13-rule self-applied re-verify table + 32 件 actions 全 resolve record + Spec stage 完了判定 ✓
+- **新 framework PRD I-D 起票** (TODO L3、本 entry close 後 access): R-1 + R-5 + iteration v3 framework gap candidates v3-4/5/6 + iteration v4 v4-1/2/3 + iteration v5 v5-1/2 + iteration v6 minor v6-1/2 = **計 13 件 framework 改善 candidates** を集約 = `audit-prd-rule10-compliance.py` の verify functions 拡張 (Cartesian completeness / duplicate matrix detection / dispatch tree pseudocode lint / verdict consistency / cross-reference consistency / `_` arm self-applied compliance / invariant cell list exhaustivity 等) + `spec-stage-adversarial-checklist.md` Rule 5/6/8/9/13 wording 強化 + `spec-first-prd.md` Spec gap PRD 起票 procedure + spec-table-driven generator candidate
 
-**user 判断必要点 (= H-2、Option α/β/γ)**: cells 14-18/30 Out of Scope rationale が Rule 12 (e-3) Permitted reasons 不在。第三者 review 推奨 = **Option β (B2 + I-226 cohesive batch 化、test harness ESM 改修を本 PRD scope に integrate)**。詳細は handoff doc Section 4.1 参照。
+**audit verify 状態**: `audit-prd-rule10-compliance.py backlog/I-224-top-level-fn-main-mechanism.md` PASS ✓ (2026-05-01)、`tests/swc_parser_top_level_await_test.rs` 4 tests passing ✓。
 
-**次着手 (`/start` 再開時)**:
-1. `report/I-224-spec-stage-v3-review-handoff.md` を読んで議論経緯 + 16 findings + Option α/β/γ 把握
-2. user 判断確認 (= H-2 Option β 推奨)
-3. iteration v3 着手 (= 16 件 fix + 5 件 action items 全 resolve)
-4. iteration v3 self-review pass + audit-prd-rule10-compliance.py PASS で Spec stage 真の完了判定 → user 承認 → Implementation stage T1-T6 (Option β なら T1-T9) 移行
+**handoff doc archive note**: `report/I-224-spec-stage-v3-review-handoff.md` (557 行) は iteration v3 開始時点の議論経緯 + 16 findings + 5 review insights + Option α/β/γ 設計判断記録、本 doc は iteration v3 完了で **archive 候補** (= `report/archive/I-224-spec-stage-v3-review-handoff-archived.md` へ move、iteration v3 完了後の post-mortem reference として preserve)。
 
-**plan.md chain への影響 (Option 別)**:
-- Option α 採用時: 現状 chain (B2 close → B3 → I-162 → ... → I-D → I-177 → ... → I-226 別 PRD として後続) 維持
-- Option β 採用時: I-224 scope に I-226 統合 = chain から I-226 entry 削除、TODO の I-226 entry も削除予定
-- Option γ 採用時: framework rule update を含むため I-D scope 拡張 + I-226 維持 (= I-D + I-226 + B2 cohesive、scope creep リスク)
+**次着手 (Implementation stage T1-T9)**: user 承認後 Implementation stage 移行可能。
+
+**plan.md chain 影響**: Option β 採用で I-226 entry を chain から削除済 (= 本 plan.md の chain section)、I-224 scope は Axis C0 + Axis C1 cohesive batch (T1-T9 sequence)。
 
 **I-205 status**: Implementation Stage T1〜T13 完了 (2026-05-01)、T11 削除済。**T14-T16 は案 β Phase 1-A (I-224 → I-225 → I-162) 完了後に再開**。I-205 architectural concern (= class member access dispatch with getter/setter framework) は **unit tests + CLI manual probes で functional 完成**、E2E green-ify (T14) は universal infra prerequisite block により待機中。
 
@@ -252,14 +253,14 @@ PRD 7 (I-201-B): Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor +
        │
        ▼
 ═══════════════════════════════════════════════════════════════════════════════
-   案 β Phase 1-C: Methodology infra codify + Test harness ESM upgrade
+   案 β Phase 1-C: Methodology infra codify
 ═══════════════════════════════════════════════════════════════════════════════
        │
        ▼
-[新 PRD I-D: Framework rule integration cohesive batch (D-1 task-ID-based 命名禁止 + D-2 Iteration v18 framework 改善 4 件 + D-3 T7/T8 連続 framework 失敗 signal Rule 10 axis 昇格 + D-4 T5 Iteration v9 lessons + 案 β B2/B3/I-162 lessons + B2 Spec stage v2 改善 candidates v2-1/v2-2 integrate) + audit script auto verify] (L4、user 承認 2026-05-01)
+[新 PRD I-D: Framework rule integration cohesive batch (D-1 task-ID-based 命名禁止 + D-2 Iteration v18 framework 改善 4 件 + D-3 T7/T8 連続 framework 失敗 signal Rule 10 axis 昇格 + D-4 T5 Iteration v9 lessons + 案 β B2/B3/I-162 lessons + B2 Spec stage v3 framework gap candidates (= R-1 Cartesian product completeness verify + R-5 Spec gap PRD 起票 procedure + 改善 v3-4/5/6 = duplicate matrix detection + dispatch tree pseudocode validation + Spec stage Self-Review verdict consistency) integrate) + audit script auto verify] (L4、user 承認 2026-05-01、I-224 iteration v3 で scope 拡張 2026-05-01)
        │
        ▼
-[新 PRD I-226: Test harness ESM support + top-level await Tier 1 (B2 = I-224 spec stage v2 で発覚、Axis C 全 cells = ✗ cells 14-18/30 + NA cells 6/7/8 を cohesive batch で empirical 解決、L4)] (user 確定 2026-05-01)
+[~~新 PRD I-226: Test harness ESM support + top-level await Tier 1~~ — **撤回 2026-05-01、I-224 Option β cohesive batch に統合**、test harness ESM upgrade (= `scripts/observe-tsc.sh --esm` flag、Spec stage trial 実装済) + top-level await Tier 1 synthesis (`#[tokio::main] async fn main()` capture) は I-224 PRD scope 内 T7/T8/T9 task で実施]
        │
        ▼
 ═══════════════════════════════════════════════════════════════════════════════

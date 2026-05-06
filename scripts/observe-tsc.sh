@@ -27,6 +27,8 @@ TSC_BIN="$PROJECT_ROOT/tools/extract-types/node_modules/.bin/tsc"
 
 # --- argument parsing ---
 MODE="both"  # both | runtime-only | type-check-only
+ESM_MODE="auto"  # auto | force-esm
+AUTO_MAIN="auto"  # auto | disabled
 FIXTURE=""
 
 while [[ $# -gt 0 ]]; do
@@ -39,10 +41,26 @@ while [[ $# -gt 0 ]]; do
             MODE="type-check-only"
             shift
             ;;
+        --esm)
+            # Force ESM runtime so top-level await works.
+            # Achieved by writing package.json {"type":"module"} into the temp dir
+            # before tsx execution.
+            ESM_MODE="force-esm"
+            shift
+            ;;
+        --no-auto-main)
+            # Disable the auto-append of `main();` when fixture defines `function main`
+            # but doesn't appear to invoke it. Spec stage oracle observation uses this
+            # to preserve fidelity (declarations-only fixtures must observe as no-output).
+            AUTO_MAIN="disabled"
+            shift
+            ;;
         -h|--help)
-            echo "Usage: $0 [--runtime-only|--type-check-only] <fixture.ts>"
+            echo "Usage: $0 [--runtime-only|--type-check-only] [--esm] [--no-auto-main] <fixture.ts>"
             echo ""
             echo "Observes TypeScript fixture behavior via tsc (type check) and tsx (runtime)."
+            echo "  --esm           Force ESM runtime (package.json type=module) so top-level await is allowed."
+            echo "  --no-auto-main  Skip the legacy auto-append of main() when function main is defined."
             echo "Output: JSON to stdout."
             exit 0
             ;;
@@ -140,11 +158,23 @@ run_runtime() {
     cp "$FIXTURE" "$tmpdir/input.ts"
 
     # Check if fixture defines a main() function that isn't already invoked.
-    # Match standalone invocation "main();" — not the declaration "function main()".
-    # The pattern requires main() at statement level (possibly indented), with semicolon.
-    if grep -qP '\bfunction main\b' "$tmpdir/input.ts" && \
-       ! grep -qP '^\s*main\(\);' "$tmpdir/input.ts"; then
+    # Recognized invocation forms (any one suppresses auto-append):
+    #   "main();"        — standalone sync call
+    #   "await main();"  — awaited async call (top-level await context)
+    # Auto-append is a legacy convenience for fixtures whose runtime entry point
+    # is the user-defined `function main`. Spec-stage oracle observation passes
+    # --no-auto-main to disable this entirely (preserving fidelity to source).
+    if [[ "$AUTO_MAIN" != "disabled" ]] && \
+       grep -qP '\bfunction main\b' "$tmpdir/input.ts" && \
+       ! grep -qP '^\s*(await\s+)?main\(\)\s*;' "$tmpdir/input.ts"; then
         echo 'main();' >> "$tmpdir/input.ts"
+    fi
+
+    # ESM mode: place package.json {"type":"module"} so tsx accepts top-level await.
+    # tsx default is cjs format which rejects top-level await with:
+    #   "Top-level await is currently not supported with the 'cjs' output format"
+    if [[ "$ESM_MODE" == "force-esm" ]]; then
+        echo '{"type":"module"}' > "$tmpdir/package.json"
     fi
 
     # Single invocation: capture stdout, stderr, and exit code in one run
