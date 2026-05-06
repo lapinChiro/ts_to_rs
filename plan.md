@@ -31,9 +31,9 @@
 
 **案 β 採用 (2026-05-01)**: I-205 T14 着手判定調査で 3 系統 prerequisite (universal infra: I-224 = B2 fn main mechanism / I-225 = B3 class field literal type inference / I-162 = constructor synthesis) を発見、`1 PRD = 1 architectural concern` 厳格適用 + Universal infra leverage maximization で **案 β (Universal infra leverage first + L1 mid-priority)** を user 承認。星取表 20/24 で 4 案中最良判定。詳細は本 entry 後 chain section 参照。
 
-**進行中: PRD α-1 (I-224 = B2) Spec stage iteration v6 minor 完了 (2026-05-01、genuine convergence 達成 = 5 rounds adversarial review iteration 全反映 + Critical=0 初達成)** — `backlog/I-224-top-level-fn-main-mechanism.md` (1771 行) を iteration v3 で大規模 rewrite + iteration v3〜v6 adversarial review 順次 fix で 52 件 actions 全 resolve。
+**進行中: PRD α-1 (I-224 = B2) Spec stage iteration v7 完了 (2026-05-01、Spec stage true closure 達成 = 5 rounds adversarial review + 1 convention compliance closure round 反映)** — `backlog/I-224-top-level-fn-main-mechanism.md` (1846 行) を iteration v3 で大規模 rewrite + iteration v3〜v6 adversarial review で 52 件 actions resolve + iteration v7 で I-205 v1.6 convention "stub test files 作成" 厳格 compliance 達成 (Rule 9 (a) helper test contracts NEW + Rule 8 (8-c) audit symmetry)。
 
-**iteration v3 + v4 + v5 + v6 minor 主要成果 (旧 21 件 + iteration v3 11 件 + iteration v4 5 件 + iteration v5 13 件 + iteration v6 minor 2 件 = 計 52 件 actions 全 resolve、convergence pattern 21→11→5→13→2 = 84% reduction Critical=0 達成)**:
+**iteration v3 + v4 + v5 + v6 minor + v7 主要成果 (旧 21 件 + iteration v3 11 件 + iteration v4 5 件 + iteration v5 13 件 + iteration v6 minor 2 件 + iteration v7 (convention compliance、新規 defect 0 件) = 計 52 件 actions 全 resolve + 11 stub test files、convergence pattern 21→11→5→13→2→0 = 100% Critical=0 + High=0 + Medium=0 + Review insights=0 達成)**:
 
 - **Matrix 拡張**: 31 cells → 80 cells full Cartesian product (Axis A 8 × Axis B 5 × Axis C 2、Axis A5 split into A5a/A5b、Axis E orthogonality merge declaration、third-party review C-1/C-4/M-2 fix)
 - **Option β cohesive batch (user 承認)**: 旧 cells 14-18/30 + 6/7/8 (Out of Scope = I-226 defer 設計) を **In Scope migration**、I-226 PRD 起票撤回 (= TODO + plan.md chain から I-226 references 削除)、test harness ESM upgrade を本 PRD scope に integrate (TS-5/TS-6 + T7/T8/T9 新 task 追加、third-party review H-2 fix)
