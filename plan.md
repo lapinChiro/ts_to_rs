@@ -9,13 +9,13 @@
 
 ---
 
-## 現在の状態 (2026-05-06 post I-224 T1-1 完了 = TS_MAIN_RENAME constant + I-154 namespace doc 整備 + label-form prefix lock-in test 1 件追加、no behavioral change)
+## 現在の状態 (2026-05-06 post I-224 T1-2 完了 = `__ts_main` collision validator + module-level scan + Tier 2 honest error reject + 13 unit tests、B4 collision dispatch path 確立)
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | **111/158 (70.3%)** = T7/T8/T9/T10/T12 baseline と同一 (Preservation、production code 0 LOC behavioral change のため確実に no regression) |
+| Hono bench clean | **111/158 (70.3%)** = T7/T8/T9/T10/T12 baseline と同一 (Preservation、本 T1-2 で Hono 内 `__ts_*` user identifier 0 件のため Hono 系 bench に regression 不在 = INV-5 R-4 audit pre-existing 確認結果と整合) |
 | Hono bench errors | **63** (T7/T8/T9/T10/T12 baseline と同一、no new compile errors、本 PRD scope 外への regression 0 件) |
-| cargo test (lib) | 3359 pass / 0 fail / 0 ignored (I-224 T1-1 = 3358 baseline + 1 NEW = `i154_labeled_break_rejects_ts_main_prefix`) |
+| cargo test (lib) | 3372 pass / 0 fail / 0 ignored (I-224 T1-2 = 3359 T1-1 baseline + 13 NEW = `i224_t12_*` 13 件 = Decl variants 全 cover + ExportDecl + ExportDefaultDecl + 一般 `__ts_*` prefix + sanity + matrix cell # 19 representative) |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
 | cargo test (E2E) | 159 pass + 70 `#[ignore]` |
@@ -57,7 +57,7 @@
 
 | Phase | Sub-commits | Status |
 |---|---|---|
-| T1: `__ts_` namespace + collision detection | ~~T1-1~~ ✓ / T1-2 / T1-3 (= INV-5 fill-in + 4-layer review) | 🔜 **次着手 (T1-2)** |
+| T1: `__ts_` namespace + collision detection | ~~T1-1~~ ✓ / ~~T1-2~~ ✓ / T1-3 (= INV-5 fill-in + 4-layer review) | 🔜 **次着手 (T1-3)** |
 | T2: IR enums + helper | T2-1 / T2-2 / T2-3 (= INV-3 partial + INV-6 + 4-layer review) | 未着手 |
 | T3: fn main synthesis + rename + substitute + Axis B/E probes | T3-1 / T3-2 / T3-3 / T3-4 (= Axis E + A5a probes + 4-layer review) | 未着手 |
 | T4: transform_module refactor + pub fn init 廃止 | T4-1 / T4-2 / T4-3 (= INV-4 + 4-layer review) | 未着手 |
@@ -67,12 +67,14 @@
 | T8: Top-level await synthesis logic | T8-1 / T8-2 / T8-3 (= INV-3 full coverage + 4-layer review) | 未着手 |
 | T9: Axis C1 cells e2e green + Hono bench verify | T9-1 / T9-2 (= **`[CLOSE]` PRD 完了**) | 未着手 |
 
-**T1-1 完了 (2026-05-06)**: `src/transformer/expressions/mod.rs` に `TS_MAIN_RENAME: &str = "__ts_main"` constant 追加 (`#[allow(dead_code)]` で T3 consume 待ち forward declaration、`TS_OLD_BINDING` cross-reference 経由 I-154 namespace reservation rationale 共有) + `src/transformer/statements/mod.rs:27-46` の I-154 doc を 4 category (labels / value bindings / rename target) 構造化更新 + `src/transformer/statements/tests/loops.rs:263-281` の I-154 lint section doc list を同 4 category 化 + `i154_labeled_break_rejects_ts_main_prefix` test (label-form prefix lint が `__ts_main` を cover することの regression 保護) 追加。**Quality gate**: cargo check pass / cargo test --lib 3359 pass (3358 + 1 NEW) / cargo fmt 0 diff / cargo clippy 0 warning。**Commit (proposed)**: `[WIP] I-224 T1-1: TS_MAIN_RENAME constant + I-154 namespace doc 整備 (no behavioral change、constant + doc 追加のみ)`。
+**T1-1 完了 (2026-05-06)**: TS_MAIN_RENAME constant + I-154 namespace doc 整備 (commit 済)。
 
-**次の `/start` で着手する task = T1-2 (`__ts_main` collision validator + Tier 2 honest error reject、value-binding side の module-level scan)**:
-- **Work**: `src/transformer/statements/mod.rs:39-48` の既存 `check_ts_internal_label_namespace` validator と symmetric な `check_ts_internal_fn_name_namespace(fn_name: &str, span: Span) -> Result<()>` 新規 validator 追加 + module-level scan で `function __ts_main()` / `const __ts_main = ...` 等 collision detection + `UnsupportedSyntaxError::new("`__ts_main` is reserved for transpiler-internal use; user must rename", span)` emission path 追加
-- **Quality gate**: matrix # 9/19/20 fixture が Tier 2 honest error reject 出力 + collision-merged cells 29/39/40/49/59/69/79/80 で同 dispatch path 共通 invariant 確認
-- **Commit message**: `[WIP] I-224 T1-2: __ts_main collision validator + Tier 2 honest error reject (matrix # 9/19/20 + collision-merged 29/39/40/49/59/69/79/80)`
+**T1-2 完了 (2026-05-06)**: `src/transformer/statements/mod.rs:67-95` に `check_ts_internal_fn_name_namespace(name: &str, span: swc_common::Span) -> Result<()>` 新規 validator 追加 (label-side validator と symmetric、`__ts_` prefix-based reject、parametric wording) + `src/transformer/mod.rs:701-844` に scan helper `scan_for_ts_namespace_collisions` + per-item dispatcher (Rule 11 (d-1) 全 ModuleItem / ModuleDecl / Stmt / Decl variants explicit enumerate) 追加 + `Transformer::transform_module` (line 313-318) と `Transformer::transform_module_collecting` (line 348-356) に scan integration (transform_module = early-Err、transform_module_collecting = unsupported accumulator seed) + `src/transformer/statements/tests/loops.rs:367-525` に 13 unit tests (Decl variants 全 cover + ExportDecl + ExportDefaultDecl + 一般 `__ts_` prefix + sanity + matrix cell # 19 representative)。**Quality gate**: cargo check / cargo test --lib 3372 pass (3359 baseline + 13 NEW) / cargo fmt 0 diff / cargo clippy 0 warning / check-file-lines OK。**Commit (proposed)**: `[WIP] I-224 T1-2: __ts_main collision validator + Tier 2 honest error reject (matrix # 9/19/20 + collision-merged 29/39/40/49/59/69/79/80)`。
+
+**次の `/start` で着手する task = T1-3 (INV-5 invariants test fill-in + 4-layer review)**:
+- **Work**: `tests/i224_invariants_test.rs::test_invariant_5_ts_main_namespace_reservation_with_collision_priority` の `#[ignore]` 解除 + fill-in (全 reachable B4 cells = matrix # 9/19/20/29/39/40/49/59/69/79/80 で transpile → Err with collision wording assert + INV-5 collision priority arm が A/C 軸 dispatch より先行 reject 確認、cells 49/59/69 の A4/A5a/A5b + B4 cases も同 wording で reject)
+- **Quality gate**: `test_invariant_5_*` green (`#[ignore]` 解除)、Layer 1-4 全 0 findings (or 全 fix 後 0 findings)
+- **Commit message**: `[WIP] I-224 T1 完了: INV-5 collision priority structural lock-in (invariants test fill-in) + 4-layer review pass`
 - **Co-Authored-By**: `Claude Opus 4.7 (1M context) <noreply@anthropic.com>`
 
 **plan.md chain 影響**: Option β 採用で I-226 entry を chain から削除済 (= 本 plan.md の chain section)、I-224 scope は Axis C0 + Axis C1 cohesive batch (T1-T9 sequence、計 23 sub-commits)。

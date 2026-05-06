@@ -299,6 +299,14 @@ impl<'a> Transformer<'a> {
     /// The file's crate-relative directory (used for `../` import path resolution) is
     /// derived from `self.tctx.file_path` via [`current_file_dir()`](Self::current_file_dir).
     pub(crate) fn transform_module(&mut self, module: &Module) -> Result<Vec<Item>> {
+        // I-224 collision-detection (INV-5 highest precedence): reject
+        // user-defined `__ts_main` (and any other `__ts_`-prefixed module-level
+        // identifier) before any A-axis structural dispatch. In abort mode the
+        // first collision becomes the function's `Err` return.
+        if let Some(collision) = scan_for_ts_namespace_collisions(module).into_iter().next() {
+            return Err(collision.into());
+        }
+
         // Pre-scan: collect class info for inheritance resolution
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
@@ -332,12 +340,19 @@ impl<'a> Transformer<'a> {
         &mut self,
         module: &Module,
     ) -> Result<(Vec<Item>, Vec<UnsupportedSyntaxError>)> {
+        // I-224 collision-detection (INV-5 highest precedence): all
+        // user-defined `__ts_`-prefixed module-level identifiers are
+        // accumulated as Tier 2 honest errors before any A-axis structural
+        // dispatch. In collection mode the scan runs first and seeds the
+        // `unsupported` accumulator with every offending identifier; the rest
+        // of the module continues to be transformed for partial output.
+        let mut unsupported: Vec<UnsupportedSyntaxError> = scan_for_ts_namespace_collisions(module);
+
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
         self.build_mut_method_names(&class_map);
 
         let mut items = Vec::new();
-        let mut unsupported = Vec::new();
         let mut init_stmts = Vec::new();
 
         for module_item in &module.body {
@@ -691,6 +706,155 @@ fn format_decl_kind(decl: &Decl) -> String {
         Decl::TsModule(_) => "TsModuleDecl".to_string(),
         Decl::Using(_) => "UsingDecl".to_string(),
         _ => format!("Decl({decl:?})"),
+    }
+}
+
+/// Scans the module's top-level for user-defined identifiers that collide
+/// with the I-154 reserved `__ts_` prefix namespace, returning a Tier 2 honest
+/// error per offending identifier.
+///
+/// Walks every [`ModuleItem`] and dispatches on AST shape (Decl variant +
+/// `ExportDecl` wrapper + `ExportDefaultDecl` with named decl) to extract the
+/// introduced identifier(s). Calls
+/// [`statements::check_ts_internal_fn_name_namespace`] on each name and
+/// accumulates rejection errors into a `Vec` for the caller to consume:
+/// [`Transformer::transform_module`] propagates the first error (early-abort
+/// mode), and [`Transformer::transform_module_collecting`] extends the
+/// caller's `unsupported` accumulator (Tier 2 honest collection mode).
+///
+/// **I-224 collision-detection invariant (INV-5)**: every reachable B4 cell
+/// (matrix # 9 / 19 / 20 / 29 / 39 / 40 / 49 / 59 / 69 / 79 / 80) contains a
+/// top-level `function __ts_main()` (or analogous Decl shape per axis A) and
+/// is rejected here with a Tier 2 honest error. The collision-detection scan
+/// runs before any A-axis dispatch (= identifier-level reservation invariant
+/// supersedes structural dispatch).
+fn scan_for_ts_namespace_collisions(module: &Module) -> Vec<UnsupportedSyntaxError> {
+    let mut errors = Vec::new();
+    for item in &module.body {
+        scan_module_item_for_collisions(item, &mut errors);
+    }
+    errors
+}
+
+/// Inner per-item dispatcher. Per Rule 11 (d-1) `_ =>` is forbidden, so every
+/// [`ModuleItem`] / [`ModuleDecl`] / [`Stmt`] variant is enumerated
+/// explicitly; variants that do not introduce module-level user-defined
+/// identifiers are matched with an empty body documenting the reason.
+fn scan_module_item_for_collisions(item: &ModuleItem, errors: &mut Vec<UnsupportedSyntaxError>) {
+    match item {
+        ModuleItem::ModuleDecl(decl) => match decl {
+            ModuleDecl::ExportDecl(export) => scan_decl_for_collisions(&export.decl, errors),
+            ModuleDecl::ExportDefaultDecl(default) => {
+                scan_default_decl_for_collisions(&default.decl, errors);
+            }
+            // Empty: imports introduce local bindings only (scoped per-file),
+            // re-exports carry already-declared names (covered at the decl
+            // site), and `ExportDefaultExpr` / `TsExportAssignment` /
+            // `TsNamespaceExport` do not introduce fresh identifiers.
+            ModuleDecl::Import(_)
+            | ModuleDecl::ExportNamed(_)
+            | ModuleDecl::ExportDefaultExpr(_)
+            | ModuleDecl::ExportAll(_)
+            | ModuleDecl::TsImportEquals(_)
+            | ModuleDecl::TsExportAssignment(_)
+            | ModuleDecl::TsNamespaceExport(_) => {}
+        },
+        ModuleItem::Stmt(stmt) => match stmt {
+            Stmt::Decl(decl) => scan_decl_for_collisions(decl, errors),
+            // Empty: non-Decl statements do not introduce module-level
+            // identifiers. Module-level `let __ts_main = ...` lives under
+            // `Stmt::Decl(Decl::Var)` and is handled in that branch.
+            Stmt::Block(_)
+            | Stmt::Empty(_)
+            | Stmt::Debugger(_)
+            | Stmt::With(_)
+            | Stmt::Return(_)
+            | Stmt::Labeled(_)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::If(_)
+            | Stmt::Switch(_)
+            | Stmt::Throw(_)
+            | Stmt::Try(_)
+            | Stmt::While(_)
+            | Stmt::DoWhile(_)
+            | Stmt::For(_)
+            | Stmt::ForIn(_)
+            | Stmt::ForOf(_)
+            | Stmt::Expr(_) => {}
+        },
+    }
+}
+
+/// Per-[`Decl`] variant dispatcher: extracts the introduced identifier(s) and
+/// calls the namespace validator on each. Per Rule 11 (d-1) every variant is
+/// enumerated explicitly.
+fn scan_decl_for_collisions(decl: &Decl, errors: &mut Vec<UnsupportedSyntaxError>) {
+    match decl {
+        Decl::Fn(fn_decl) => check_ident_for_collision(&fn_decl.ident, errors),
+        Decl::Class(class_decl) => check_ident_for_collision(&class_decl.ident, errors),
+        Decl::Var(var_decl) => {
+            for declarator in &var_decl.decls {
+                // BindingIdent form (`const X = ...`, `let X = ...`,
+                // `var X = ...`) is the matrix B4-axis shape. Destructuring
+                // patterns (`const { X } = ...`, `const [X] = ...`) are not
+                // currently a documented collision vector; extend here with a
+                // recursive `Pat` walker if one ever surfaces.
+                if let ast::Pat::Ident(binding) = &declarator.name {
+                    check_ident_for_collision(&binding.id, errors);
+                }
+            }
+        }
+        Decl::Using(using_decl) => {
+            for declarator in &using_decl.decls {
+                if let ast::Pat::Ident(binding) = &declarator.name {
+                    check_ident_for_collision(&binding.id, errors);
+                }
+            }
+        }
+        Decl::TsInterface(interface) => check_ident_for_collision(&interface.id, errors),
+        Decl::TsTypeAlias(alias) => check_ident_for_collision(&alias.id, errors),
+        Decl::TsEnum(enum_decl) => check_ident_for_collision(&enum_decl.id, errors),
+        Decl::TsModule(module_decl) => match &module_decl.id {
+            ast::TsModuleName::Ident(ident) => check_ident_for_collision(ident, errors),
+            // Ambient string-named modules (`declare module "fs" { ... }`) do
+            // not introduce a collidable Rust identifier — skip.
+            ast::TsModuleName::Str(_) => {}
+        },
+    }
+}
+
+/// Default-decl dispatcher: only [`ast::DefaultDecl::Class`] / `Fn` /
+/// `TsInterfaceDecl` carry an identifier — anonymous defaults
+/// (`export default function() {}`) cannot collide.
+fn scan_default_decl_for_collisions(
+    decl: &ast::DefaultDecl,
+    errors: &mut Vec<UnsupportedSyntaxError>,
+) {
+    match decl {
+        ast::DefaultDecl::Class(class_expr) => {
+            if let Some(ident) = &class_expr.ident {
+                check_ident_for_collision(ident, errors);
+            }
+        }
+        ast::DefaultDecl::Fn(fn_expr) => {
+            if let Some(ident) = &fn_expr.ident {
+                check_ident_for_collision(ident, errors);
+            }
+        }
+        ast::DefaultDecl::TsInterfaceDecl(interface) => {
+            check_ident_for_collision(&interface.id, errors);
+        }
+    }
+}
+
+/// Helper: validate one identifier against the `__ts_` namespace and append
+/// any rejection error to the accumulator. The validator returns the concrete
+/// `UnsupportedSyntaxError` directly (no anyhow wrapping), so the only thing
+/// to do here is forward the `Err` into the accumulator.
+fn check_ident_for_collision(ident: &ast::Ident, errors: &mut Vec<UnsupportedSyntaxError>) {
+    if let Err(unsup) = statements::check_ts_internal_fn_name_namespace(&ident.sym, ident.span) {
+        errors.push(unsup);
     }
 }
 

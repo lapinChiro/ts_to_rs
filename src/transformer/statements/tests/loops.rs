@@ -362,3 +362,145 @@ fn i154_non_prefixed_user_labels_accepted() {
         Err(e) => panic!("non-prefixed user label should not error: {e}"),
     }
 }
+
+// ============ I-224: Module-level fn-name namespace lint tests ============
+//
+// Symmetric to the label-side I-154 lint above: user-defined module-level
+// identifiers starting with `__ts_` (= `function __ts_main() {}`,
+// `const __ts_main = ...`, `class __ts_main {}`, `interface __ts_main {}`,
+// `type __ts_main = ...`, `enum __ts_main {}`, `namespace __ts_main {}`, and
+// their `export`-wrapped variants) are rejected as Tier 2 honest errors with
+// wording mentioning the offending identifier and the namespace structure.
+// Mechanism: `check_ts_internal_fn_name_namespace` invoked via
+// `scan_for_ts_namespace_collisions` at the top of `transform_module(_collecting)`.
+//
+// Acceptance helper: the validator's wording always contains the substring
+// "is reserved" — tests assert this substring plus the offending identifier
+// appears in the collected `unsupported` list.
+
+/// Helper: run `transpile_collecting` and assert that at least one unsupported
+/// entry is reported with both `name` (verbatim) and the substring
+/// `"is reserved"` in its `kind` field.
+fn assert_ts_namespace_collision(src: &str, name: &str) {
+    let result = crate::transpile_collecting(src);
+    match result {
+        Ok((_rust, unsupported)) => {
+            let hits: Vec<_> = unsupported
+                .iter()
+                .filter(|u| u.kind.contains(name) && u.kind.contains("is reserved"))
+                .collect();
+            assert!(
+                !hits.is_empty(),
+                "expected at least one Tier 2 reject mentioning `{name}` and `is reserved`, \
+                 got unsupported list: {unsupported:?}"
+            );
+        }
+        Err(e) => panic!("transpile_collecting failed unexpectedly for {src:?}: {e}"),
+    }
+}
+
+#[test]
+fn i224_module_level_fn_decl_rejects_ts_main() {
+    // Matrix # 9 representative (A0 + B4 + C0): library-form `__ts_main` collision.
+    assert_ts_namespace_collision(
+        "function __ts_main(): void { console.log('user'); }",
+        "__ts_main",
+    );
+}
+
+#[test]
+fn i224_module_level_const_decl_rejects_ts_main() {
+    // PRD task description names this shape explicitly:
+    // `const __ts_main = ...` should reject identical to `function __ts_main()`.
+    assert_ts_namespace_collision(
+        "const __ts_main = (): void => { console.log('user'); };",
+        "__ts_main",
+    );
+}
+
+#[test]
+fn i224_module_level_let_decl_rejects_ts_main() {
+    // `let __ts_main = ...` shape (Decl::Var with VarDeclKind::Let).
+    assert_ts_namespace_collision("let __ts_main = 1;", "__ts_main");
+}
+
+#[test]
+fn i224_module_level_class_decl_rejects_ts_main() {
+    assert_ts_namespace_collision("class __ts_main {}", "__ts_main");
+}
+
+#[test]
+fn i224_module_level_interface_decl_rejects_ts_main() {
+    assert_ts_namespace_collision("interface __ts_main { x: number; }", "__ts_main");
+}
+
+#[test]
+fn i224_module_level_type_alias_rejects_ts_main() {
+    assert_ts_namespace_collision("type __ts_main = number;", "__ts_main");
+}
+
+#[test]
+fn i224_module_level_enum_decl_rejects_ts_main() {
+    assert_ts_namespace_collision("enum __ts_main { A, B }", "__ts_main");
+}
+
+#[test]
+fn i224_module_level_namespace_decl_rejects_ts_main() {
+    // `namespace __ts_main {}` (TsModule with Ident id).
+    assert_ts_namespace_collision("namespace __ts_main { export const x = 1; }", "__ts_main");
+}
+
+#[test]
+fn i224_export_fn_decl_rejects_ts_main() {
+    // ExportDecl wrapper around Decl::Fn — same dispatch path.
+    assert_ts_namespace_collision("export function __ts_main(): void {}", "__ts_main");
+}
+
+#[test]
+fn i224_export_default_named_fn_rejects_ts_main() {
+    // ExportDefaultDecl with a named DefaultDecl::Fn — covers the
+    // `default-decl` branch of the scan.
+    assert_ts_namespace_collision("export default function __ts_main(): void {}", "__ts_main");
+}
+
+#[test]
+fn i224_other_ts_prefixed_module_name_rejected() {
+    // Prefix check (rather than name-specific to `__ts_main`) — verifies the
+    // namespace is reserved for any future internal target. Not a B4 cell;
+    // hygiene parity with label-side prefix lint.
+    assert_ts_namespace_collision(
+        "function __ts_other_internal(): void {}",
+        "__ts_other_internal",
+    );
+}
+
+#[test]
+fn i224_non_prefixed_user_main_accepted() {
+    // Sanity: user `function main() {}` (= matrix B1 partition) must NOT be
+    // rejected by the namespace lint. The rename / synthesis dispatch is
+    // separate (T3 work).
+    let result = crate::transpile_collecting("function main(): void { console.log('hi'); }");
+    match result {
+        Ok((_rust, unsupported)) => {
+            assert!(
+                !unsupported.iter().any(|u| u.kind.contains("is reserved")),
+                "user `function main` must not trigger namespace lint: {unsupported:?}"
+            );
+        }
+        Err(e) => panic!("user `function main` should not error: {e}"),
+    }
+}
+
+#[test]
+fn i224_matrix_cell_19_stmt_expr_with_collision_rejected() {
+    // Matrix # 19 representative (A1 + B4 + C0): `__ts_main` collision in
+    // executable-mode source (top-level Stmt::Expr `console.log` + user-side
+    // call `__ts_main()`). The collision-detection scan precedes A-axis
+    // dispatch (per design dispatch tree top arm), so the rejection still
+    // fires regardless of the additional execution stmts.
+    let src = "\
+        function __ts_main(): void { console.log('user __ts_main'); }\n\
+        console.log('top-level');\n\
+        __ts_main();\n";
+    assert_ts_namespace_collision(src, "__ts_main");
+}

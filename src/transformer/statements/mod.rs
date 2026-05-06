@@ -41,12 +41,10 @@ use nullish_assign::fuse_nullish_assign_shadow_lets;
 /// User labels starting with `__ts_` are rejected at all 3 label-introducing /
 /// label-referencing sites (`Stmt::Labeled` declaration, labeled `Stmt::Break`,
 /// labeled `Stmt::Continue`) to prevent silent collision with internal labels.
-/// (Symmetric enforcement for user-defined function/value names that collide
-/// with the rename target `__ts_main` is provided by a sibling module-level
-/// validator added in a follow-up implementation step — until that validator
-/// lands, the reservation of `__ts_main` here is documentation-only at the
-/// fn-name level; the label-side prefix lint already covers any
-/// `__ts_`-prefixed label, including `__ts_main`.)
+/// Symmetric enforcement for user-defined module-level identifier names is
+/// provided by [`check_ts_internal_fn_name_namespace`] below (= guards against
+/// `function __ts_main()`, `const __ts_main = ...`, `class __ts_main {}` etc.
+/// from colliding with the rename target).
 ///
 /// SWC parser accepts `break undefined_label;` (tsx catches it with "Undefined label"
 /// syntax error, but SWC does not). Without lint on labeled break/continue, user
@@ -61,6 +59,46 @@ pub(crate) fn check_ts_internal_label_namespace(label: &ast::Ident) -> Result<()
             label.span,
         )
         .into());
+    }
+    Ok(())
+}
+
+/// I-154 namespace enforcement for **module-level user-defined identifier names**
+/// (= the symmetric counterpart of [`check_ts_internal_label_namespace`] at
+/// label sites). Rejects any module-level identifier whose name starts with the
+/// reserved `__ts_` prefix, preventing user definitions from colliding with
+/// ts_to_rs internal emission targets.
+///
+/// The concrete consumer at I-224 is the user-`main` rename target
+/// [`crate::transformer::expressions::TS_MAIN_RENAME`] (= `__ts_main`): without
+/// this validator, a user writing `function __ts_main() {}` would silently
+/// collide with the synthesized rename emission and produce duplicate Rust
+/// definitions (E0428). The check is prefix-based (rather than name-specific
+/// to `__ts_main`) for hygiene parity with the label-side validator and to
+/// future-proof the namespace against new reserved fn-name targets.
+///
+/// Invocation: walked over every module-level `Decl` (Fn / Var / Class /
+/// TsInterface / TsTypeAlias / TsEnum / TsModule) and `ExportDecl`-wrapped
+/// counterparts by [`super::scan_for_ts_namespace_collisions`].
+///
+/// Returns the concrete [`UnsupportedSyntaxError`] (rather than wrapping in
+/// [`anyhow::Error`]) so the accumulating caller does not need a fallible
+/// `downcast` to recover the typed error — the contract that "any failure is
+/// a Tier 2 honest reject" is type-encoded.
+pub(crate) fn check_ts_internal_fn_name_namespace(
+    name: &str,
+    span: swc_common::Span,
+) -> std::result::Result<(), UnsupportedSyntaxError> {
+    if name.starts_with("__ts_") {
+        return Err(UnsupportedSyntaxError::new(
+            format!(
+                "identifier `{name}` is reserved for ts_to_rs internal emission \
+                 (the `__ts_` prefix namespace covers internal labels, value \
+                 bindings, and the user-`main` rename target `__ts_main`); \
+                 user must rename"
+            ),
+            span,
+        ));
     }
     Ok(())
 }
