@@ -27,21 +27,134 @@ use ts_to_rs::transpile;
 /// 外に配置されるが、user 視点の execution semantic (= top-level stmts 順序通り、`main();`
 /// call site も順序通り) は preserve。
 ///
-/// **Verification (c)**: Per-cell E2E fixture で TS / Rust stdout の byte-exact match
-/// を verify (TS-3 で fixture 作成、T5/T9 で green 化)。本 stub は INV-1 contract の
-/// integration-level lock-in (= matrix in-scope cells の representative subset で
-/// transpile + cargo run + tsc/tsx stdout byte-exact match)。
+/// **Verification (c)**: per-cell E2E fixture で TS / Rust stdout の byte-exact
+/// match は `tests/e2e_test.rs::test_e2e_cell_i224_*` で comprehensive に verify。
+/// 本 test はその integration-level coverage に対する **IR-text-level structural
+/// lock-in** = representative in-scope cells (Axis A 1/3/6 × Axis B 0/1) で
+/// `transpile()` 出力を直接 inspect し、synthesized fn main body 内の captured
+/// top-level statements が source 順序通り emit されることを substring positional
+/// match で assert。
+///
+/// **T5-1 fill-in (2026-05-08)**: e2e harness が利用できない CI minimal build や、
+/// tsx + cargo run の両方が同じ誤った出力を produce する regression を検出するため、
+/// e2e と独立した dispatch-loop ordering invariant の structural lock-in。
+///
+/// **Representative cells** (chosen to span Axis A 1/3/6 × Axis B 0/1):
+/// - cell-09 (A1+B0): plain `Stmt::Expr` only — fn main body holds the single
+///   `println!`.
+/// - cell-10 (A1+B1): `Stmt::Expr` + sync user main rename + substituted
+///   `__ts_main()` call site at end.
+/// - cell-22 (A3+B1): SideEffect Var Decl captured as `let p = makePoint(...)`
+///   followed by `println!` then substituted `__ts_main()`.
+/// - cell-28 (A6+B0 mixed): Lit init (top-level const) PLUS SideEffect Var
+///   captured as `let n = compute()` PLUS `println!`.
+/// - cell-29 (A6+B1 mixed): same A6 mixed shape with sync user main rename
+///   + substituted call.
+/// - cell-31 (B1 multi-call boundary value): two substituted `__ts_main()`
+///   call sites in source order.
 #[test]
-#[ignore = "I-224 INV-1 verification stub: Implementation Stage T5/T9 で fill in \
-            (cells 11/13/15/16/31/33/35/36/71/73/76 fixtures で TS stdout vs cargo run stdout \
-            byte-exact match)"]
 fn test_invariant_1_ts_rust_execution_order_byte_exact() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T5/T9 で fill in: \
-         representative in-scope cells で TS source → tsc/tsx stdout vs ts_to_rs → cargo run \
-         stdout の byte-exact match を assert (INV-1 source-order preservation invariant)"
-    );
+    use std::fs;
+
+    /// Asserts that `needles` appear in `haystack` in the given order
+    /// (each needle starting strictly after the previous needle's end).
+    fn assert_substrings_in_order(cell: &str, haystack: &str, needles: &[&str]) {
+        let mut search_start = 0usize;
+        for (i, needle) in needles.iter().enumerate() {
+            let found = haystack[search_start..].find(needle).unwrap_or_else(|| {
+                panic!(
+                    "INV-1 [{cell}] expected substring #{i} {needle:?} not found after byte \
+                     offset {search_start}.\nGenerated Rust:\n{haystack}",
+                )
+            });
+            search_start += found + needle.len();
+        }
+    }
+
+    let workspace_root = env!("CARGO_MANIFEST_DIR");
+
+    // (cell file stem, list of substrings that must appear in source order)
+    let cells: &[(&str, &[&str])] = &[
+        // cell-09 (A1+B0): `console.log("hello world");` → single println
+        // inside fn main body. The top-level Stmt::Expr is captured in
+        // source order (single-stmt cell → trivially satisfied).
+        (
+            "cell-09-stmt-expr-only-no-main",
+            &["fn main()", "println!(\"hello world\")"],
+        ),
+        // cell-10 (A1+B1): `function main` defined → renamed to `__ts_main`,
+        // then `console.log("top-level"); main();` capture into fn main body
+        // in source order: println first, substituted call second.
+        (
+            "cell-10-stmt-expr-with-user-sync-main",
+            &[
+                "fn __ts_main()",
+                "fn main()",
+                "println!(\"top-level\")",
+                "__ts_main()",
+            ],
+        ),
+        // cell-22 (A3+B1): SideEffect Var captured as `let p = makePoint(...)`
+        // BEFORE `println!`, BEFORE `__ts_main()` substituted call. Lock-in
+        // for the let-then-stmt-expr-then-substituted-call ordering invariant.
+        (
+            "cell-22-decl-var-with-user-sync-main",
+            &[
+                "fn __ts_main()",
+                "fn main()",
+                "let p = makePoint(",
+                "println!(",
+                "__ts_main()",
+            ],
+        ),
+        // cell-28 (A6+B0 mixed): `function compute(): number { return 42; }`
+        // emit as top-level fn (NonTriggerDef path). `const LIT_VAL = 100;`
+        // emit as top-level const (Lit init = ToplevelConst). `const n =
+        // compute();` capture as `let n = compute();` (SideEffect →
+        // FnMainBodyCapture). `console.log(LIT_VAL, n);` capture as `println!`.
+        // INV-1 invariant: fn main body has `let n` BEFORE `println!`.
+        (
+            "cell-28-mixed-no-main",
+            &[
+                "fn compute()",
+                "const LIT_VAL",
+                "fn main()",
+                "let n = compute()",
+                "println!(",
+            ],
+        ),
+        // cell-29 (A6+B1 mixed): same shape as cell-28 but with sync user
+        // main rename + substituted call at end.
+        (
+            "cell-29-mixed-with-user-sync-main",
+            &[
+                "fn __ts_main()",
+                "fn compute()",
+                "const LIT_VAL",
+                "fn main()",
+                "let n = compute()",
+                "println!(",
+                "__ts_main()",
+            ],
+        ),
+        // cell-31 (B1 multi-call boundary value, INV-2 sub-case for INV-1
+        // probe): two `main()` call sites both substituted to `__ts_main()`,
+        // appearing in source order (= 2 distinct occurrences in fn main
+        // body).
+        (
+            "cell-31-multiple-main-calls",
+            &["fn __ts_main()", "fn main()", "__ts_main()", "__ts_main()"],
+        ),
+    ];
+
+    for (cell, needles) in cells {
+        let ts_path = format!("{workspace_root}/tests/e2e/scripts/i-224/{cell}.ts");
+        let ts_source = fs::read_to_string(&ts_path)
+            .unwrap_or_else(|e| panic!("INV-1 [{cell}] failed to read {ts_path}: {e}"));
+        let rs_source = transpile(&ts_source)
+            .unwrap_or_else(|e| panic!("INV-1 [{cell}] transpile() returned Err: {e:?}"));
+        assert_substrings_in_order(cell, &rs_source, needles);
+    }
 }
 
 /// INV-2: User `main` symbol semantic preservation + multi-call substitution sub-case

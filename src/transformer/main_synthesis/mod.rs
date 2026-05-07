@@ -13,9 +13,10 @@
 //!    [`DispatchArm`]): classification result types consumed by Implementation Stage T3
 //!    ([`Transformer::synthesize_fn_main`], not yet implemented).
 //! 2. **Per-init-shape predicates** ([`classify_init_kind`], [`has_side_effect_init`],
-//!    [`classify_decl_var_path`]): operate on a single `Decl::Var` and decide its
-//!    Library / Toplevel-const / Fn-main-body-capture path (PRD Design section #3
-//!    "per-item runtime decision").
+//!    [`classify_per_decl_path`], [`all_decls_captured`]): classify a `VarDeclarator`
+//!    or aggregate VarDecl-level signal, deciding the Library / Toplevel-const /
+//!    Fn-main-body-capture routing (PRD Design section #3 "per-item runtime
+//!    decision").
 //! 3. **Module-level predicates** ([`is_executable_mode`], [`detect_user_main`]):
 //!    walk the module body and return `(is_executable_mode: bool,
 //!    user_main_kind: UserMainKind, has_top_level_await: bool)` axis values.
@@ -42,17 +43,10 @@
 //! ([`Transformer::try_capture_module_item_into_main_stmts`]) into
 //! [`Transformer::transform_module`] / `transform_module_collecting`, replacing
 //! the legacy `init_stmts` + `pub fn init` mechanism with the [`MainStmt`] →
-//! [`Transformer::synthesize_fn_main`] pipeline. The legacy `build_init_fn` helper
-//! has been removed (T4-1 also retired it since the function had no remaining
-//! callers post-refactor — keeping a `#[allow(dead_code)]` placeholder for one
-//! commit would have violated the project's "no dead code in production"
-//! invariant for no structural benefit).
-//!
-//! [`Transformer::collect_top_level_executions`] survives as a thin test-facing
-//! wrapper around the per-item helper; the I-228 spec-modori coverage and the
-//! 80-cell unit tests exercise it directly. The `#[allow(dead_code)]` on this
-//! method documents the test-only role — production callers go through
-//! `try_capture_module_item_into_main_stmts` inside their per-item dispatch loop.
+//! [`Transformer::synthesize_fn_main`] pipeline. [`Transformer::collect_top_level_executions`]
+//! survives as a `#[allow(dead_code)]` test-facing wrapper around the per-item
+//! helper; production callers go through `try_capture_module_item_into_main_stmts`
+//! inside the per-item dispatch loop.
 
 use anyhow::Result;
 use swc_ecma_ast::{self as ast, Decl, Expr, Module, ModuleDecl, ModuleItem, Stmt, VarDecl};
@@ -75,14 +69,25 @@ mod user_main;
 pub use user_main::detect_user_main;
 
 // Decl::Var initializer classification (`InitKind` / `DeclVarPath` enums +
-// `classify_init_kind` / `has_side_effect_init` / `classify_decl_var_path` +
-// `expr_init_kind` private helper). Extracted from mod.rs for the same
-// file-line reason as await_walker / user_main.
+// `classify_init_kind` / `has_side_effect_init` / `classify_per_decl_path` /
+// `all_decls_captured` + `expr_init_kind` private helper). Extracted from
+// mod.rs for the same file-line reason as await_walker / user_main.
 mod init_classifier;
 // Items used directly in mod.rs (via `Self::capture_var_decl_into_main_stmts`
 // and the `Decl::Var` arm of `collect_top_level_executions`) — `DeclVarPath`,
-// `has_side_effect_init`, `classify_decl_var_path`.
-pub(crate) use init_classifier::{classify_decl_var_path, has_side_effect_init, DeclVarPath};
+// `has_side_effect_init`, `classify_per_decl_path`, `all_decls_captured`.
+pub(crate) use init_classifier::{
+    all_decls_captured, classify_per_decl_path, has_side_effect_init, DeclVarPath,
+};
+// `classify_decl_var_path` (= the legacy VarDecl-level aggregating classifier)
+// was removed entirely by the `/check_job deep deep` review structural fix
+// (2026-05-08): production was migrated to the per-declarator
+// `classify_per_decl_path` by the prior `/check_job deep` iteration, and the
+// remaining test usages were migrated to either `classify_per_decl_path` or
+// to direct `classify_init_kind` partition assertions. Removing the legacy
+// classifier eliminates the dual-classifier maintenance burden and aligns
+// with `ideal-implementation-primacy.md` (= no test-only retention of code
+// that production no longer needs).
 // Items consumed by the unit tests in `tests/mod.rs` (via `super::*`) and by
 // callers of `classify_init_kind` outside this module. `#[allow(unused_imports)]`
 // records that `mod.rs` itself does not directly use these symbols — they are
@@ -542,9 +547,9 @@ impl<'a> Transformer<'a> {
     /// **Per-shape semantics**:
     /// - `Stmt::Expr` in executable mode → capture as `MainStmt::Expr` (non-await) or
     ///   `MainStmt::ExprAwait` (bare `await x;`).
-    /// - `Stmt::Decl(Decl::Var)` whose [`classify_decl_var_path`] is
-    ///   `FnMainBodyCapture` → capture per declarator as `MainStmt::Let` or
-    ///   `MainStmt::LetAwait`.
+    /// - `Stmt::Decl(Decl::Var)` whose declarators include any
+    ///   [`classify_per_decl_path`]`= FnMainBodyCapture` shape → capture those
+    ///   declarators as `MainStmt::Let` or `MainStmt::LetAwait`.
     /// - `ExportDecl(Decl::Var)` with `FnMainBodyCapture` path → capture identically
     ///   (the `pub` modifier is dropped per Axis E orthogonality merge revision,
     ///   I-228-c fix 2026-05-07).
@@ -587,19 +592,21 @@ impl<'a> Transformer<'a> {
                 Ok(true)
             }
 
-            // ============== Decl::Var (capture or top-level const path) ==============
+            // ============== Decl::Var (per-declarator routing) ==============
+            // T5-1 deep review structural fix 2026-05-08: capture
+            // FnMainBodyCapture-bound declarators here, then return
+            // `Ok(false)` if ANY sibling declarator needs LibraryMode /
+            // ToplevelConst emission via `transform_module_item` (= the
+            // existing per-init dispatch path that emits top-level
+            // `Item::Fn` / `Item::Const` and silently skips
+            // unsupported / data-literal init shapes). Returning
+            // `Ok(true)` only when ALL declarators are FnMainBodyCapture-
+            // bound preserves the pre-existing single-decl SideEffect /
+            // NonTriggerData behavior (no `transform_module_item`
+            // duplicate emission).
             ModuleItem::Stmt(Stmt::Decl(Decl::Var(var))) => {
-                match classify_decl_var_path(var, is_executable_mode_flag) {
-                    DeclVarPath::FnMainBodyCapture => {
-                        self.capture_var_decl_into_main_stmts(
-                            var,
-                            is_executable_mode_flag,
-                            main_stmts,
-                        )?;
-                        Ok(true)
-                    }
-                    DeclVarPath::ToplevelConst | DeclVarPath::LibraryMode => Ok(false),
-                }
+                self.capture_var_decl_into_main_stmts(var, is_executable_mode_flag, main_stmts)?;
+                Ok(all_decls_captured(var, is_executable_mode_flag))
             }
 
             // ============== ExportDecl-wrapped Decl::Var (I-228-c fix) ==============
@@ -613,17 +620,14 @@ impl<'a> Transformer<'a> {
             // Using) fall through to `transform_module_item` for top-level emission
             // with `pub` preserved.
             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => match &export.decl {
-                Decl::Var(var) => match classify_decl_var_path(var, is_executable_mode_flag) {
-                    DeclVarPath::FnMainBodyCapture => {
-                        self.capture_var_decl_into_main_stmts(
-                            var,
-                            is_executable_mode_flag,
-                            main_stmts,
-                        )?;
-                        Ok(true)
-                    }
-                    DeclVarPath::ToplevelConst | DeclVarPath::LibraryMode => Ok(false),
-                },
+                Decl::Var(var) => {
+                    self.capture_var_decl_into_main_stmts(
+                        var,
+                        is_executable_mode_flag,
+                        main_stmts,
+                    )?;
+                    Ok(all_decls_captured(var, is_executable_mode_flag))
+                }
                 Decl::Fn(_)
                 | Decl::Class(_)
                 | Decl::TsInterface(_)
@@ -686,20 +690,26 @@ impl<'a> Transformer<'a> {
     }
 
     /// Helper for [`Self::collect_top_level_executions`]: walks every declarator
-    /// of a (non-ambient) `VarDecl` whose `classify_decl_var_path` resolves to
-    /// `FnMainBodyCapture`, and pushes one [`MainStmt::Let`] / [`MainStmt::LetAwait`]
-    /// per declarator into `main_stmts`.
+    /// of a (non-ambient) `VarDecl` and pushes [`MainStmt::Let`] /
+    /// [`MainStmt::LetAwait`] for each declarator whose [`classify_per_decl_path`]
+    /// resolves to `FnMainBodyCapture`. LibraryMode / ToplevelConst declarators
+    /// are skipped here and emitted by `convert_var_decl_module_level` via
+    /// `transform_module_item` (the per-declarator routing structural fix added
+    /// by `/check_job deep` 2026-05-08).
     ///
     /// **I-228-d multi-declarator iteration (Spec stage 逆戻り 2026-05-07)**:
     /// `const a = 1, b = compute();` previously routed only the first declarator
     /// to capture; now all declarators are captured (= each becomes its own
     /// `let` binding inside fn main body, source-order preserved). When the
     /// VarDecl's [`classify_init_kind`] returns [`InitKind::AwaitInit`] (= ANY
-    /// declarator contains await per the recursive walker) or
-    /// [`InitKind::SideEffect`], routing to FnMainBodyCapture forces all
-    /// declarators (including pure-Lit ones in mixed-init VarDecls) into local
-    /// `let` bindings inside fn main; the `pub const` form is dropped to
-    /// preserve TS module-load source-order semantics in Rust execution.
+    /// declarator contains await per the recursive walker),
+    /// [`InitKind::SideEffect`], or [`InitKind::NonTriggerData`] (= ANY
+    /// declarator is an Object / Array literal in executable mode, per the
+    /// I-224 T5-1 Spec stage 逆戻り 2026-05-08 silent-drop fix), routing to
+    /// FnMainBodyCapture forces all declarators (including pure-Lit ones in
+    /// mixed-init VarDecls) into local `let` bindings inside fn main; the
+    /// `pub const` form is dropped to preserve TS module-load source-order
+    /// semantics in Rust execution.
     ///
     /// **Per-declarator MainStmt variant selection**: `MainStmt::LetAwait` is
     /// emitted only for the **bare-Await** init shape (`const c = await fetch();`)
@@ -712,45 +722,75 @@ impl<'a> Transformer<'a> {
     /// **DeclVarPath::ToplevelConst / LibraryMode**: no main_stmts capture; the
     /// existing `convert_var_decl_module_level` path emits the top-level
     /// `Item::Const` (Lit init) or library-mode binding (declare-marked / no-init).
-    fn capture_var_decl_into_main_stmts(
+    pub(crate) fn capture_var_decl_into_main_stmts(
         &mut self,
         var: &VarDecl,
         is_executable_mode_flag: bool,
         main_stmts: &mut Vec<MainStmt>,
     ) -> Result<()> {
-        match classify_decl_var_path(var, is_executable_mode_flag) {
-            DeclVarPath::FnMainBodyCapture => {
-                for decl in &var.decls {
-                    let ast::Pat::Ident(binding) = &decl.name else {
-                        // Destructuring captures (`const { a } = compute()` /
-                        // `const [a] = arr`) are not enumerated by the I-224 matrix.
-                        // Skip the per-declarator capture; the existing path will
-                        // surface this as an unsupported pattern (T4 may revisit).
-                        continue;
-                    };
-                    let name = binding.id.sym.to_string();
-                    let Some(init_expr) = decl.init.as_deref() else {
-                        // No init in this declarator (= mid-list `let a = 1, b;`
-                        // type or other rare TS shape). Skip capture.
-                        continue;
-                    };
-                    if let Expr::Await(await_expr) = init_expr {
-                        // Bare-Await init: extract awaitee, emit LetAwait (T3 applies
-                        // `.await` based on the variant tag).
-                        let inner = self.convert_expr(&await_expr.arg)?;
-                        main_stmts.push(MainStmt::LetAwait { name, init: inner });
-                    } else {
-                        // All other init shapes (Lit / SideEffect / nested-Await):
-                        // emit Let with the whole IR. For nested-await, convert_expr
-                        // preserves the inner `Expr::Await` sub-node which T3 emission
-                        // renders as `.await` within the async fn main context.
-                        let init = self.convert_expr(init_expr)?;
-                        main_stmts.push(MainStmt::Let { name, init });
-                    }
-                }
+        // Ambient guard: declare-marked Var has no runtime emission anywhere
+        // (LibraryMode for all declarators per `classify_per_decl_path`).
+        if var.declare {
+            return Ok(());
+        }
+        for decl in &var.decls {
+            // Per-declarator routing (T5-1 deep review structural fix
+            // 2026-05-08): only capture FnMainBodyCapture-bound declarators.
+            // LibraryMode / ToplevelConst declarators are emitted by
+            // `convert_var_decl_module_level` via the caller's
+            // `transform_module_item` invocation (= the per-init dispatch
+            // path that emits `Item::Fn` for Arrow / FnExpr, `Item::Const`
+            // for Lit, and silently skips Object / Array / Class /
+            // unsupported via `_ => continue`). The mixed Def+Data case
+            // (e.g., `const f = () => 1, x = { a: 1 };`) is now structurally
+            // honest: Arrow → top-level `fn f`, Object → `let x` inside
+            // fn main body. Pre-T5-1-deep-review the VarDecl-level routing
+            // forced ALL declarators into a single path (NonTriggerData
+            // precedence captured everything as MainStmt::Let, losing the
+            // top-level Item::Fn emission for Arrow declarators).
+            if !matches!(
+                classify_per_decl_path(decl, is_executable_mode_flag, var.declare),
+                DeclVarPath::FnMainBodyCapture
+            ) {
+                continue;
             }
-            // ToplevelConst / LibraryMode: no main_stmts capture.
-            DeclVarPath::ToplevelConst | DeclVarPath::LibraryMode => {}
+            let ast::Pat::Ident(binding) = &decl.name else {
+                // Destructuring captures (`const { a } = compute()` /
+                // `const [a] = arr`) at module level: surface as Tier 2 honest
+                // error per `conversion-correctness-priority.md` Tier 1 silent
+                // semantic loss prevention (= /check_problem 2026-05-08
+                // structural fix; pre-T5-1 silent drop, post-T5-1 honest
+                // error). Hono / i-224 reachability=0 verified 2026-05-08;
+                // proper destructuring pattern conversion deferred to a
+                // separate architectural concern.
+                return Err(crate::transformer::UnsupportedSyntaxError::new(
+                    "module-level destructuring var decl with executable trigger \
+                     requires destructuring pattern conversion; rewrite as \
+                     `const tmp = <init>; const a = tmp.a;` for now",
+                    decl.span,
+                )
+                .into());
+            };
+            let name = binding.id.sym.to_string();
+            let Some(init_expr) = decl.init.as_deref() else {
+                // No init in this declarator (= mid-list `let a = 1, b;`
+                // type or other rare TS shape). Skip capture.
+                continue;
+            };
+            if let Expr::Await(await_expr) = init_expr {
+                // Bare-Await init: extract awaitee, emit LetAwait (T3 applies
+                // `.await` based on the variant tag).
+                let inner = self.convert_expr(&await_expr.arg)?;
+                main_stmts.push(MainStmt::LetAwait { name, init: inner });
+            } else {
+                // All other capture-bound init shapes (NonTriggerData /
+                // SideEffect / nested-Await): emit Let with the whole IR.
+                // For nested-await, convert_expr preserves the inner
+                // `Expr::Await` sub-node which T3 emission renders as
+                // `.await` within the async fn main context.
+                let init = self.convert_expr(init_expr)?;
+                main_stmts.push(MainStmt::Let { name, init });
+            }
         }
         Ok(())
     }

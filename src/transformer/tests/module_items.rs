@@ -311,17 +311,27 @@ fn test_transform_module_no_top_level_exprs_no_fn_main_synthesis() {
 
 #[test]
 fn test_try_capture_err_branch_abort_mode_propagates_first_error() {
-    // `{a: 1} satisfies Foo` is `TsSatisfies(Object(...))` — currently rejected
-    // by `convert_expr` as an unsupported expression. Wrapping it in a
-    // top-level `Stmt::Expr` (`console.log(...)`) makes the module enter
-    // executable mode (= `is_executable_mode = true`), routing the Stmt::Expr
-    // through `try_capture_module_item_into_main_stmts`. Inside the capture,
-    // `convert_expr` recurses into the call's argument, hits the satisfies
-    // sub-expression, and returns `Err(_)`. In abort mode the error must
-    // propagate as the function's `Err` return value.
+    // `class { method() {} }` is `Expr::Class` — a class **expression**
+    // (anonymous class) which `convert_expr` currently does not support
+    // (= falls through to the `_ => Err("unsupported expression")` arm).
+    // Wrapping it in a top-level `Stmt::Expr` (`console.log(...)`) makes the
+    // module enter executable mode (= `is_executable_mode = true`), routing
+    // the Stmt::Expr through `try_capture_module_item_into_main_stmts`.
+    // Inside the capture, `convert_expr` recurses into the call's argument,
+    // hits the Class sub-expression, and returns `Err(_)`. In abort mode the
+    // error must propagate as the function's `Err` return value.
+    //
+    // **Fixture choice rationale (T5-1 review fix 2026-05-08)**: previously
+    // this test used `{a: 1} satisfies Foo` (= `TsSatisfies(Object)`), but
+    // T5-1 added a `TsSatisfies` passthrough to `convert_expr` (passes
+    // through to inner Object literal) so the satisfies form no longer
+    // surfaces as the outer error. Using `Class` keeps the test future-
+    // proof: Class expressions are a fundamental Rust-incompatible shape
+    // (anonymous classes cannot be expressed as let-bindings without
+    // synthetic name generation; left as Tier 2 honest reject for follow-up
+    // PRD scope) and will continue to hit the `_ => Err` arm.
     let source = r#"
-        interface Foo { a: number; }
-        console.log({a: 1} satisfies Foo);
+        console.log(class { method() {} });
     "#;
     let module = parse_typescript(source).expect("parse failed");
     let result = transform_module(&module, &TypeRegistry::new());
@@ -332,8 +342,8 @@ fn test_try_capture_err_branch_abort_mode_propagates_first_error() {
         Err(e) => format!("{e:#}"),
     };
     assert!(
-        err.contains("TsSatisfies") || err.to_lowercase().contains("satisfies"),
-        "expected error message to mention TsSatisfies / satisfies (= the unsupported \
+        err.contains("Class") || err.to_lowercase().contains("class"),
+        "expected error message to mention Class / class (= the unsupported \
          capture sub-expression), got: `{err}`"
     );
 }
@@ -344,20 +354,21 @@ fn test_try_capture_err_branch_collecting_mode_accumulates_and_skips_emission() 
     //   (a) accumulate the convert_expr error into `unsupported`,
     //   (b) NOT emit the failed Stmt::Expr (= no `pub fn init` ghost from a
     //       legacy code path, no double-emission via transform_module_item).
-    //   (c) continue conversion of unrelated items (the interface Foo
-    //       declaration must still emit as `Item::Struct`).
+    //   (c) continue conversion of unrelated items (the surrounding decl
+    //       `function helper(): void {}` must still emit as `Item::Fn`).
     let source = r#"
-        interface Foo { a: number; }
-        console.log({a: 1} satisfies Foo);
+        function helper(): void {}
+        console.log(class { method() {} });
     "#;
     let module = parse_typescript(source).expect("parse failed");
     let (items, unsupported) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
 
-    // (a) Accumulator received the satisfies failure.
+    // (a) Accumulator received the Class failure.
     assert!(
-        unsupported.iter().any(|u| u.kind.contains("TsSatisfies")
-            || u.kind.to_lowercase().contains("satisfies")),
-        "expected `TsSatisfies` / `satisfies` in accumulated unsupported list, got: {unsupported:?}"
+        unsupported
+            .iter()
+            .any(|u| u.kind.contains("Class") || u.kind.to_lowercase().contains("class")),
+        "expected `Class` / `class` in accumulated unsupported list, got: {unsupported:?}"
     );
 
     // (b) No legacy `init` Item was synthesized despite the captured Stmt::Expr
@@ -376,8 +387,8 @@ fn test_try_capture_err_branch_collecting_mode_accumulates_and_skips_emission() 
     assert!(
         items
             .iter()
-            .any(|i| matches!(i, Item::Struct { name, .. } if name == "Foo")),
-        "expected `Foo` struct to still be emitted (partial-output contract), \
+            .any(|i| matches!(i, Item::Fn { name, .. } if name == "helper")),
+        "expected `helper` fn to still be emitted (partial-output contract), \
          got items: {items:?}"
     );
 }

@@ -9,531 +9,200 @@
 
 ---
 
-## 現在の状態 (2026-05-07 post I-224 T4 完了 = transform_module(_collecting) を `try_capture_module_item_into_main_stmts` + `synthesize_fn_main` 経由に refactor + transform_module_item `_ => Err` arm を Rule 11 (d-1) compliance に expand + A4/A5b Tier 2 wording 改善 + `build_init_fn` helper 削除 + `namespace_lint.rs` sub-module 抽出 + INV-4 invariants test fill-in + 4-layer review pass)
+## 現在の状態 (2026-05-08)
+
+**進行中**: PRD α-1 (I-224 = B2 fn main mechanism) Implementation Stage、T5-1 完了 / T5-2 着手前。
+
+**次着手**: T5-2 (NEW C0 fixtures green-ify + INV-7 fill-in + 4-layer review)。詳細は下記「[/start 再開時の手順](#start-再開時の手順)」参照。
+
+### Quality Gate (post T5-1 + /check_job ×3 + /check_problem ×2 累積)
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | **108/158 (68.4%)** at /tmp/hono-src f10dee8 SHA (= post-T4 working tree、Hono 4.12.18) / **109/158 (69.0%)** at SHA-pinned 027e3df (= T4 vs T3=111/63 baseline = -2 clean / +4 errors、4 件全件 **Tier 1 silent semantic change → Tier 2 honest error** 化 = `conversion-correctness-priority.md` 観点で **Improvement** = silent semantic loss を honest error に elevate、cloudflare-workers/websocket.ts + deno/websocket.ts の `export const upgradeWebSocket = defineWebSocketHelper(...)` がそれまで silently dropped されていた事実を T4 の deeper convert_expr 経由 capture が surfacing) |
-| Hono bench errors | **68** at f10dee8 / **67** at 027e3df (Tier-transition Improvement、broken-fix PRD allowed pattern per `prd-completion.md`) |
-| cargo test (lib) | **3520 pass / 0 fail / 0 ignored** (T3 baseline 3513 + 7 NEW T4 unit tests = 6 A4 control-flow Tier 2 wording + 1 A5b debugger Tier 2 wording) |
-| cargo test (integration) | 122 pass |
-| cargo test (compile) | 3 pass |
-| cargo test (E2E) | 159 pass + 70 `#[ignore]` |
-| cargo test (i224_invariants_test) | **5 pass / 2 ignored** (T1-3 で INV-5 + T2 で INV-3 partial / INV-6 + T3-4 で INV-2 + T4-3 で **INV-4 fill-in**、INV-1/INV-7 は T5/T9 で順次 fill-in 予定) |
-| cargo test (i224_helper_test) | **5 pass / 0 ignored** |
-| cargo test (i205_helper_test) | **4 pass / 0 ignored** |
-| cargo test (i205_invariants_test) | **2 pass / 5 ignored** |
-| clippy | 0 warnings |
-| fmt | 0 diffs |
-| `scripts/audit-no-pub-fn-init.sh` | exit=0 (= INV-4 codebase invariant lock-in、enforced paths `src/`/`tools/`/`tests/e2e/rust-runner/` で 0 hits) |
-| ./scripts/check-file-lines.sh | OK (全 .rs file < 1000 行、`transformer/mod.rs` 932 行 (= 1078 → 932、`namespace_lint.rs` 185 行抽出 + `build_init_fn` 削除で削減)) |
+| cargo test (24 binaries) | lib **3542** / e2e **183** + 96 ignored / integration 122 / compile 3 / i224_invariants 6 + 1 ignored / i224_helper 5 / i205_invariants 2 + 5 ignored / i205_helper 4 / 全 green / 0 fail |
+| cargo clippy / fmt / file-line | 0 warnings / 0 diffs / 全 .rs file < 1000 行 |
+| audit-prd-rule10-compliance.py / audit-no-pub-fn-init.sh | PASS / exit=0 (INV-4 lock-in) |
+| Hono bench | clean **107** / errors **72** at SHA-pinned 027e3df (T4 baseline 108/68 → -1 clean / +4 errors、全件 **Tier 1 silent → Tier 2 honest Improvement** per `prd-completion.md` broken-fix PRD allowed pattern) |
 
 **bench 非決定性**: ±1 clean / ±2 errors の noise variance を [I-172] として記録 (test/bench infra defect、別 PRD)。
 
-### 進行中作業
+### Implementation Stage 進捗 (T1〜T9 sub-commits 一覧)
 
-**案 β 採用 (2026-05-01)**: I-205 T14 着手判定調査で 3 系統 prerequisite (universal infra: I-224 = B2 fn main mechanism / I-225 = B3 class field literal type inference / I-162 = constructor synthesis) を発見、`1 PRD = 1 architectural concern` 厳格適用 + Universal infra leverage maximization で **案 β (Universal infra leverage first + L1 mid-priority)** を user 承認。星取表 20/24 で 4 案中最良判定。詳細は本 entry 後 chain section 参照。
+| Phase | Status | 完了日 |
+|-------|--------|--------|
+| T1: `__ts_` namespace + collision detection (INV-5 fill-in) | ✓ 完了 | 2026-05-07 |
+| T2: IR enums + helper (INV-3 partial / INV-6 fill-in) | ✓ 完了 | 2026-05-07 |
+| T3: fn main synthesis + rename + substitute + Axis B/E probes | ✓ 完了 | 2026-05-07 |
+| T4: transform_module refactor + `pub fn init` 廃止 (INV-4 fill-in) | ✓ 完了 | 2026-05-07 |
+| **T5-1**: Existing C0 cells e2e green-ify + I-205 cell-09 unblock + INV-1 fill-in | ✓ 完了 | 2026-05-08 |
+| T5-2: NEW C0 fixtures green + INV-7 fill-in + 4-layer review | **次着手** | — |
+| T6a: I-154 doc + audit script CI integration | 未着手 | — |
+| T7: Test harness ESM upgrade permanent integration | 未着手 | — |
+| T8: Top-level await synthesis logic | 未着手 | — |
+| T9: Axis C1 cells e2e green + Hono bench verify + `[CLOSE]` PRD 完了 | 未着手 | — |
 
-**進行中: PRD α-1 (I-224 = B2) Spec stage iteration v7 完了 (2026-05-01、Spec stage true closure 達成 = 5 rounds adversarial review + 1 convention compliance closure round 反映)** — `backlog/I-224-top-level-fn-main-mechanism.md` (1846 行) を iteration v3 で大規模 rewrite + iteration v3〜v6 adversarial review で 52 件 actions resolve + iteration v7 で I-205 v1.6 convention "stub test files 作成" 厳格 compliance 達成 (Rule 9 (a) helper test contracts NEW + Rule 8 (8-c) audit symmetry)。
+各 T の詳細 task spec + completion criteria は [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) Sub-commits 一覧 table 参照。
 
-**iteration v3 + v4 + v5 + v6 minor + v7 主要成果 (旧 21 件 + iteration v3 11 件 + iteration v4 5 件 + iteration v5 13 件 + iteration v6 minor 2 件 + iteration v7 (convention compliance、新規 defect 0 件) = 計 52 件 actions 全 resolve + 11 stub test files、convergence pattern 21→11→5→13→2→0 = 100% Critical=0 + High=0 + Medium=0 + Review insights=0 達成)**:
+### Spec への逆戻り Iteration log (PRD doc Iteration v1〜v10 = audit trail)
 
-- **Matrix 拡張**: 31 cells → 80 cells full Cartesian product (Axis A 8 × Axis B 5 × Axis C 2、Axis A5 split into A5a/A5b、Axis E orthogonality merge declaration、third-party review C-1/C-4/M-2 fix)
-- **Option β cohesive batch (user 承認)**: 旧 cells 14-18/30 + 6/7/8 (Out of Scope = I-226 defer 設計) を **In Scope migration**、I-226 PRD 起票撤回 (= TODO + plan.md chain から I-226 references 削除)、test harness ESM upgrade を本 PRD scope に integrate (TS-5/TS-6 + T7/T8/T9 新 task 追加、third-party review H-2 fix)
-- **SWC parser empirical lock-in test 完成**: `tests/swc_parser_top_level_await_test.rs` 4 tests passing で Axis A vs C1 mutual exclusion (25 NA cells) 構造的 lock-in (third-party review C-2 fix)
-- **`scripts/observe-tsc.sh` 拡張**: `--esm` flag (top-await 用 ESM mode) + `--no-auto-main` flag (Spec stage fidelity) を追加、Spec stage で trial 実装完了
-- **Cell-05 fixture fidelity 修正 + Cell 27 split (cell-27a 新規作成)**: third-party review C-3/C-4 fix
-- **Axis B B1 / Axis E orthogonality merge structural verify**: `## Problem Space > Axis B B1 Orthogonality Verification` + `## Problem Space > Axis E Orthogonality Probe` sub-sections 追加 (third-party review H-1/M-2 fix)、Axis E `pub` modifier preservation rule 明示 (`__ts_main` rename target は private = INV-5 整合、third-party review High #2 fix)
-- **Design dispatch tree rewrite (iteration v3 → v4 進化)**: iteration v3 で 4-tuple match (`is_executable_mode`, `user_main_kind`, `is_async_required`, `has_lit_top_level_const`) + collision arm 最優先 + unreachable!() defensive lock-in を導入 → iteration v4 で third-party re-review が axis-tuple ↔ definition mismatch (cells #5/#25 fall to unreachable!()) + A6 cells double-claim 発見、**3-tuple match** (`is_executable_mode`, `user_main_kind`, `has_top_level_await`) に simplify + `has_lit_top_level_const` を per-item runtime decision に移行、Rule 9 (a) 1-to-1 mapping table を Design section 内に hard-code (third-party review Critical #2 fix → iteration v4 Critical 1 + Medium 1 + High 1 fix)
-- **INV 拡張**: INV-3 wording revise (Axis C1 in-scope trigger 反映 + B1+C1 sync edge cells 14/34/74 exhaustive 列挙) + INV-6 (TypeResolver unaffected、R-3 fix) + INV-7 (`pub fn init` external API audit、R-2 fix) 追加
-- **Pre-Implementation Audit Findings section 追加**: `__ts_main` user code grep (R-4 fix、`src/`/`tests/`/`tools/` で 0 hits = INV-5 reachability prerequisite 満たす) + `pub fn init` definition/call site grep (R-2 fix、call site 0 件 = breaking change reachable surface 不在 = INV-7 verify) + `scripts/audit-no-pub-fn-init.sh` 新規作成 (M-3 fix、CI integrate target T6a)
-- **Spec Review Iteration Log v3 entry**: 13-rule self-applied re-verify table + 32 件 actions 全 resolve record + Spec stage 完了判定 ✓
-- **新 framework PRD I-D 起票** (TODO L3、本 entry close 後 access): R-1 + R-5 + iteration v3 framework gap candidates v3-4/5/6 + iteration v4 v4-1/2/3 + iteration v5 v5-1/2 + iteration v6 minor v6-1/2 = **計 13 件 framework 改善 candidates** を集約 = `audit-prd-rule10-compliance.py` の verify functions 拡張 (Cartesian completeness / duplicate matrix detection / dispatch tree pseudocode lint / verdict consistency / cross-reference consistency / `_` arm self-applied compliance / invariant cell list exhaustivity 等) + `spec-stage-adversarial-checklist.md` Rule 5/6/8/9/13 wording 強化 + `spec-first-prd.md` Spec gap PRD 起票 procedure + spec-table-driven generator candidate
+| Iteration | 日付 | 概要 |
+|-----------|------|------|
+| v1〜v7 | 2026-05-01 | Spec stage 5 rounds adversarial review + convention compliance、52 件 actions 全 resolve、Spec stage true closure 達成 |
+| v8 | 2026-05-07 | T2 完了時、I-228 sub-entries 4 件 (recursive Await detection 等) Spec への逆戻り |
+| v9 | 2026-05-08 | T5-1 着手中、cell-12/24 silent-drop Tier 1 fix 用 `InitKind` 4→5 variant split (NonTriggerDef + NonTriggerData) |
+| **v10** | 2026-05-08 | T5-1 完了後 `/check_job` 3 iteration + `/check_problem` 2 round の累積 structural fix 5 件 record (詳細は PRD doc Iteration v10 entry) |
 
-**audit verify 状態**: `audit-prd-rule10-compliance.py backlog/I-224-top-level-fn-main-mechanism.md` PASS ✓ (2026-05-01)、`tests/swc_parser_top_level_await_test.rs` 4 tests passing ✓。
-
-**handoff doc archive note**: `report/I-224-spec-stage-v3-review-handoff.md` (557 行) は iteration v3 開始時点の議論経緯 + 16 findings + 5 review insights + Option α/β/γ 設計判断記録、本 doc は iteration v3 完了で **archive 候補** (= `report/archive/I-224-spec-stage-v3-review-handoff-archived.md` へ move、iteration v3 完了後の post-mortem reference として preserve)。
-
-**次着手 (Implementation stage T1-T9、user 確定 2026-05-01 で 23 sub-commits decomposition 採用)**: 各 T を 2-4 sub-commits に decompose、各 sub-commit で cargo check / cargo test (該当 scope) / cargo fmt / cargo clippy 全 pass + commit message format `[WIP] I-224 T<N>-<sub>: <single-focus deliverable>` (中間) / `[WIP] I-224 T<N> 完了: <T-level summary> + 4-layer review pass` (T-完了) / `[CLOSE] I-224 PRD 完了: ...` (T9-2 final)。
-
-**Implementation stage progress chain (23 sub-commits、PRD doc Implementation Stage Tasks section の Sub-commits 一覧 table 参照)**:
-
-| Phase | Sub-commits | Status |
-|---|---|---|
-| T1: `__ts_` namespace + collision detection | ~~T1-1~~ ✓ / ~~T1-2~~ ✓ / ~~T1-3~~ ✓ (= INV-5 fill-in + 4-layer review) | ✓ **T1 完了 (2026-05-07)** |
-| T2: IR enums + helper | ~~T2-1~~ ✓ / ~~T2-2~~ ✓ / ~~T2-3~~ ✓ (= INV-3 partial + INV-6 + 4-layer review、user 指示で T2-1/T2-2/T2-3 を 1 commit に bundle) | ✓ **T2 完了 (2026-05-07)** |
-| T3: fn main synthesis + rename + substitute + Axis B/E probes | ~~T3-1~~ ✓ / ~~T3-2~~ ✓ / ~~T3-3~~ ✓ / ~~T3-4~~ ✓ (= Axis E + A5a probes + 4-layer review、user 指示で 1 commit に bundle) | ✓ **T3 完了 (2026-05-07)** |
-| T4: transform_module refactor + pub fn init 廃止 | ~~T4-1~~ ✓ / ~~T4-2~~ ✓ / ~~T4-3~~ ✓ (= INV-4 + 4-layer review、user 指示で T4-1/T4-2/T4-3 を 1 commit に bundle) | ✓ **T4 完了 (2026-05-07)** |
-| T5: E2E green-ify (existing C0) + I-205 cell-09 unblock | T5-1 / T5-2 (= NEW C0 + INV-7 + 4-layer review) | 未着手 |
-| T6a: I-154 doc + audit script CI integration | T6a (single sub-commit、4-layer review 内包) | 未着手 |
-| T7: Test harness ESM upgrade permanent integration | T7-1 / T7-2 (= --esm CI flow + 4-layer review) | 未着手 |
-| T8: Top-level await synthesis logic | T8-1 / T8-2 / T8-3 (= INV-3 full coverage + 4-layer review) | 未着手 |
-| T9: Axis C1 cells e2e green + Hono bench verify | T9-1 / T9-2 (= **`[CLOSE]` PRD 完了**) | 未着手 |
-
-**T1-1 完了 (2026-05-06)**: TS_MAIN_RENAME constant + I-154 namespace doc 整備 (commit 済)。
-
-**T1-2 完了 (2026-05-06)**: `src/transformer/statements/mod.rs:67-95` に `check_ts_internal_fn_name_namespace(name: &str, span: swc_common::Span) -> Result<()>` 新規 validator 追加 (label-side validator と symmetric、`__ts_` prefix-based reject、parametric wording) + `src/transformer/mod.rs:701-844` に scan helper `scan_for_ts_namespace_collisions` + per-item dispatcher (Rule 11 (d-1) 全 ModuleItem / ModuleDecl / Stmt / Decl variants explicit enumerate) 追加 + `Transformer::transform_module` (line 313-318) と `Transformer::transform_module_collecting` (line 348-356) に scan integration (transform_module = early-Err、transform_module_collecting = unsupported accumulator seed) + `src/transformer/statements/tests/loops.rs:367-525` に 13 unit tests (Decl variants 全 cover + ExportDecl + ExportDefaultDecl + 一般 `__ts_` prefix + sanity + matrix cell # 19 representative)。**Quality gate**: cargo check / cargo test --lib 3372 pass (3359 baseline + 13 NEW) / cargo fmt 0 diff / cargo clippy 0 warning / check-file-lines OK。**Commit (proposed)**: `[WIP] I-224 T1-2: __ts_main collision validator + Tier 2 honest error reject (matrix # 9/19/20 + collision-merged 29/39/40/49/59/69/79/80)`。
-
-**T1-3 完了 (2026-05-07)**: `tests/i224_invariants_test.rs::test_invariant_5_ts_main_namespace_reservation_with_collision_priority` の `#[ignore]` 解除 + fill-in (全 reachable B4 cells = matrix # 9/19/20/29/39/40/49/59/69/79/80 を 11 case の table-driven integration test として実装、各 cell で `transpile()` Err with collision wording + `transpile_collecting()` `unsupported[0]` collision wording を assert)。**Cells 49/59/69 priority sub-check** で A-axis 代替 reject (`Stmt(If(`、`Stmt(Empty(`、`Stmt(Debugger(` wording、`format_module_item_kind` の `format!("Stmt({stmt:?})")` envelope 込み substring match) が unsupported list 内に存在するが index 0 ではない (= collision arm が priority で勝つ) ことを **non-trivial structural assert**。**Quality gate**: cargo test --lib 3372 pass / cargo test (full 24 binaries) all green / cargo fmt 0 diff / cargo clippy 0 warning / check-file-lines OK (test file 428 行 < 1000)。**`/check_job` 4-layer self-applied review (敵対的 deep review)**: 初回 review で Layer 3 / Layer 4 finding = cell 59 (A5a Empty) を `cells_with_alternative_a_axis_reject` から除外していた compromise を発見 → empirical probe で current state (post T1-2 / pre T2/T3) では cell 59 unsupported list に `Stmt(Empty(` が index 1 に structural pinning 可能と確認 → cell 59 を non-trivial priority sub-check に追加 + cell 49/69 substring を `Stmt(<Variant>(` envelope 込み form に tighten + docstring に "Cell 59 forward-compat note" 追加 (T4-2 で Stmt::Empty silent-skip lands 時の test update guidance) で **structural strengthening fix**。Re-review で Layer 1-4 全 **0 findings ✓**。**Defect Classification 5 category (final)**: Grammar gap / Oracle gap / Spec gap = 0、Implementation gap = 1 (= self-applied fix で resolved)、Review insight = 1 (= L1 substring tightening、self-applied fix で resolved)。**Commit (proposed)**: `[WIP] I-224 T1 完了: INV-5 collision priority structural lock-in (invariants test fill-in、cells 49/59/69 non-trivial priority + envelope-match substring) + 4-layer self-applied review pass`。
-
-**T2 完了 (2026-05-07、T2-1 + T2-2 + T2-3 を user 指示で 1 commit に bundle、`/check_job` adversarial deep review **2 round** = 初回 4 件 fix + 1 件 Spec gap escalate (TODO `[I-228]`) + 2 round で更に 3 件 fix + 3 件 Spec gap candidate を `[I-228]` sub-entry に集約 (= I-228-b/c/d))**: `src/transformer/main_synthesis/{mod.rs, tests.rs}` 新規 directory module = (a) **IR enums** (MainStmt 4 variants / UserMainKind 5 variants / InitKind 3 variants / DeclVarPath 3 variants / DispatchArm 13 variants) + (b) **per-init-shape predicates** (classify_init_kind / has_side_effect_init / classify_decl_var_path with declare/no-init defensive guards) + (c) **module-level predicates** (is_executable_mode / detect_user_main + helpers + **`is_ambient_decl` ambient filter (review fix)** / has_top_level_await、全て Rule 11 (d-1) self-applied compliant = Stmt / Decl / ModuleItem / DefaultDecl 全 variants explicit enumerate) + (d) **dispatch arm classifier** (classify_dispatch_arm = 13 reachable arms + 4 structurally-unreachable arms with empirical lock-in via tests/swc_parser_top_level_await_test.rs) + (e) **Transformer::collect_top_level_executions** shared helper (Rule 11 (d-1) compliant Stmt 全 variants enumerate、ambient/no-init Var defensive guard、let-else + unreachable! macro for `.expect()` rule compliance per testing.md)。Production code 0 LOC change for transform_module path (T2 module is staging foundation、T4-1 で integration、4 items に per-item `#[allow(dead_code)]` + T3/T4 consumer task ID コメント記載 per TS_MAIN_RENAME precedent)。Public items 6 件に **`#[doc(hidden)]` 付与 (review fix)** で internal API public exposure を明示。Tests = (1) **73 unit tests** in src/transformer/main_synthesis/tests.rs (Equivalence partitioning + Boundary value + Decision Table + AST variant exhaustiveness + #[should_panic] for unreachable arms + 80-cell representative collect_top_level_executions cells + **9 declare-marked tests (review fix)**)、(2) **test_dispatch_arm_one_to_one_mapping_per_in_scope_cell fill-in** in tests/i224_helper_test.rs = 43 reachable cells × DispatchArm Rule 9 (a) 1-to-1 mapping + DispatchArm coverage sanity check、(3) **test_invariant_3_sync_async_dispatch_consistency_4_subcases C0 partial fill-in** = Trigger 1 only (B2+C0、6 cells) + Sync (no-trigger C0、11 cells) で is_async_required computation verify、(4) **test_invariant_6_type_resolver_layer_unaffected fill-in** = main_synthesis/mod.rs source content audit で **8 forbidden tokens (review fix で `type_resolution` 追加)** 不在 structural verify。**Quality gate**: cargo test 3783 pass / 0 fail / 86 ignored (lib 3372→3445 +73 / i224_helper 0→1 pass +1 / i224_invariants 1→3 pass +2) / cargo fmt 0 diff / cargo clippy --all-targets --all-features -- -D warnings 0 warning / check-file-lines OK (mod.rs 946 行 / tests.rs 705 行 < 1000 threshold)。**`/check_job` 4-layer adversarial deep review (2026-05-07)**: 初回 review で **5 findings 発見**: (L1-1) 6 public items が `#[doc(hidden)]` 不在 = internal API expose、(L1-2) INV-6 forbidden tokens に `type_resolution` 不在、(L2-1 **Spec gap**) `has_top_level_await` AST shape direct 形が nested top-level await (`f(await x)` 等) を miss = T3 emission で Rust E0728 risk、(L2-2 Implementation gap **Critical**) `detect_user_main` が declare-marked decls を filter せず → `declare function main()` を B1 と誤分類、(L3-1) 12 orthogonality-merged out-of-scope cells (A4/A5a/A5b + B0..B3) が dispatch arm test に不在。**Self-fix 全 4 件 (T2 scope 内 resolve)**: L1-1 → 6 items に `#[doc(hidden)]` 付与、L1-2 → forbidden_tokens list に `type_resolution` 追加、L2-2 → `is_ambient_decl(decl: &Decl)` helper 新設 + `detect_user_main_from_decl` で先行 filter (Decl::Fn/Var/Class/TsEnum/TsModule の `declare` flag 判定、Interface / TypeAlias は always type-only 維持、Using は runtime resource 維持) + 9 unit tests 追加 (declare function main / async / const / class / enum / namespace / export declare / `__ts_main` ambient / `declare interface main` 維持)、L3-1 → 評価結果「PRD mapping table 1-to-1 で in-scope cells のみ enumerate、out-of-scope orthogonality-merged cells は dispatch tree に到達しない dead path = 追加 test value 無し」と確定で defer、後続 PRD spec evolution 時に再評価。**TODO defer 1 件 (out of T2 scope = Spec stage 逆戻り必要)**: L2-1 Spec gap → **TODO `[I-228]`** 起票 (PRD I-224 Axis C definition incompleteness、recursive Await detection 必要、T3 着手前に Spec stage 逆戻り or T3 完了後 independent PRD)。Re-review で Layer 1-4 全 **0 findings ✓**。**Defect Classification 5 category (final、deep review 2 round 後)**: Grammar gap / Oracle gap = 0、Spec gap = 1 entry × 4 sibling sub-cases (= L2-1 nested top-level await + I-228-b Lit::Regex inclusion inconsistency + I-228-c ExportDecl-wrapped side-effect-init Axis A miss + I-228-d multi-declarator first-only check、全て同 root cause "AST shape direct vs recursive walk" pattern、TODO `[I-228]` に集約 = framework 失敗 signal を Spec stage iteration へ escalate)、Implementation gap = 3 (= L1-2 INV-6 token narrowing for false-positive elimination + L2-2 declare-marked filter + 2 round Lit::Regex narrow per design intent、全 self-fix で resolved)、Review insight = 2 (= L1-1 doc(hidden) + 2 round #[should_panic] precondition test、全 self-fix で resolved)。**Commit (proposed)**: `[WIP] I-224 T2 完了: main_synthesis foundation module + 75 unit tests + dispatch arm 1-to-1 mapping integration test + INV-3 (C0 partial) / INV-6 invariants test fill-in + adversarial deep review 2 round fix (declare-marked filter + doc(hidden) + INV-6 token narrowing + Lit::Regex narrow + #[should_panic] precondition + I-228 Spec gap 4 sub-entries escalate) + 4-layer review pass`。
-
-**T3 完了 (2026-05-07、T3-1 + T3-2 + T3-3 + T3-4 を user 指示で 1 commit に bundle、`/check_job` 4-layer self-applied review = Layer 1-4 全 0 findings + 1 件 Spec gap (NonTrigger 拡張 = 後述) + 2 件 Review insight deferred)**: I-224 fn main mechanism の foundation + partial integration を bundle 完了。
-
-- **T3-1 (synthesize_fn_main impl)**: `Transformer::synthesize_fn_main(main_stmts: Vec<MainStmt>, user_main: UserMainKind, has_top_level_await: bool) -> Vec<Item>` を `src/transformer/main_synthesis/mod.rs` に追加 = 3-tuple match dispatch tree per Rule 9 (a) 1-to-1 mapping、`is_executable_mode = !main_stmts.is_empty() || has_top_level_await` で derive、12 reachable arms (LibraryNone/FnSyncDirect/FnAsyncDirect/NonFn + ExecNoneSync/FnSyncRename/FnAsyncRename/NonFnSync + ExecNoneAsync/FnSyncRenameAsync/FnAsyncRenameAsync/FnAsyncRename/NonFnAsync) + 1 defensive `unreachable!()` for Collision arm。Helpers: `main_stmts_to_ir_stmts(Vec<MainStmt>) -> Vec<IrStmt>` (4 variants 全 mapping、`ExprAwait`/`LetAwait` で `IrExpr::Await` 自動 wrap)、`build_synthesized_fn_main(body, is_async) -> Item::Fn` (sync = no attr / async = `#[tokio::main]`、`Visibility::Private`)。**18 NEW unit tests** in `src/transformer/main_synthesis/tests/mod.rs` (12 reachable arms + 5 body-emission semantic tests + 1 `#[should_panic]` for Collision)。
-- **T3-2 (user main rename)**: `Transformer` struct に `user_main_substitution: bool` field 追加 (`spawn_nested_scope` / `spawn_nested_scope_with_local_synthetic` で propagate)、`transform_module` / `transform_module_collecting` 冒頭で `is_executable_mode(module) && matches!(detect_user_main(module), FnSync | FnAsync)` の gate 計算で set。`convert_fn_decl` に rename + visibility-drop logic 追加 = `user_main_substitution && name == "main"` で `name = TS_MAIN_RENAME (= "__ts_main")` + `vis = Visibility::Private` (rename は `is_async && name == "main"` tokio::main attribute 計算 **前** に行うため、post-rename name "__ts_main" が "main" と match せず attribute 自動 drop = INV-3 (a) 別 path 整合)。`convert_arrow_var_decl` に同 rename + vis-drop logic (B1b form 整合)。`convert_var_decl_module_level` に **B1c form (`const main = function() {}`) 新 arm 追加** = `Expr::Fn(fn_expr)` を synthetic FnDecl 経由で `convert_fn_decl` に dispatch (3 forms B1a/B1b/B1c が同一 IR shape に collapse、Axis B B1 orthogonality)。
-- **T3-3 (call substitution)**: `convert_call_expr` の `Expr::Ident(ident)` arm に `user_main_substitution && fn_name == "main"` で `fn_name = TS_MAIN_RENAME` substitute logic 追加 (registry / FileTypeResolution lookup は original "main" key で行い、IR emission boundary でのみ rewrite)。
-- **T3-4 (Spec gap fix + helper / invariants tests fill-in)**:
-  - **Spec gap discovery + structural fix (NonTrigger 拡張)**: T3-2/T3-3 wiring 後 e2e_test 7 件 fail 発見 (`callable_interface`/`i177_f_arrow_fn_expr_narrow_cohesion`/`object_literal_inference`/`optional_params`/`param_type_infer`/`typeof_const`/`var_type_arrow`)、root cause = `classify_init_kind` の SideEffect 分類が overly broad で `const f = (...) => ...` (Arrow init) や `const Phase = { ... } as const;` (TsAs(Object) init) を SideEffect 扱い → `is_executable_mode=true` 誤 trigger → library-mode + B1/B2 fixture で rename gate 誤発火 → no synthesized fn main + cargo run E0601。Structural fix: **`InitKind::FunctionDef → NonTrigger` rename + 拡張**、Arrow / Fn / Class definition + Object / Array literal + 型-only wrappers (TsAs / TsConstAssertion / TsTypeAssertion / TsNonNull / TsInstantiation / TsSatisfies / Paren、`expr_init_kind` recursive helper で walk) を NonTrigger に分類 (= module-load runtime side effect 不在 partition、`has_side_effect_init` false return = exec mode trigger 不在)、`classify_decl_var_path` `(true, NonTrigger) → LibraryMode` routing 追加 (= 既存 `convert_var_decl_module_level` path 維持、no main_stmts capture)。**17 NEW unit tests** for NonTrigger partition: 6 件 base = Arrow / async Arrow / FnExpr / has_side_effect_init false × 2 + classify_decl_var_path executable LibraryMode、+ 11 件 expansion = Object literal / Array literal / Class expression / TsAs(Object) / TsConstAssertion(Array) / Paren(Lit) Lit-preserve / TsNonNull(Paren(Arrow)) nested / nested wrappers with SideEffect inner / TsSatisfies(Object) / has_side_effect_init Object false + TsAs-const false (recursive walk + アグリゲート + クラス全 partition の structural lock-in)。
-  - **Stmt::Empty silent skip**: `transform_module` / `transform_module_collecting` の loop 冒頭に `Stmt::Empty(_) => continue` silent skip 追加 (= PRD Design section #3 "A5a partition: silent skip per the per-item dispatch table" の T4-2 work から partial early-land、orthogonality probe を T3 で fill-in する prerequisite)。
-  - **Generator guard for B1c FnExpr arm (deep review fix、2026-05-07 `/check_job` Layer 2 Empirical 由来)**: `convert_var_decl_module_level` の `Expr::Fn` arm を `if !fn_expr.function.is_generator` で guard。**Lesson source**: Hono SHA pin (027e3df = baseline) bench で T3 純 delta = clean 111→110 / errors 63→64 / +1 OTHER を検出 (noise variance ±2 errors 範囲外、同 SHA 再現 stable)、原因 file = `helper/ssg/ssg.ts:203` (`export const fetchRoutesContent = function* <...>`)。Pre-T3: convert_var_decl_module_level の `_ => continue` arm で FnExpr init silently dropped (= I-016 owner、no error)。Post-T3 (guard 前): 新 B1c arm が generator FnExpr を convert_fn_decl 経由 routing → generator body の `Yield` が unsupported expression error → +1 OTHER。**Tier-transition compliance**: 修正後 Hono bench = clean **111** / errors **63** = **Preservation (= baseline 完全一致)**、Tier-transition compliance pass。Generator guard test `tests/i224_helper_test.rs::test_b1c_fn_expr_generator_guard_preserves_silent_drop` で 3 sub-case lock-in (= non-generator FnExpr emits `fn`、generator FnExpr silent drops、async non-generator FnExpr emits `(async) fn`)。
-  - **File split (file-line check fit)**: `main_synthesis/mod.rs` 1274 → 901 行に縮小 = `init_classifier.rs` 新規 sub-module 抽出 (InitKind / DeclVarPath enums + classify_init_kind / has_side_effect_init / classify_decl_var_path + private `expr_init_kind` helper、~370 行)。`arrow_fns.rs` 1023 → 998 行に縮小 = T3-2 added comment block trim (B1c synthesize 部 + B1b rename 部の docstring 簡略化)。両 file < 1000 line threshold compliant。
-  - **Helper / invariants tests fill-in (4 件全 #[ignore] 解除 + green)**:
-    - `tests/i224_helper_test.rs::test_axis_b_b1a_b_c_rename_dispatch_symmetric`: 3 fixture variants (B1a function decl / B1b const arrow / B1c const fn expr) を identical body で構築 + transpile output が **byte-exact identical** であることを assert (orthogonality merge probe)、各 fixture で `fn __ts_main` 存在 + `fn main()` 不在 + `__ts_main()` substituted call site ≥ 2 occurrences。
-    - `tests/i224_helper_test.rs::test_axis_e_export_preserve_symmetric`: `export function helper()` + `export function main()` fixture で `pub fn helper` 保持 + `pub fn __ts_main` **不在** + `fn __ts_main` 存在 + `__ts_main()` substituted call の 4 件 assert (INV-5 transpiler-internal identifier private + non-rename symbol pub preservation orthogonality)。
-    - `tests/i224_helper_test.rs::test_axis_a5a_compositional_orthogonality_with_b_axis`: cells 51 vs 1 / 53 vs 3 / 55 vs 5 / 57 vs 7 で A5a + Bn が A0 + Bn と byte-exact identical output を produce することを assert (Stmt::Empty silent skip orthogonality)、cell 59 vs 9 (B4 collision) 用に negative-path probe (両 fixture が transpile Err with `__ts_main` collision wording、byte offset 除いた structural error wording 一致 = collision priority orthogonality)。
-    - `tests/i224_invariants_test.rs::test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase`: in-scope cells 13/15/33/35/73/75 (B1/B2 cells) で `fn __ts_main` declaration + `__ts_main()` substituted call site の 2 invariants assert + multi-call boundary value (cell 31 boundary、3 `main();` call sites in source) で `__ts_main()` substituted occurrence ≥ 3 + bare `main()` reference 不在 assert。`detect_user_main` cross-axis sanity check (FnSync / FnAsync trigger) 付加。
-    - `tests/i224_invariants_test.rs::test_invariant_5_*` (T1-3 で fill-in 済) の cell 59 expectation は Stmt::Empty silent skip 整合のため `cells_with_alternative_a_axis_reject` から削除 + `match cell` arm から `59 => "Stmt(Empty(",` arm 削除 (T3-4 fix の co-update)。
-- **Quality gate**: cargo test 全 pass (lib **3513** = T2 baseline 3445 + T3-1 18 NEW + T3-4 17 NEW NonTrigger (6 base + 11 expansion) + classify_dispatch_arm direct panic test 1 NEW + 32 lib-only NonTrigger ripple / e2e **159** + 70 ignored / cli 3 / compile 3 / integration 122 / **i224 helper 5 pass + 0 ignored** = T3 で全 stub fill-in + deep review generator guard test 1 件 NEW (sync + async generator + non-generator + async non-generator 4 sub-cases) / **i224 invariants 4 pass + 3 ignored** = INV-2 fill-in、INV-1 (T5/T9) + INV-4 (T4-3) + INV-7 (T5-2) は後続 task / i205 helper 4 pass / i205 invariants 2 pass + 5 ignored) / cargo fmt 0 diff / cargo clippy --all-targets --all-features -- -D warnings 0 warning / `./scripts/check-file-lines.sh` OK / **Hono bench Tier-transition Preservation** (= clean 111 / errors 63 baseline 完全一致、Hono SHA pin (027e3df) で純 T3 delta verify、generator guard fix 後)。
-- **`/check_job` 4-layer self-applied review (T3 commit 前、deep + 第三者敵対的 review 2 round)**:
-  - **Layer 1 (Mechanical)**: 0 findings (clippy / fmt / file-line / test name pattern / Rule 11 (d-1) 全 compliance、no unwrap/panic in production)
-  - **Layer 2 (Empirical)**: **Initial review** 0 findings (18 unit + 4 helper + INV-2/INV-5 invariants + 159 e2e 全 green、7 originally-failing e2e tests が NonTrigger fix で 0 件に解消)。**Deep review (Hono bench Tier-transition compliance verify)**: 1 finding (= Hono SHA pin で純 T3 delta = +1 OTHER 検出、原因 file `helper/ssg/ssg.ts:203` generator FnExpr → Yield unsupported error)、generator guard structural fix で resolved (= clean 111 / errors 63 baseline 完全一致 Preservation)、generator guard test `test_b1c_fn_expr_generator_guard_preserves_silent_drop` 追加。
-  - **Layer 3 (Structural cross-axis)**: 1 finding self-resolved (= NonTrigger Spec extension during T3-4 e2e verification、PRD spec の InitKind partition over-broad classification の structural fix)、2 件 Review insight deferred:
-    - **L3-1 (indirect main reference)**: `const f = main; f();` 等 indirect call は `convert_call_expr` の direct Ident("main") substitute path に該当せず未 rename = `main` reference dangling。Per PRD scope (direct `main()` call substitute focus) として acceptable + I-016 silent drop downstream で実装 broken は pre-existing。後続 PRD で Ident reference 全 rewrite に拡張可能候補。
-    - **L3-2 (ExportDefaultDecl rejection)**: `export default function main()` は pre-T3 から `transform_module_item._ => Err` で reject、T3 の rename gate trigger は orthogonal。Pre-existing gap、T3 で regression 導入なし。T4-2 `_ arm refactor` で integrate 候補。
-  - **Layer 4 (Adversarial trade-off)**: 0 findings (pre/post matrix = pre-T3 152 e2e pass / partial integration 152→152 (rename causes 7 failures) / post-NonTrigger 159 pass = improvement、no regression、Hono bench Preservation)。NonTrigger 拡張 + generator guard は **structural fix** (root cause = overly-broad SideEffect classification + B1c arm の non-narrow scope)、patch ではない。
-- **Defect Classification 5 Category (final、deep review 2 round 累積)**: Grammar gap / Oracle gap = 0、**Spec gap = 1** (= NonTrigger 拡張 during e2e verification、PRD I-224 Spec stage `classify_init_kind` partition wording を post-T9 doc-sync で update 候補、framework 失敗 signal 弱 = init expression purity 概念は PRD spec で明示されていなかった、I-228 sub-entries (a/b/c/d) のような明示的 Spec への逆戻り は不要、本 commit code の InitKind enum docstring + init_classifier.rs module docstring に semantic justification embedded)、**Implementation gap = 1** (= deep review Layer 2 で発覚、generator FnExpr B1c arm guard 不在 = T3 introduced regression。Generator guard structural fix + lock-in test で resolved、root cause = "B1c FnExpr arm が non-narrow scope だった" / 解決 = `is_generator` guard で pre-T3 silent-drop semantic を preserve)、Review insight = 2 (L3-1, L3-2 deferred per上記)。
-- **Production code 修正 file**:
-  - `src/transformer/mod.rs`: Transformer struct に `user_main_substitution: bool` field 追加 + `spawn_nested_scope` / `spawn_nested_scope_with_local_synthetic` で propagate + `transform_module` / `transform_module_collecting` 冒頭で flag set + Stmt::Empty silent skip arm 追加。
-  - `src/transformer/functions/mod.rs::convert_fn_decl`: rename + vis-drop logic 追加。
-  - `src/transformer/functions/arrow_fns.rs::convert_var_decl_module_level`: B1c FnExpr arm 追加 (synthetic FnDecl 経由)。`convert_arrow_var_decl`: rename + vis-drop logic 追加。
-  - `src/transformer/expressions/calls.rs::convert_call_expr`: Ident("main") substitute logic 追加。
-  - `src/transformer/main_synthesis/mod.rs`: synthesize_fn_main method + main_stmts_to_ir_stmts + build_synthesized_fn_main helpers 追加 (約 280 行)。
-  - `src/transformer/main_synthesis/init_classifier.rs`: 新規 sub-module (InitKind enum 4 variants Lit/NonTrigger/AwaitInit/SideEffect / DeclVarPath enum / classify_init_kind / has_side_effect_init / classify_decl_var_path / private expr_init_kind helper、約 370 行)。
-- **Test 修正 file**:
-  - `src/transformer/main_synthesis/tests/mod.rs`: 18 NEW synthesize_fn_main unit tests + 17 NEW NonTrigger partition tests = 6 base (Arrow / async Arrow / FnExpr / has_side_effect_init false × 2 / classify_decl_var_path executable LibraryMode) + 11 expansion (Object literal / Array literal / Class expression / TsAs(Object) / TsConstAssertion(Array) / Paren(Lit) Lit-preserve / TsNonNull(Paren(Arrow)) nested / nested-wrappers SideEffect inner / TsSatisfies(Object) / has_side_effect_init Object false + TsAs-const false) + 1 NEW classify_dispatch_arm direct panic test for `(false, _, true)` defensive unreachable!() arm (= /check_problem light review 由来、Rule 11 (d-1) self-applied 全 defensive arm に lock-in test) (計 36 NEW)。
-  - `tests/i224_helper_test.rs`: 3 helper tests fill-in (B1 orthogonality / Axis E / A5a compositional)。
-  - `tests/i224_invariants_test.rs`: INV-2 fill-in + INV-5 cell 59 expectation co-update。
-  - `src/transformer/expressions/tests/{arrays,update_exprs,optional_chaining,type_guards,expected_type,calls/rest_params_tests}.rs`: Transformer struct literal sites 13 件に `user_main_substitution: false` field 追加 (test fixture symmetry)。
-- **PRD T4 着手前 prerequisite**: T3 で `pub fn init` synthesis は **依然 build_init_fn 経由で残存**、T4-1 で `synthesize_fn_main` 経由 path に refactor + `build_init_fn` 削除予定。INV-4 (codebase 内 `pub fn init` 0 件) は T4-3 で fill-in。
-- **Commit (proposed)**: `[WIP] I-224 T3 完了: synthesize_fn_main + user main rename + main() substitution + Axis B/E/A5a orthogonality probe + InitKind NonTrigger Spec extension (Arrow/Fn/Class/Object/Array/type-wrappers 拡張) + Stmt::Empty silent skip + init_classifier.rs sub-module 抽出 + 4-layer review pass (1 Spec gap structural fix + 2 Review insight deferred)`。
-
-**T4 完了 (2026-05-07、T4-1 + T4-2 + T4-3 を 1 commit に bundle、`/check_job` 4-layer self-applied review = Layer 1-4 全 0 findings + Hono bench Tier-transition Improvement = silent → honest 化 4 件)**: I-224 fn main mechanism の **production wiring 完成** + `pub fn init` mechanism 完全廃止。
-
-- **T4-1 (transform_module / transform_module_collecting refactor)**:
-  - `Transformer::try_capture_module_item_into_main_stmts(&mut self, item, is_executable_mode_flag, &mut Vec<MainStmt>) -> Result<bool>` 新規 method を `src/transformer/main_synthesis/mod.rs` に追加 = per-item capture dispatch single source of truth、`Ok(true) = captured / Ok(false) = not in capture scope / Err(_) = capture attempted but convert_expr failed`。Rule 11 (d-1) self-applied compliance で全 ModuleItem / ModuleDecl / Stmt / Decl variants explicit enumerate。
-  - `transform_module` / `transform_module_collecting` の dispatch loop を refactor = (a) namespace collision scan (existing) → (b) is_executable_mode + detect_user_main + has_top_level_await + user_main_substitution flag activation (= upfront pre-compute) → (c) pre_scan_classes + iface_methods + build_mut_method_names → (d) **single-pass dispatch loop** (Stmt::Empty silent skip pre-arm + try_capture / transform_module_item routing) → (e) `synthesize_fn_main` で fn main Items emit。`init_stmts` 変数削除、`build_init_fn` 呼び出し撤去。
-  - **synthesize_fn_main Collision arm structural fix (Spec gap、self-resolved)**: 当初 `Collision arm = unreachable!()` だったが、collecting mode では `scan_for_ts_namespace_collisions` が accumulate (= Err return せず)、後続 dispatch で Collision に到達するため `Vec::new()` (= synthesis suppressed) に変更。`#[should_panic]` test を `assert!(items.is_empty())` form に migrate + non-empty payload 時も synthesis suppress を追加 lock-in。
-  - `collect_top_level_executions` は **test-only thin wrapper** に降格 (= `#[allow(dead_code)]` 付き、production callers は `try_capture_module_item_into_main_stmts` を直接 call)。test API 互換性維持。
-  - `src/transformer/main_synthesis/{mod.rs, init_classifier.rs}` の T1-T3 由来の `#[allow(dead_code)]` 全廃 (= production wiring 完成で all consumed)。
-- **T4-2 (transform_module_item _ arm refactor + Tier 2 wording 改善)**:
-  - `transform_module_item` の `_ => Err(format_module_item_kind(...))` arm を Rule 11 (d-1) compliance で expand: ModuleItem 全 variants explicit enumerate (Decl-bearing / Import-export / TS legacy module forms / A4 control-flow / A5b Debugger / pre-handled-by-caller `unreachable!()` for Stmt::Empty + Stmt::Expr)。
-  - **A4 (control-flow) Tier 2 wording 改善**: `format!("ControlFlow at top-level requires fn main wrapping; lift to a named function or use I-203 future expansion ({suffix})", ...)` = SWC AST kind を suffix に preserve しつつ user-facing guidance を prepend。Stmt 15 variants (Block/If/Switch/Throw/Try/While/DoWhile/For/ForIn/ForOf/Labeled/Continue/Break/Return/With) を unified arm で route。
-  - **A5b (Debugger) Tier 2 wording 改善**: `` "`debugger` statement has no Rust equivalent (use `panic!()` for a hard stop or `std::dbg!()` for value tracing per the user's intent)" `` = user-facing alternative guidance。
-  - `build_init_fn` helper 完全削除 (= 0 callers、T4-1 で routing 撤去、T4-2 で削除完成)。`src/transformer/mod.rs` 1003 → 932 行に削減 = `namespace_lint.rs` 185 行抽出 (Rule 11 (d-1) 全 ModuleItem / ModuleDecl / Stmt / Decl / DefaultDecl 変種 enumerate version) + `build_init_fn` 削除 + 新 transform_module_item dispatch tree。
-  - `tests/i224_invariants_test.rs::test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase` の `fn main()` 検出 assert を update (= T4-1 wiring で synthesized fn main が emit されるため、cell 13/15/33/35/73/75 で `fn __ts_main` + `fn main()` 両者を assert)、cell 49/69 alternative wording substring を T4-2 後 form (`Stmt(If(` → 同 + ControlFlow prefix、`Stmt(Debugger(` → `` `debugger` statement has no Rust equivalent ``) に update。
-  - 7 NEW unit tests in `src/transformer/statements/tests/loops.rs` (A4 partition: if/for/while/try/switch/block で `ControlFlow at top-level` substring 検出 + A5b: debugger で `panic!()` / `std::dbg!()` substring 検出)。
-  - `src/transformer/tests/module_items.rs` の 3 既存 tests を新 form (= `fn main()` synthesis) に migrate (`test_transform_module_top_level_expr_stmt_synthesizes_fn_main` + `..._merge_into_single_fn_main` + `..._no_fn_main_synthesis`)、INV-4 lock-in (= 各 test で legacy `init` Item 0 件 assert)。
-- **T4-3 (INV-4 invariants test fill-in + audit script regex tightening)**:
-  - `tests/i224_invariants_test.rs::test_invariant_4_no_pub_fn_init_in_codebase_post_t4` の `#[ignore]` 解除 + fill-in = **2 件独立 verifier**: (1) `scripts/audit-no-pub-fn-init.sh` subprocess invoke で `exit=0` + `OK: 0 hits` summary line 検出、(2) Rust source の enforced paths (`src/`/`tools/`/`tests/e2e/rust-runner/`) で `^\s*pub\s+fn\s+init\s*[\(<]` (= function definition のみ match) 直接 grep で hits=0 verify。
-  - `scripts/audit-no-pub-fn-init.sh` の regex pattern を tighten = `\bpub\s+fn\s+init\b` (= doc comment / panic message での mention にも match) → `^\s*pub\s+fn\s+init\s*[\(<]` (= function definition のみ match、historic mention の文字列は false positive にならず)。`HONO_SRC` / `HONO_CLEAN` env var override も追加 (= SHA-pinned bench compare 用)。
-  - **`/check_job` 4-layer self-applied review (T4 commit 前、deep + Hono bench Tier-transition Improvement verification)**:
-    - **Layer 1 (Mechanical)**: 0 findings (clippy / fmt / file-line / test name pattern / Rule 11 (d-1) 全 compliance、production unwrap/panic 不在)
-    - **Layer 2 (Empirical)**: 0 findings (cargo test 3520 lib + 159 e2e + 122 integration + 24 binaries 全 green、INV-4 audit script + grep 両 verifier pass)
-    - **Layer 3 (Structural cross-axis)**: 0 findings (Rule 11 (d-1) 全 enum 変種 enumerate、`unreachable!()` defensive arms with documented invariants、namespace_lint extraction で structural cohesion 改善)
-    - **Layer 4 (Adversarial trade-off)**: 0 findings (Hono bench at SHA-pinned 027e3df = T3 baseline 111/63 vs T4 working tree 109/67 = -2 clean / +4 errors、4 件全件 **Tier 1 silent semantic change → Tier 2 honest error** transition: cloudflare-workers/websocket.ts + deno/websocket.ts は T3 で `export const upgradeWebSocket = defineWebSocketHelper(async ...)` を silently dropped、T4 の deeper `convert_expr` 経由 capture で Object literal Prop::Getter unsupported syntax を honest surface = `conversion-correctness-priority.md` 観点で **Improvement** = `prd-completion.md` broken-fix PRD の **allowed Improvement classification**。bun/websocket.ts + helper/css/index.ts の 2 件は既存 Tier 2 file に追加 honest error 出現 = 同 silent → honest pattern。0 件の T4 architectural concern scope への new compile error)
-  - **Defect Classification 5 Category (final)**: Grammar gap / Oracle gap = 0、Spec gap = 1 (= synthesize_fn_main Collision arm collecting-mode reachability、self-resolved + #[should_panic] test → assert form migrate)、Implementation gap = 0、Review insight = 0。
-- **Production code 修正 file**:
-  - `src/transformer/mod.rs` (1003 → 932 行): transform_module / transform_module_collecting refactor + transform_module_item _ arm Rule 11 (d-1) expand + Tier 2 wording 改善 + `build_init_fn` 削除 + `namespace_lint::scan_for_ts_namespace_collisions` import。
-  - `src/transformer/namespace_lint.rs` (新規 185 行): scan_for_ts_namespace_collisions + scan_module_item_for_collisions + scan_decl_for_collisions + scan_default_decl_for_collisions + check_ident_for_collision を抽出、Rule 11 (d-1) self-applied compliance。
-  - `src/transformer/main_synthesis/mod.rs`: `try_capture_module_item_into_main_stmts` 新規追加、`collect_top_level_executions` を thin wrapper に降格、Collision arm `unreachable!()` → `Vec::new()` migrate、T1-T3 由来の `#[allow(dead_code)]` 全廃。
-  - `src/transformer/main_synthesis/init_classifier.rs`: T1-T3 由来の `#[allow(dead_code)]` 全廃。
-- **Test 修正 file**:
-  - `src/transformer/main_synthesis/tests/mod.rs`: `test_synthesize_panics_on_collision_arm` を `test_synthesize_emits_no_items_on_collision_arm` に migrate (= `assert!(items.is_empty())` form、empty + non-empty payload 両 case lock-in)。
-  - `src/transformer/statements/tests/loops.rs`: 7 NEW T4-2 wording tests (A4 if/for/while/try/switch/block の ControlFlow substring + A5b debugger の panic!()/std::dbg!() substring)。
-  - `src/transformer/tests/module_items.rs`: 3 既存 tests を `fn main()` synthesis form に migrate + INV-4 (legacy `init` Item 0 件) assert 追加。
-  - `tests/i224_helper_test.rs::test_axis_b_b1a_b_c_rename_dispatch_symmetric`: assertion update = `fn __ts_main` + `fn main()` synthesized binary entry 両者 assert (= T4-1 wiring で synthesized fn main が emit されるため)。
-  - `tests/i224_invariants_test.rs`: INV-2 cell-level assertion update + INV-5 cell 49/69 alternative wording substring を T4-2 form に update + **INV-4 fill-in** (subprocess audit script invoke + 独立 grep verify)。
-  - `scripts/audit-no-pub-fn-init.sh`: pattern tighten + HONO_SRC / HONO_CLEAN env override 追加。
-- **Quality gate**: cargo test 全 pass (lib **3520** = T3 baseline 3513 + 7 NEW T4 wording tests / e2e 159 + 70 ignored / compile_test 3 / integration 122 / **i224 helper 5 pass + 0 ignored** / **i224 invariants 5 pass + 2 ignored** = INV-4 fill-in、INV-1/INV-7 は T5/T9 defer / i205 helper 4 pass / i205 invariants 2 pass + 5 ignored) / cargo fmt 0 diff / cargo clippy --all-targets --all-features -- -D warnings 0 warning / `./scripts/check-file-lines.sh` OK (`transformer/mod.rs` 932 行 / `namespace_lint.rs` 185 行) / **`scripts/audit-no-pub-fn-init.sh` exit=0 (INV-4 codebase invariant lock-in)** / **Hono bench Tier-transition Improvement** (= 027e3df pinned baseline 111/63 → T4 working tree 109/67、4 件 silent → honest 化、broken-fix PRD allowed pattern)。
-- **Commit (proposed)**: `[WIP] I-224 T4 完了: transform_module(_collecting) を try_capture_module_item_into_main_stmts + synthesize_fn_main 経由に refactor + transform_module_item _ arm Rule 11 (d-1) expand + A4/A5b Tier 2 wording 改善 + build_init_fn 削除 + namespace_lint.rs 抽出 + INV-4 invariants test fill-in (audit script + grep 2 verifier) + 4-layer review pass (Hono bench Tier-transition Improvement = silent → honest 4 件 + 0 new compile errors)`。
-
-**plan.md chain 影響**: T4 完了で I-224 production wiring 完成、`pub fn init` mechanism 完全廃止 (INV-4 lock-in)。次着手は T5 (E2E green-ify (existing C0) + I-205 cell-09 unblock + INV-1 source-order invariants test fill-in)。
-
-**I-205 status**: Implementation Stage T1〜T13 完了 (2026-05-01)、T11 削除済。**T14-T16 は案 β Phase 1-A (I-224 → I-225 → I-162) 完了後に再開**。I-205 architectural concern (= class member access dispatch with getter/setter framework) は **unit tests + CLI manual probes で functional 完成**、E2E green-ify (T14) は universal infra prerequisite block により待機中。
-
-**PRD 2.7 (I-198 + I-199 + I-200 cohesive batch) 完了 (2026-04-27)** — Implementation stage T1〜T15 全 task + formal `/check_job` 4-layer review + 9 課題本質 fix (F1〜F10) 完了。詳細は下記「直近の完了作業」table 参照。
-
-**Spec stage 完了 (2026-04-28): I-205 v7 final (Class member access dispatch with getter/setter methodology framework)**。
-PRD 2.8 (I-201-A) Spec stage 検討中に **既存 class Method Getter/Setter call site emission framework** の **Tier 2 broken window + L2 Design Foundation defect** を発見 (compile error E0507 / E0609、silent semantic divergence)。PRD 2.8 / PRD 2.9 / PRD 7 (I-201-B) 全 prerequisite framework として I-205 を起票、PRD 2.7 self-applied integration pattern で **framework v1.3 → v1.4 → v1.5 → v1.6 連続 revision** を first-class adopter として self-applied verify 完了。3 度の review iteration (initial → deep → deep deep) で **33 findings + 11 RC clusters resolution**、**rule-audit symmetry principle 確立**。
-
-**主要成果**:
-- I-205 PRD: 1661 lines、Spec stage v7 final、matrix ~120+ cells、6 invariants (INV-1〜6)、Spec → Impl Dispatch Arm Mapping section
-- TS-0〜TS-5 全 Spec Stage Tasks 完了
-- 5 dedicated test files: 3 SWC parser tests (10 passed) + i205_invariants_test.rs (6 ignored stubs) + i205_helper_test.rs (4 ignored stubs)
-- 34 E2E fixtures + 34 expected files (red 状態 lock-in、Implementation Stage T14 で green 化)
-- framework 改修: `spec-stage-adversarial-checklist.md` v1.6 (Rule 1 (1-4) Orthogonality merge legitimacy + Rule 11 (d-6) Architectural concern relevance + Rule 8 (8-c) audit + Rule 11 (d-6) audit) + `prd-completion.md` Tier-transition compliance + `prd-template` skill (Step 3-pre/3-pre-2/4-template/4.5)
-- audit script extensions: `audit-prd-rule10-compliance.py` に 9 new verify functions (Rule 1/2/5/6/8/11/13 + orthogonality consistency + Rule 11 (d-6) + Invariants test contracts) + `audit-ast-variant-coverage.py` に `--files` flag
-
-**進行中: I-205 Implementation Stage Tasks T14〜T16 (T1-T13 完了 2026-05-01、T11 削除 2026-05-01 で新 PRD I-A / I-B へ migrate、Iteration v9 から user 指示で「T を一つ完了するごとに `/check_job` 4-layer review + 徹底見直し + commit」運用に transition)**。
-
-~~T1 (doc update)~~ ✓ → ~~T2 (MethodSignature/TsMethodInfo kind field)~~ ✓ → ~~T3 (collect_class_info propagate + Rule 11 d-1 fix)~~ ✓ → ~~T4 (TsTypeLit kind propagate)~~ ✓ → ~~T5 (Read context dispatch + B7 traversal helper + extends 登録 Spec gap fix Iteration v9)~~ ✓ → ~~T6 (Write context dispatch via dispatch_member_write helper、Iteration v10、Spec gap = Mapping table Read/Write symmetric 化 fix)~~ ✓ → ~~T7 (UpdateExpr setter desugar、Iteration v11、Spec gap = TypeResolver Update.arg 未再帰 fix)~~ ✓ → ~~T8 (compound assign desugar + INV-3 1-evaluate compliance + T7 helpers IIFE back-port + DRY refactor + member_dispatch.rs 6-file split、Iteration v12、Spec gap = TypeResolver compound assign Member.obj 未再帰 fix)~~ ✓ → ~~T9 (logical compound `??= &&= ||=` integration、Iteration v13、Spec gap = matrix LHS type variants test lock-in + Implementation gap = ??= non-Option LHS Tier 2 honest gate)~~ ✓ → ~~T10 (Internal `this.x` dispatch、Iteration v16 + v17、Implementation gap 4 = T6 setter dispatch silent regression `&self`/`&mut self` inference fix via `body_requires_mut_self_borrow` recursive walker + setter MethodCall detection + L1-DD-1 helper test naming convention + L3-DD-1 `target_roots_at_self` Index/Deref/nested FieldAccess structural extension + L4-DD-1 doc completeness + Spec gap = T9 logical compound internal lock-in test 追加 + Review insight 2 = constructor body bug 別 TODO `[I-222]` + transitive mut method calls 別 TODO `[I-223]` 起票 + TODO doc-sync 5 entries `[I-219]`〜`[I-223]`)~~ ✓ → ~~T11 (static accessor dispatch + matrix expansion)~~ **削除 (2026-05-01)、新 PRD I-A / I-B へ migrate、`note.after.md` archive 参照** → ~~T12 (Getter body .clone() 自動挿入、C1 pattern、Iteration v19、20 unit tests + helper additions in classes/helpers.rs + build_method_inner gate + E2E ignore reason update T14 defer + Iteration v18 sub-iteration v18.1 で T14 scope re-partition、4-layer review 0 findings + Defect Classification 全 0 + Review insight 1 = T16 + 別 PRD I-D split で対応)~~ ✓ → ~~T13 (B6/B7 corner cells Tier 2 reclassify lock-in verify + INV-5 visibility consistency invariant Option B 採用 audit + 5 NEW integration tests + 3 NEW registry-level boundary value tests、Iteration v20、Hono empirical reachability=0 で Option A overengineering 回避、production code 0 LOC change、4-layer review = Layer 3 finding 1 件 = INV-5 setter symmetric probe 不在を本 T13 内 fix + Implementation gap 1 + Review insight 1 = INV-5 (b)/(c) wording を Option B 反映 doc 更新済)~~ ✓ → **T14-T16 は案 β Phase 1-A (I-224 = B2 → I-225 = B3 → I-162) 完了後に再開、I-205 architectural concern は T1-T13 で functional 完成済 (unit tests + CLI manual probe で verify 済)、universal infra prerequisite block により待機中 (2026-05-01 案 β user 承認)**。
-
-**案 β Phase 1-A の最初の prerequisite = PRD α-1 (I-224 = B2) Spec stage 起動が次着手**。詳細は本 plan.md の chain section + `次の作業` section 参照。
-
-**T11 削除根拠 (2026-05-01 user 確定)**: T11 sub-tasks (11-b/c/d/e/f) は subsequent review iteration で発見された **orthogonal な追加 architectural concern** であり、I-205 本来の concern (= "Class member access dispatch with getter/setter framework"、cells 9/18 の Tier 1 化 + 全 dispatch context での symmetric coverage) と別軸。元 T11 (11-a) Static accessor dispatch は T5/T6 で完了済 (cells 9/18 Tier 1 lock-in)、(11-e) Static setter Write も T6 で完了済。残 sub-tasks (11-b/c/d/f) は 2 つの新 PRD として独立起票 (1 PRD = 1 architectural concern 厳格適用、scope creep 認識):
-- **新 PRD I-A "Method static-ness IR field propagation"** (= 元 11-b、`MethodSignature.is_static` field 追加 + Rule 9 (c-1) Field Addition Symmetric Audit、61 site)
-- **新 PRD I-B "Class TypeName context detection unification"** (= 元 11-d + 11-f + I-214 統合、TypeResolver `RustType::ClassConstructor(String)` type marker + 全 Ident match sites unification + `Expr::AssociatedConst` 新 IR variant)
-- **(11-c) matrix cell expansion** は新 PRD I-A / I-B の completion criteria に integrate
-
-T12〜T15 は T11 dependency なし (T14 の `Depends on: T1-T13` は形式的記載、T11 で create 予定だった static defensive 4 cells fixture は本 PRD scope 外 = 新 PRD I-A/I-B scope)、T11 削除は T12-T15 着手・完了に構造的影響なし。詳細は `backlog/I-205-getter-setter-dispatch-framework.md` 内 `## ⚠️ T11 削除 + 新 PRD I-A / I-B migration 注記` section + `note.after.md` archive 参照。
-
-**Iteration v18 (2026-05-01) = T12 着手前 Spec への逆戻り完了**: T12 implementation 着手前の cells 70-81 全 cells empirical observation で **2 件の framework 失敗 signal** を発見、`spec-first-prd.md` 「Spec への逆戻り」発動による spec re-design + 本 PRD self-applied integration 完了。
-- **Spec gap 1 (cell 78)**: 初版 spec の "C1 last-expr 拡張" claim (= TS の last-expr `self.field` を Rust last-expr semantic に leverage) は **TS spec で reject される input form** (tsc TS2378+TS2355 errors、annotation 付き form / annotation 無 form 両方で `return self.field;` pattern と semantic equivalent でない) を前提にしていた誤り。**cell 78 を NA reclassify** (Rule 3 (3-1) per TS spec)、本 PRD scope から削除。
-- **Spec gap 2 (cell 74 fixture)**: TS-3 task で per-cell E2E fixture を作成した際 fixture 自体の tsc empirical observation を skip、`class Cache` が ES2017+ standard built-in `Cache` interface (Service Worker API) と duplicate identifier conflict (TS2300+TS2339) で tsc reject。**fixture rename** (`Cache` → `OptCache`) で fix、spec / ideal output 維持 + tsc accept restoration verify (tsx runtime `hello\n` unchanged)。
-- **Framework 改善 candidate 4 件 (本 PRD close 時 integrate or 別 framework PRD 起票)**: (改善 A) `spec-stage-adversarial-checklist.md` Rule 3 (3-2) Spec stage Mandatory enforcement 強化 = 各 ✗/要調査 cell の TS code を `scripts/observe-tsc.sh` で empirical 確認 + audit script で `## SWC Parser Empirical Lock-ins` section の各 cell 対応 entry 存在 auto verify、(改善 B) `spec-first-prd.md` 「Spec への逆戻り」section に「Implementation 着手前 last-mile empirical observation」を Mandatory verification step として追加、(改善 C) Rule 5 (5-1) sub-rule 拡張 = "fixture 自体の tsc empirical observation で fixture content 正当性 verify 済" を Spec stage 完了 verification 必須項目に追加 + audit script で fixture file empirical observation log embed auto verify、(改善 D) Builtin name conflict detection = TS class/interface/type/enum declaration name の ES standard library / DOM types / Node types 等 builtin との conflict check linter rule / fixture creation guidance 追加候補。
-- **本 v18 で確定した T12 scope**: 本 PRD scope (✗→✓) = cells 70/72/74 (3 cells)、Regression lock-in (✓ 維持) = cells 71/73/81 (3 cells、cell 73/81 は unit test only)、別 PRD C2 scope = cells 75/76/77/79/80 (5 cells、本 T12 では no-rewrite gate skip lock-in test のみ)、NA reclassify = cell 78 (1 cell)、合計 12 cells 全 treatment 確定。詳細は `backlog/I-205-getter-setter-dispatch-framework.md` 内 `### Iteration v18` entry + cell 78 / cell 74 SWC Parser Empirical Lock-ins entries 参照。
-
-**Iteration v19 (2026-05-01) = T12 単独 commit 完了 + Option 3 split で T16 + 別 PRD I-D 切り出し**: T12 implementation (Class Method Getter body C1 `.clone()` 自動挿入) 完了 + 4-layer review 0 findings + user 指示由来 task-ID-based 命名 audit を Option 3 split (I-205 内 T16 + 別 PRD I-D) で対応決定。
-- **T12 implementation** (本 v19 commit):
-  - `src/transformer/classes/helpers.rs` に `is_self_single_hop_field_access` (private) + `insert_getter_body_clone_if_self_field_access` (`pub(super)`、`&mut [Stmt]` slice API、`Stmt` enum 全 14 variants 完全 enumerate per Rule 11 (d-1)) helper 追加
-  - `src/transformer/classes/members.rs::build_method_inner` に gate (`kind == Getter && return_type non-Copy`) + helper invoke 追加
-  - `src/transformer/classes/tests/i_205.rs` 新規 file (20 unit tests = Decision Table C 完全 cover + Equivalence partitioning + Boundary value + Branch coverage C1 + AST variant exhaustiveness + Negative tests + Direct helper probes)
-  - `tests/e2e_test.rs` cells 70/71/72/74 fixture `#[ignore]` reason update (T12 完了 + I-162 prerequisite block + T14 deferred 明示)
-  - **Iteration v18 sub-iteration v18.1 で T14 scope re-partition**: E2E green-ify は T14 task scope (Depends on T1-T10/T12/T13 + I-162 prerequisite block) に明示 defer、T12 verification は unit tests + CLI manual probe で primary 達成、Iteration v19 で番号統一 (= T12 implementation commit)
-  - **Quality gate 全 pass**: cargo fmt 0 diff / cargo clippy 0 warning (`ptr_arg` lint で `&mut Vec` → `&mut [Stmt]` slice API) / cargo test --lib 3355 (3335 baseline + 20 T12) / e2e 159 + 70 ignored / compile_test 3 / check-file-lines OK (helpers.rs 712 行 / classes/tests/i_205.rs 320 行 < 1000 threshold)
-  - **`/check_job` 4-layer review (deep modifier 適用)**: Layer 1-4 全 0 findings ✓ (Mechanical / Empirical 20 unit tests + CLI probe verify / Structural cross-axis 直交軸 enumeration 全 cover / Adversarial trade-off pre/post matrix で trade-off なし structural fix)
-  - **Defect Classification 5 category**: Grammar/Oracle/Spec/Implementation gap = 0、**Review insight = 1** (= user 指示由来 task-ID-based 命名 audit、Option 3 split で対応 → T16 + 別 PRD I-D)
-- **Option 3 split (user 確定 2026-05-01) + Q1/Q2 拡張 (Iteration v19 light review 2026-05-01)** で **T16 + 別 PRD I-D を切り出し**:
-  - **T16 (I-205 scope 内追加 last task、Depends on T15)**: I-205 implementation で蓄積された task-ID-based 命名 violation (~150-200 changes) を semantic 命名に rewrite + 凝集度観点で実装分割再考 + **既存 rule violation cleanup integrate (Q1 Option α 採用、Iteration v19 light review insight 2 由来)** = `members.rs:440 default_expr.unwrap()` 等の `testing.md` "unwrap() only in test code" rule violation の cleanup を I-205 implementation 範囲内で integrate (1 PRD = 1 architectural concern = "I-205 cleanup quality 改善" boundary 内、I-205 範囲外の codebase-wide cleanup は別 PRD scope)。Sub-tasks: (16-a) Audit + violation enumerate + semantic naming proposal table + 既存 rule violation grep、(16-b) Semantic naming proposal、(16-c) 実装分割再考 + 既存 rule violation cleanup integrate、(16-d) Atomic refactor commit
-  - **新 PRD I-D (subsequent、I-205 close 後 deferred、Q2 拡張案採用)**: **Framework rule integration cohesive batch (I-205 lesson source 全統合)** = (D-1) task-ID-based 命名禁止 + (D-2) Iteration v18 framework 改善 4 件 (Rule 3 (3-2) Spec stage Mandatory + Spec への逆戻り 前倒し検出 + Rule 5 (5-1) fixture content empirical + Builtin name conflict detection) + (D-3) T7/T8 TypeResolver visit coverage axis 昇格 + (D-4) T5 Iteration v9 lessons (Rule 9 (c) 拡張 + INV-7 候補 + Rule 9 (a) symmetric enumeration)。1 PRD = 1 architectural concern = "framework rule level structural enforcement of I-205 lesson source candidates" cohesive batch、I-205 で蓄積された framework gap candidates 清算 form
-- **記号 ID I-A / I-B / I-D の numeric ID 割り当て (Q3 Option b 採用)**: 各 PRD spec stage 着手時に確定 (= I-205 close 後)、本 commit では記号 ID preserve (TODO file の I-XXX numeric pattern と並存は transitional clear annotation で acceptable)
-- **次着手 T13 (B6/B7 corner cells Tier 2 honest error 化 + INV-5 verification + boundary value test 拡充)**: T11 削除済 dependency なし、T1/T5/T6 only。詳細は本 PRD doc 内 T13 task description 参照。
-
-**T7 単独 commit 完了 (2026-04-29、Iteration v11、`convert_update_expr` Transformer method 化 + Member dispatch + Spec gap fix)**: `convert_update_expr` を free function から Transformer method 化 (call site `mod.rs:129` 連動更新)、`convert_update_expr_member_arm` で T6 `classify_member_receiver` shared helper 経由 Static / Instance / Fallback dispatch + `dispatch_instance_member_update` / `dispatch_static_member_update` 新規 helper (5 件: getter_return_is_numeric numeric type check + build_update_setter_block 共通 setter desugar block builder + dispatch_instance_member_update + dispatch_static_member_update + non_numeric_update_message op-specific Tier 2 wording)。`unreachable!()` macro で MethodKind 3-variant + lookup non-empty invariant codify (T6 dispatch helper と symmetric structural enforcement)。**Spec gap fix (Iteration v11、T5 extends/decl.rs fix と同 pattern)**: `pipeline/type_resolver/expressions/mod.rs::resolve_expr` の `ast::Expr::Update(_)` arm が `update.arg` を recursive resolve せず、Member target の receiver expr_type が未登録 → Transformer `classify_member_receiver` で silent Fallback dispatch (= class member setter dispatch を逃す silent semantic loss) を発見、`Unary` arm pattern 踏襲で `self.resolve_expr(&update.arg)` 追加し structural 解消。**Framework 改善検討**: `spec-stage-adversarial-checklist.md` Rule 10 axis enumeration の default check axis として "TypeResolver visit coverage of operand-context expressions" 追加候補。**Cohesive cleanup (T7 scope 内)**: 既存 Ident form `convert_update_expr` の binding 名 `_old` を `__ts_old` に rename (I-154 `__ts_` namespace reservation rule extension to value bindings、user identifier collision 防止)、snapshot 3 件 (do_while/general_for_loop/update_expr) は pure rename diff で auto-update。**Production code**: `convert_update_expr` method + `convert_update_expr_member_arm` + `build_fallback_field_update_block` (B1/B9 Fallback FieldAccess BinOp block) + member_dispatch.rs に T7 helper 5 件追加。**Pre/post matrix**: Fix (Tier 2 broken → Tier 1) cells 42/43/45-a/45-c/45-dd/45-de、Reclassify (Tier 2 broken → Tier 2 honest) cells 44/45-b/45-db/45-dc、Preserve cell 45-da (PRD 2.7 honest error)、**No regression**。**Unit test 15 件**: tests/i_205/update.rs 新規 (cells 42/43/44/45-a/45-b/45-c/45-db/45-dc/45-dd/45-de + B3 setter only ++ + Computed reject + postfix/prefix 両 form lock-in)。**Final quality (post-deep-deep-review fix)**: cargo test --lib 3247 pass (3220 baseline + 15 T7 first-review + 7 second-review op-symmetric coverage + 5 deep-review D3/D4 branch coverage = 3247) / e2e 159 pass + 70 ignored / integration 122 pass / compile_test 3 pass / clippy 0 warning / fmt 0 diff / check-file-lines OK (update.rs = 959 行 < 1000 threshold、deep-review 副次 cleanup で 1046 → 959 line refactor)。**CLI manual probe**: cell 43 `c.value++` → `{ let __ts_old = c.value(); c.set_value(__ts_old + 1.0); __ts_old }` ✓。**Defect Classification (Iteration v11 final、first/second/deep/deep-deep review 累積)**: Spec gap 5 (= first-review TypeResolver Update.arg 未再帰 + second-review L2-2 cell 44 #[ignore] message / L3-2 matrix op-axis asymmetric / L3-3 matrix Block form mismatch / L3-4 Spec→Impl Mapping B2/B3 missing、全件本 T7 内 resolved、framework 失敗 signal = Rule 9/Rule 10 axis + Rule 11 (d-2) audit + Rule 11 (d-6-a) architectural concern relevance auto-audit 追加候補) / Implementation gap 7 (= second-review L1-1 doc comment + L1-2 test assertion 弱、deep-review D1 anyhow!→UnsupportedSyntaxError + D2 const 抽出 + D3 _ => arm test + D4 static defensive arms test、**deep-deep-review DD1 convert_update_expr exhaustive match (38 variants 全 enumerate、Rule 11 (d-1) compliance + Rust compiler structural safety net)**、全件本 T7 内 resolved) / Review insight 1 (= L4-2 INV-3 1-evaluate compliance for non-Ident receiver、T8 (8-a) scope に詳細 defer = architectural concern relevance 観点で T8 に内包、structural 解消 + T7 helpers への back-port を T8 で実施) + Static B7 inherited update arm test のみ T11 (11-c) matrix expansion defer (T6 pattern 整合)。
-
-**T1-T3 batch 完了 (2026-04-28、`/check_job` 4-layer review + Fix 1-4 適用後 final state)**: `MethodKind { Method, Getter, Setter }` enum (foundational `src/ir/method_kind.rs` 配置、registry re-export で 51 site backward compat) + `MethodSignature.kind` / `TsMethodInfo.kind` field 追加 + `collect_class_info` の `_ => {}` 排除 + class.rs:145 Rule 11 (d-1) violation fix + Pass 2 `resolve_method_sig` の kind hardcode latent bug fix + Fix 2 で `convert_method_info_to_sig` の symmetric kind drop (T4 work piece) を前倒し完了 + Fix 3 で `let _ = X` Rust idiom refactor + Fix 4 で framework Rule 9 sub-rule (c) "Field-addition symmetric conversion site audit" 追加 (v1.6 → v1.7 self-applied integration) + getter/setter propagation unit test 12 件 (4 class T3 + 5 method_kind Fix 1 + 3 type_literals Fix 2)。**新 PRD I-213 起票** (codebase-wide IR struct construction DRY refactor、L4、recurring problem evidence: I-383 T8' + I-205 T2 で 2 度連続)、Fix 4 と相補的 (process vs structural)。**Final quality (post-3-iteration `/check_job` review + light review)**: cargo test --lib 3176 pass / e2e 159 pass + 70 ignored / 122 integration pass / 3 compile_test pass / clippy 0 warning / fmt 0 diff / audit PASS / Pipeline integrity (`src/ir/` SWC indep) 維持。
-
-**T6 単独 commit 完了 (2026-04-28、Iteration v10 first + second review = `dispatch_member_write` helper + Spec → Impl Mapping symmetric 化 + DRY refactor + dead code 排除 + C1 coverage 補完)**: T5 で structural enforcement された `for_write=true` skip path を維持しつつ、`convert_assign_expr` の plain `Assign` × Member target × non-Computed gate で `dispatch_member_write(member, value)` helper 経由に切替 (= setter dispatch / Tier 2 honest error / B1/B9 fallback FieldAccess の統合 dispatch 経路)。**第二次 fix (second-review deep deep `/check_job`)**: (Fix A = DRY violation 解消) `MemberReceiverClassification` enum + `classify_member_receiver` shared helper を抽出、Read/Write 両 helper の receiver type detection 知識を 1 箇所に集約 (subsequent T7-T9 compound dispatch も leverage 可能、増殖性 risk を structural に排除)。(Fix B = asymmetric structural enforcement 解消) T5 `dispatch_instance_member_read` の dead code (`Ok(Expr::FieldAccess)`) を `unreachable!()` macro に置換、4 helper (Read instance / Read static / Write instance / Write static) 全てが symmetric structural enforcement 統一。(Fix C/D = C1 coverage 補完) Static field lookup miss test 1 + Read 3 + Write 3 = 7 defensive dispatch arm test 追加。(T11 (11-f) defer) pre-existing latent gap = Receiver Ident unwrap (Paren / TsAs / TsNonNull wrap で static dispatch を逃す) を T11 task description に Implementation 候補 + 判断基準 詳細記載。**Production code**: `MemberReceiverClassification` enum (Static/Instance/Fallback 3 variants) + `classify_member_receiver` shared helper + `dispatch_member_write` + `dispatch_instance_member_write` (4 arm + `unreachable!()`) + `dispatch_static_member_write` (4 arm + `unreachable!()`)。**Spec gap fix (first-review source)**: `## Spec → Impl Dispatch Arm Mapping` の `dispatch_member_write` table を Read mapping と完全 symmetric な structural form (Instance / Static section 分離 + 5 arm enumerate) に拡張、Rule 9 (a) compliance restored。**Unit test 17 件**: cells 11/12/13/14/16/17/18/19 dispatch arm 8 件 (B1/B2/B3/B4/B6/B7/B8/B9 全 cover) + INV-2 E1 Read/Write symmetry 1 件 + T6 Fallback equivalence 1 件 + second-review C1 補完 7 件 (Static field lookup miss 1 + Read 3 defensive + Write 3 defensive)。**Pre/post matrix**: Fix (Tier 2 → Tier 1) cells 13/14/18、Reclassify (silent → Tier 2 honest) cells 12/16/17、Preserve cells 11/19、**No regression**。**Final quality**: cargo test --lib 3207 pass (3190 baseline + 17 T6) / e2e 159 pass + 70 ignored / compile 3 pass / clippy 0 warning / fmt 0 diff / Hono Tier-transition compliance = **Preservation** (clean 110 / errors 64 unchanged、Hono が external setter dispatch on class instances を主要使用していないため allowed per `prd-completion.md`)。**CLI manual probe**: B4 `b.x=5` → `b.set_x(5.0)` ✓、B8 `Counter.count=7` → `Counter::set_count(7.0)` ✓。**Defect Classification (final)**: Spec gap 1 (first-review fix 済 = Mapping asymmetric) / Implementation gap 4 (second-review 全 fix 済 = DRY violation / dead code asymmetric / Static lookup miss test / Defensive arms test) / Review insight 2 (first-review #1 = Framework v1.8 候補 / second-review #2 = Receiver Ident unwrap = T11 (11-f) defer)。
-
-**T5 単独 commit 完了 (2026-04-28、Iteration v9 = T5 着手前 Spec への逆戻り 2 件 fix + 3 回 `/check_job` reviews による critical bug 2 件追加 fix + Read context dispatch + B7 traversal helper)**: T5 着手前調査で **2 件の infrastructure Spec gap** を発覚 → Iteration v9 = `spec-first-prd.md` 「Spec への逆戻り」発動 (= 1 PRD = 1 architectural concern の completeness 達成、別 PRD I-013/I-014/I-206 と orthogonal な registration phase の修正)。**(1) `class.rs:195` extends hardcode** (`extends: vec![]`) を `class.class.super_class` 経由 `Vec<String>` に propagate (interface `decl.rs:63-73` と symmetric registration pattern) + **(2) `decl.rs:264` empty body class register filter** に `extends.is_empty()` を condition 追加 (`class Sub extends Base {}` を Pass 2 結果で register、Pass 1 placeholder ↔ Pass 2 collect の data preservation invariant の structural fix)。**Production code 追加**: registry `pub fn lookup_method_sigs_in_inheritance_chain(&self, type_name, field) -> Option<(Vec<MethodSignature>, bool /* is_inherited */)>` (cycle-safe HashSet visited、parent traversal) + `resolve_member_access` Read context dispatch 拡張 (B1 fallback / B2 Getter MethodCall / B3 Setter Tier 2 honest "read of write-only property" / B4 Getter+Setter MethodCall / B6 Method Tier 2 honest "method-as-fn-reference (no-paren)" / B7 inherited Tier 2 honest "inherited accessor access" / B8 Static FnCall::UserAssocFn / B9 unknown fallback)。**3 回 `/check_job` 4-layer reviews による追加 fix (deep deep review fix)**: (Critical 1 = Implementation gap) `convert_member_expr_inner` の `for_write=true` で本 T5 Read dispatch を skip (Write context LHS leak silent regression を structural fix、T6 で setter dispatch 別途実装する正しい partition) + (Critical 2 = Spec gap) `Spec → Impl Mapping` table の Static dispatch arms 訂正 + `dispatch_static_member_read` の dead code を `unreachable!()` macro で structural enforcement (`sigs` non-empty + `MethodKind` 3 variant exhaustive invariant codified)。**Unit test 14 件**: cells 1/2/3/4/5/7/8/9/10 dispatch arm IR token-level lock-in 9 件 + B7 traversal helper 4 件 (cycle-safe / direct hit / single-step / multi-step inherited、boundary value analysis 完備) + Write context regression 1 件 (Read dispatch leak の structural lock-in)。**Pre/post matrix**: Fix (Tier 2 → Tier 1) cells 2/3/5/9、Reclassify (silent → Tier 2 honest) cells 4/7/8、Preserve cells 1/6/10、**No regression**。**Final quality (post 3 reviews)**: cargo test --lib 3190 pass / e2e 159 pass + 70 ignored / 3 compile_test pass / clippy 0 warning / fmt 0 diff / Hono Tier-transition compliance = **improvement** (post-deep-deep-fix bench: clean 110 / errors 64、+1 OTHER = `router/smart-router/router.ts:46:20` `method-as-fn-reference (no-paren)` は本 T5 dispatch arm B6 の silent FieldAccess emit → Tier 2 honest reclassify、ideal-implementation-primacy 観点で silent semantic loss 排除 = improvement、本 PRD scope 外 file への new compile error 0 件)。**Defect Classification (3 reviews 累積)**: Spec gap 4 (extends 登録 / decl.rs:264 / static dispatch wording missing / Mapping table 誤記、全て本 T5 内 resolved、framework 失敗 signal) / Implementation gap 1 (Write context LHS leak、本 T5 内 resolved) / Review insight 4 = **6 件本 T5 内 resolved + 3 件 T11/T13 task description に詳細 defer (Mixed class is_static = T11 (11-b) / Static field strategy = T11 (11-d)(11-e) / INV-5 verification = T13 (13-b)(13-c) / Multi-step N>=3 step boundary = T13 (13-d))**。**Framework 改善検討 6 candidates** (Iteration v9 entry 内 詳細記載) は本 PRD close 時 integrate or 別 framework PRD 起票候補。
-
-PRD 2.8 (I-201-A) は I-205 完了後に再開、I-205 framework foundation を leverage。
-
-**Plan η update (2026-04-26 post I-177-B empirical investigation)**: I-177-B 実装中の empirical verification で **TypeResolver-Synthetic registry integration の pre-existing latent bug** を発見 (`SyntheticTypeRegistry::fork_dedup_state` が `union_dedup` を継承しつつ `types: BTreeMap::new()` で fork、builtin pre-registered union 型を使う narrow guard で `compute_complement_type` が None を返し、post-narrow scope の EarlyReturnComplement event が push されない silent failure)。Plan η chain に **Step 1.5 = I-177-E (synthetic fork inheritance fix)** を I-177-B prerequisite として挿入し close。
-
-**Plan η (2026-04-26 user 確定 + 2026-04-26 Step 1.5 + 2.5 挿入): I-177 umbrella + I-048 を 1 PRD = 1 architectural concern で順次 close する 8 PRDs serial 構成**:
-
-```
-Phase 0: empirical audit (silent change quantification、完了 2026-04-26、report/I-177-step0-audit/)
-   ↓
-PRD 1 (I-177-D): TypeResolver narrowed_type suppression scope refactor (案 C、**完了 2026-04-26**)
-   ↓
-PRD 1.5 (I-177-E): TypeResolver synthetic fork inheritance gap fix (~5 LOC core + ~50 test、**完了 2026-04-26**)
-   ↓
-PRD 2 (I-177-B): collect_expr_leaf_types query 順序 fix + leaf type resolution cohesion (canonical helper extract、~75 LOC、non-matrix-driven、**完了 2026-04-26**)
-   ↓
-PRD 2.5 (I-177-F): resolve_arrow_expr / resolve_fn_expr / class constructor / class method body の visit_block_stmt 経由統一 (~4 LOC production + 4 unit test + 1 E2E、**完了 2026-04-26**、I-177-B callable arrow form `#[ignore]` 解除)
-   ↓
-PRD 2.7 (I-198 + I-199 + I-200 cohesive batch): framework Rule 改修 (Rule 3/4/10/11/12) + TypeResolver coverage extension (StaticBlock + Prop::Method/Getter/Setter body resolve + AutoAccessor Tier 2 error reported) + ast-variants.md Prop/PropOrSpread/Decorator section 新規追加 + audit scripts CI 化、**完了 2026-04-27** (Implementation Revision 1 PropOrSpread Grammar gap fix + Revision 2 cell 15 Prop::Assign critical Spec gap fix、3162 lib pass + 18 new unit tests + 19 audit self-tests、Hono 0 regression)
-   ↓
-PRD 2.75 (I-205): Class member access dispatch with getter/setter methodology framework (PRD 2.8/2.9/I-201-B prerequisite、L2 Design Foundation、Tier 2 broken framework → Tier 1 完全変換、Spec stage v7 final 完了 2026-04-28、framework v1.3 → v1.6 self-applied integration、Implementation Stage T1-T15 ← **次着手**)
-   ↓
-PRD 2.8 (I-201-A): AutoAccessor 単体 Tier 1 化 (decorator なし subset、`accessor x: T = init` → `struct field + getter/setter pair`、L3、user 承認 2026-04-27、I-205 framework leverage)
-   ↓
-PRD 2.9 (I-202): Object literal `Prop::Method` / `Prop::Getter` / `Prop::Setter` Tier 1 化 (Transformer 完全 emission、L3、user 承認 2026-04-27、I-205 framework leverage)
-   ↓
-PRD 3 (I-177 mutation propagation 本体): F1/F3 body mutation propagation (Tier 0 silent semantic change、L1、案 A vs 案 B 確定)
-   ↓
-PRD 4 (I-177-A): else_block_pattern Let-wrap 化 + I-194 typeof if-block elision (拡張可)
-   ↓
-PRD 5 (I-177-C): symmetric XOR early-return detection
-   ↓
-PRD 6 (I-048): closure ownership 推論 (T7-3 完全 GREEN-ify)
-   ↓
-PRD 7 (I-201-B): Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor + class + method + property + parameter 全 application 共通、L1 silent semantic change、user 承認 2026-04-27、PRD 3 後の next-priority L1 = reachability 軸で PRD 3 先行 + I-201-A foundation を leverage)
-```
-
-**Plan η Step 1.5 (I-177-E) 起票根拠**: I-177-B 実装中の empirical verification (CLI 経由の `function h(...)` typeof + post-if return scenario) で hard error が解消されない事象を逐次 dbg trace し、`compute_complement_type` の `synthetic_enum_variants` query が builtin pre-registered union signature に対し None を返す pattern を確定。`fork_dedup_state` の `types: BTreeMap::new()` を `types: self.types.clone()` に修正することで構造的に解消。本 PRD は I-177-B PRD 起票時 problem space に未認識だった prerequisite で、Plan η framework の 1 PRD = 1 architectural concern 原則に従い独立 PRD として起票。
-
-### 直近の完了作業
-
-実装詳細は git log、設計判断は [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) に集約。
-
-| PRD | 日付 | 残課題 / 後続への影響 |
-|-----|------|---------------------|
-| **I-205 T13 (B6/B7 corner cells Tier 2 honest error reclassify lock-in verify + INV-5 visibility consistency invariant Option B 採用 audit + 5 NEW integration tests + 3 NEW registry-level boundary value tests + deep deep review 4 L1-DD + 3 L3-DD findings 全 fix or Review insight 化、Iteration v20)** | 2026-05-01 | **Architectural concern**: T5 で実装済の B6 (method-as-fn-reference) / B7 (inherited accessor) Tier 2 honest error reclassify dispatch arm の lock-in verify、INV-5 (Visibility consistency = `private get/set` の external access が Tier 2 honest error reclassify) の **Option A vs Option B reachability audit + Option B 採用**、boundary value analysis 観点で multi-step inheritance (N>=3) + partial cycle test の registry-level + integration-level 拡充。**(13-a) Cells 7/8 verify**: T5 で `read.rs:172` (`test_cell_7_b6_method_as_fn_reference_no_paren_emits_unsupported_syntax_error`) / `read.rs:200` (`test_cell_8_b7_inherited_getter_read_emits_unsupported_syntax_error`) 既存 lock-in 確認、追加 production / test 不要。**(13-b) INV-5 reachability audit**: Hono codebase 284 TS files 全件 `grep -rEn "private get \w\|private set \w"` で **0 件 hit** (= reachability = 0)、Option A (`MethodSignature.accessibility` field 追加 + 50+ site Rule 9 (c) Field-addition symmetric audit + dispatch arm で `UnsupportedSyntaxError::new("access to private accessor", _)` emit) は overengineering と判定、recurring problem evidence (I-383 T8' / I-205 T2 で latent kind drop 2 度連続) 考慮で **Option B (status quo) を採用**。Option B mechanism: `resolve_member_visibility(Some(Private), _)` → `Visibility::Private` (= no `pub` modifier) は既に implementation 済 (`src/transformer/classes/helpers.rs:89`)、Rust E0624 visibility error が consumer module 経由で **Tier 2 honest error 自動 surface** (no production code change needed)。**(13-c) INV-5 integration test fill-in**: `tests/i205_invariants_test.rs::test_invariant_5_private_accessor_external_access_tier2` (getter) + Layer 3 cross-axis review で発見した setter symmetric counterpart `test_invariant_5_private_setter_external_write_tier2` を追加 fill-in、`#[ignore]` 解除。Test contract: (1) private accessor → no `pub` modifier、(2) public accessor → `pub` modifier 存在、(3) external `obj.x` / `obj.x = v` → cell 2 / cell 14 dispatch fires regardless of accessibility = MethodCall emit 一貫。**(13-d) Multi-step + partial cycle boundary value tests**: 既存 T5 N=2 step を boundary 拡張、3 件 NEW unit test (`src/transformer/expressions/tests/i_205/read.rs`): `test_b7_traversal_n3_step_inheritance_returns_inherited_flag` (A→B→C→D の 4-class chain N=3 step verify) + `test_b7_traversal_partial_cycle_with_intermediate_method_returns_inherited_flag` (A→B→C→A partial cycle で method on C、cycle 前 hit verify) + `test_b7_traversal_partial_cycle_no_method_terminates` (deeper cycle depth=3 で全 class missing、infinite loop なく None return verify)。**Helper integration stubs fill-in (Spec stage F-deep-deep-4 commitment 完成)**: `tests/i205_helper_test.rs` 4 stubs を **integration-level transpile probe** として fill-in、`#[ignore]` 解除。Layered test design (registry-level unit = 7 件 + integration-level = 4 件) で B7 dispatch arm を unit / integration 両 level で symmetric verify。**Production code: 0 LOC change** (T13 は test-only commit、Option B 採用判断により unchanged)。**`/check_job` 4-layer review (Iteration v20、initial pass + deep deep iteration 累積)**: **Initial pass**: Layer 1 Mechanical 0 findings / Layer 2 Empirical 0 findings / Layer 3 Structural cross-axis 1 finding (= INV-5 setter symmetric probe 不在 → 本 T13 内 fix) / Layer 4 Adversarial trade-off 0 findings。**Deep deep iteration (user 指示 2026-05-01)**: Layer 1 で 4 件 finding 追加発見 (L1-DD-1 circular test assertion message misleading / L1-DD-2 disambiguation test direct のみ inherited 不在 / L1-DD-3 invariants test file-level doc out of sync / L1-DD-4 INV-5 tests `\x20` escape 非 conventional)、Layer 3 で 3 件 Review insight 追加発見 (L3-DD-1 protected accessor INV-7 candidate = Hono reachability=0 + INV-5 と structural symmetric argument で defer 不要、L3-DD-2 multiple inheritance via interface extends order-dependent first-match = TS spec correction (interface は accessor signature 宣言を valid に support、defer rationale 訂正) + Hono empirical comprehensive audit で intersection (multi-extends × accessor signature) reachability=0 確認 → Option B symmetric argument で defer、L3-DD-3 INV-5 cross-axis cell coverage 2-cell only = structural symmetric argument で sufficient)、全 L1-DD 4 件本 v20 内 fix + 全 L3-DD 3 件 Review insight 化。Hono protected accessor reachability も追加 audit (`grep -rEn "protected get \w\|protected set \w"` = 0 件)、INV-5 の Option B 適用範囲を private + protected 両 visibility level に structural extend。**Defect Classification 5 Category (累積 final)**: Grammar/Oracle/Spec gap = 0、Implementation gap 5 (initial 1 setter symmetric + L1-DD-1〜4、全件本 v20 内 fix)、Review insight 4 (initial 1 PRD doc wording + L3-DD-1〜3)。**Final quality**: cargo test --lib **3358 pass** (3355 T12 baseline + 3 T13 NEW = 3 b7_traversal tests) / e2e_test 159 pass + 70 ignored / compile_test 3 pass / integration 122 pass / **i205_helper_test 4 pass / 0 ignored** (T13 で全 stub fill-in) / **i205_invariants_test 2 pass / 5 ignored** (INV-5 getter + setter fill-in、INV-1〜4/6 は T15 defer) / clippy 0 warning / fmt 0 diff / check-file-lines OK (read.rs 756 / helper 115 / invariants 229 < 1000 threshold) / Hono Preservation (clean 111 / errors 63 unchanged、production 0 LOC change で確実)。 |
-| **I-205 T12 (Class Method Getter body C1 `.clone()` 自動挿入、Iteration v18 + Iteration v19、20 unit tests + Decision Table C 完全 cover + Stmt 14 variants exhaustive enumeration + cell 78 NA reclassify per TS spec + cell 74 fixture rename `Cache → OptCache` + sub-iteration v18.1 で T14 scope re-partition + Option 3 split で T16 + 別 PRD I-D 切り出し)** | 2026-05-01 | **Architectural concern**: Class Method Getter body の last `return self.field;` pattern (C1 limited pattern) で return_type が non-Copy (D4 String / D5 Vec / D6 Option<non-Copy> / D7 HashMap / D8 Tuple<mixed> / D9 Struct / D10 Enum / D11 DynTrait / D12 Fn / D13 TypeVar / D14 Any / D15 Regex) の場合 `return self.field.clone();` に自動 rewrite (cells 70/72/74 = D4/D5/D6 Option<non-Copy>、D7-D15 = orthogonality merge inheritance)。Decision Table C 完全 enumeration: kind=Getter × body shape (single-hop self field access only) × return_type Copy性 → no rewrite (D1/D2/D3/D6 Option<Copy>) / clone rewrite (D4-D15 non-Copy)。**Iteration v18 = T12 着手前 Spec への逆戻り (2 件 framework 失敗 signal)**: (1) cell 78 NA reclassify (TS spec で `last-expr self.field` patterns reject、`return self.field;` semantic equivalent claim 誤り) + (2) cell 74 fixture rename (`class Cache` が ES2017+ Service Worker API `Cache` interface と duplicate identifier conflict)、`spec-first-prd.md` 「Spec への逆戻り」発動 + 本 PRD self-applied integration。**Framework 改善 candidate 4 件 (本 PRD close 時 integrate or 別 framework PRD 起票)**: 改善 A `Rule 3 (3-2)` Spec stage Mandatory enforcement + 改善 B `spec-first-prd.md` 「Spec への逆戻り」section に "Implementation 着手前 last-mile empirical observation" 追加 + 改善 C `Rule 5 (5-1)` fixture content tsc empirical + 改善 D Builtin name conflict detection。**Iteration v19 = T12 単独 commit + Option 3 split**: T12 implementation (`src/transformer/classes/helpers.rs::is_self_single_hop_field_access` private helper + `insert_getter_body_clone_if_self_field_access` `pub(super)` slice API helper、`Stmt` 全 14 variants exhaustive enumerate per Rule 11 (d-1)、`build_method_inner` gate `kind == Getter && return_type non-Copy`)、20 unit tests (`src/transformer/classes/tests/i_205.rs`)、`/check_job` 4-layer review = Layer 1-4 全 0 findings、Defect Classification = Grammar/Oracle/Spec/Implementation gap 0 + Review insight 1 (= user 指示 task-ID-based 命名 audit、Option 3 split で対応 → I-205 内 T16 + 別 PRD I-D)。**Final quality**: cargo test --lib 3355 / e2e 159 + 70 ignored / clippy 0 / fmt 0 / check-file-lines OK / Hono Preservation。詳細は `backlog/I-205-getter-setter-dispatch-framework.md` Iteration v18 + v19 entries 参照。 |
-| **I-205 T10 (Internal `this.x` dispatch、E2 context、Iteration v16 + Iteration v17 deep-deep `/check_job` review + `&mut self` regression structural fix + `target_roots_at_self` Index/Deref structural extension + TODO doc-sync 5 entries)** | 2026-05-01 | **Architectural concern**: Internal `this.x` dispatch (E2 context、class method body 内) を external dispatch (E1) と structural symmetric に統一、INV-2 (External (E1) と internal (E2 this) dispatch path symmetry) を **構造的に達成** (= 重複 logic 不要、既存 T5/T6/T7/T8/T9 dispatch helpers が `Expr::This` receiver で uniformly fire)。**Empirical foundation**: TypeResolver の `visit_class_body` (visitors.rs:439) が `this` を `RustType::Named { class }` で scope_stack register、`classify_member_receiver` (mod.rs:147) Instance gate で fire、`Expr::This` → `Expr::Ident("self")` IR conversion 既存 (expressions/mod.rs:196) で uniform。**Pre-T10 silent regression discovered + structural fix (Iteration v16 critical finding)**: T6 setter dispatch 導入により IR shape が `Expr::Assign { FieldAccess(self, x), v }` → `Expr::MethodCall { self, "set_x", [v] }` に変化、`body_has_self_assignment` (helpers.rs:100、top-level `Stmt::Expr(Expr::Assign)` のみ検出) が setter MethodCall 見落とし、internal `this.x = v` (cell 61) / `this.x += v` (cell 63) / `this.x++` (cell 64) で silent `&self` emit → Rust E0596 compile error "cannot borrow `*self` as mutable" を引き起こす silent regression を発見。本 T10 で **structural fix**: `body_has_self_assignment` → `body_requires_mut_self_borrow` rename + 拡張 (recursive `IrVisitor` walker `MutSelfRequirementVisitor` + 2 detection cases: case (1) `Expr::Assign { target: self.field, .. }` (pre-T10 case) + case (2) `Expr::MethodCall { object: self, method: starts_with("set_"), .. }` (T6/T7/T8/T10 setter dispatch family))。Recursive descent により pre-T10 helper の depth limitation も同時に解消 (= `if cond { this.x = 5 }` 等 non-trivial top-level structures でも正しく `&mut self` emit)。`is_self_setter_call` shared helper extraction (= prefix `"set_"` + receiver `Expr::Ident("self")` の symmetric structural enforcement)。**Production code**: `src/transformer/classes/helpers.rs` (~80 LOC: `body_requires_mut_self_borrow` + `MutSelfRequirementVisitor` + `is_self_setter_call`) + `src/transformer/classes/members.rs` (call site 1 行更新)。**`/check_job` 4-layer review (Iteration v16)**:
-- **Layer 1 (Mechanical)**: 0 findings (全 file < 1000 lines / clippy 0 / fmt 0 / test name pattern 準拠)
-- **Layer 2 (Empirical)**: 0 findings (CLI probe で cells 60/61/63/64 の generated Rust が compile + 期待 stdout を produce すること empirical 確認 = stand-alone Rust で `Counter.incrInternal()` 1+1=2 等 verify、Hono Preservation)
-- **Layer 3 (Structural cross-axis)**: 1 Spec gap = T9 logical compound `this.x ??= v` (cell 38 internal counterpart) の dispatch test 不在、orthogonality merge inheritance のみに依存 → 本 T10 内 lock-in test 追加で structural verify (`test_internal_this_b4_nullish_assign_emits_block_form_with_predicate`)
-- **Layer 4 (Adversarial trade-off)**: 0 findings (pre-T10 baseline では internal `this.x = v` 系が silent compile error、本 T10 で structural fix → pre/post matrix: cells 61/63/64 が Tier 2 broken → Tier 1 fix。Trade-off: false positive `set_*` prefix regular method は &mut self emit (sound = strictly more permissive)、false negative は Rust E0596 で surface する safe fail-safe)
-
-**Defect Classification (5 category)**: Spec gap 1 (T9 logical compound internal test missing、本 T10 内 fix) / Implementation gap 1 (T6 setter dispatch 導入時 `body_has_self_assignment` を symmetric audit 不足、setter MethodCall 検出 logic を helper に追加せず → 本 T10 で structural fix。**Framework 失敗 signal**: I-205 v1.7 Rule 9 sub-rule (c) Field-addition symmetric audit を T6 review 時に **逆 direction (= IR shape 変化 → caller helper update audit)** に拡張する candidate、本 T6→T10 chain は Rule 9 (c) "IR shape evolution" axis を framework 追加する empirical evidence) / Review insight 1 (Constructor body conversion `try_extract_this_assignment` が `this.<accessor> = v` の B3/B4 dispatch を bypass し `Self { value: 7.0 }` 等 invalid struct field を emit する pre-existing bug を発見、別 TODO `[I-222]` 起票)。
-
-**Pre/post matrix**: cells 61 (`this.x = v` internal B4) / 63 (`this.x += v` internal B4) / 64 (`this.x++` internal B4): Tier 2 broken (silent E0596) → Tier 1 (correct `&mut self` + setter dispatch) / cell 60 (Read internal B2): preserved / setter body internal `this.x = v`: Tier 2 broken → Tier 1 / Tier 2 honest error reclassify cells (B2/B3/B6 internal): preserved / Hono Preservation (clean 111 / errors 63 unchanged)。**Iteration v17 deep-deep review (本 T10 内 追加 fix)**: L1-DD-1 (helper test naming convention、`test_*` prefix で全 rename) + L2-DD-1 (cells 63/64 stand-alone Rust empirical compile + run verify、output 1/2/3 ✓) + **L3-DD-1 (`is_self_field_access` → `target_roots_at_self` recursive helper extension、`self.arr[i] = v` Index target + `self.x.y = v` nested FieldAccess + `(*self).x = v` Deref を structural detect、5 件 NEW unit test 追加)** + L4-DD-1 (`is_self_setter_call` prefix-based heuristic の sound 性 + transitive mut `[I-223]` boundary を doc comment 明記)。**TODO doc-sync (T9 commit `cf0d7ce` の `pre-commit-doc-sync.md` violation の本 T10 内 fix)**: I-219 (TypeResolver `resolve_member_type` Spec gap、L3) / I-220 (Setter accept type asymmetry、L4) / I-221 (Top-level Module-level statement expression-context dispatch、L4) を TODO 追加 + I-222 (Constructor body bug、L4) 新規起票 + **I-223 (Method receiver inference does not detect transitive mut propagation、L4、Iteration v17 L3-DD-2 由来)** 新規起票。**Final quality**: cargo test --lib **3335 pass** (3308 baseline + 12 this_dispatch + 15 helper = 3335) / e2e_test 159 pass + 70 ignored / compile_test 3 pass / integration 122 pass / clippy 0 warning / fmt 0 diff / check-file-lines OK (helpers.rs 603 行 / this_dispatch.rs 631 行、両者 < 1000 threshold)。 |
-| **I-205 T9 (Logical compound `??= &&= \|\|=` Member target setter dispatch + Iteration v14 deep-deep review structural completeness + Iteration v15 `/check_problem` cleanup)** | 2026-04-30 | **Iteration v15 `/check_problem` cleanup (2026-04-30 post-deep-deep review)**: 4 件 cleanup を本 T9 commit 内 fix — (A-1) `_span: Span` 未使用 parameter 削除 / (A-2) `let _ = ts_obj;` workaround 削除 + predicate-unavailable err span を `ts_obj.span()` で sibling errors と consistency 確保 / (A-3) `span: Span` parameter chain 全削除 (entry method `try_dispatch_member_logical_compound` から `dispatch_*_member_logical_compound` → `dispatch_b4_strategy` → `emit_*` の chain 全体、`use swc_common::Span` 不要に) / (A-4) PRD doc matrix cells 39/40 D-axis orthogonality に sub-cells 7 件追加 (38-identity / 38-blocked / 39-other / 39-truthy / 39-blocked / 40-other / 40-truthy / 40-blocked) で Iteration v14 実装の structural form を完全 enumerate (Rule 10 (Cross-axis matrix completeness) compliance restored)。**`ReceiverCalls` struct → enum refactor (Iteration v15、user 承認)**: 「意味のないフィールド」code smell (`Static.object` placeholder + `Instance.class_name` 空文字列) を type-safe enum (`Instance { object, field } / Static { class_name, field }`) に置換、4 emit_* helpers + dispatch_b4_strategy + resolve_receiver_for_calls + wrap_with_iife_if_needed の dispatch を match-based 化、SE-having branch (= 必ず Instance variant) で `unreachable!()` macro により invariant codify (Static は statically SE-free per resolve_receiver_for_calls)。design-integrity.md 凝集度 / 責務分離 改善、future T11 (11-c) static matrix expansion 等で類似 helper 再導入時の robustness 確保。**新規 TODO 起票 (4 件)**: I-219 (TypeResolver `resolve_member_type` Spec gap = T8 F-SX-1 予測済) / I-220 (Setter accept type asymmetry = T6/T7/T8/T9 共通 pre-existing) / I-221 (Top-level Module statement expression-context dispatch = T14 / E2E suboptimal)。**Final quality**: cargo test 全 pass (lib 3308 = 3274 baseline + 34 T9、e2e 159 + 70 ignored、compile 3、integration 122) / clippy 0 warning / fmt 0 diff / check-file-lines OK / Hono Preservation (clean 111 / errors 63 unchanged)。 |
-| **I-205 T8 (Compound assign Member target setter dispatch + INV-3 1-evaluate compliance + T7 IIFE back-port + DRY refactor + member_dispatch.rs 6-file split、Iteration v12)** | 2026-04-29 | **Architectural concern**: arithmetic / bitwise compound assign (`+= -= *= /= %= \|= &= ^= <<= >>= >>>=`、11 ops) Member target で B4 instance / B8 static setter desugar yield_new (`{ let __ts_new = obj.x() OP rhs; obj.set_x(__ts_new); __ts_new }`)、B2/B3/B6/B7 Tier 2 honest error reclassify (`compound assign to read-only / read of write-only / to method / to inherited accessor` wording)、INV-3 1-evaluate compliance for side-effect-having receiver (IIFE form `{ let mut __ts_recv = receiver; ... }`)、T7 dispatch_instance_member_update への INV-3 back-port (cohesive batch、`build_instance_setter_desugar_with_iife_wrap` shared helper)。**Spec gap fix (Iteration v12)**: TypeResolver `resolve_assign_expr` の compound `Member` arm が `is_propagating_op` のみで `resolve_expr(&member.obj)` 経路を通っていた → arithmetic / bitwise compound でも receiver expr_type を unconditional register に修正 (Iteration v11 T7 Update.arg 未再帰と同 pattern、framework 失敗 signal)。**DRY refactor (Iteration v12 third-review)**: T7 update + T8 compound × Instance/Static の B4 setter desugar arm が完全 identical だった IIFE wrap + setter call construction logic 60 行を `member_dispatch/shared.rs::build_instance_setter_desugar_with_iife_wrap` + `build_static_setter_desugar_block` shared helpers に集約 (subsequent T9 logical compound も leverage 可能)。**File split (Iteration v12 third-review)**: `member_dispatch.rs` (1179 行、CLAUDE.md threshold violation) を `member_dispatch/{mod, shared, read, write, update, compound}.rs` (6 file 計 1331 行、各 file 100-369 行) に architectural concern 別 split。**Production code**: `convert_assign_expr` T8 dispatch gate (T6 plain `=` 直後、`arithmetic_compound_op_to_binop` 1-to-1 mapping helper 経由) + `Transformer::dispatch_member_compound` entry method + `dispatch_instance_member_compound` / `dispatch_static_member_compound` 新規 helper + `is_side_effect_free` / `wrap_with_recv_binding` / `build_setter_desugar_block` (旧 `build_update_setter_block` を generalize) shared infrastructure + `TS_RECV_BINDING = "__ts_recv"` constant (I-154 namespace extension)。**`/check_job` 4-layer review (first + second iteration 累積)** で発見された 10 件 finding 全 fix + 別 scope 2 件 TODO 起票:
-- **First review** (commit 前 initial): F1 (Implementation gap = `is_side_effect_free` 二重呼び出し) / F2 (Implementation gap = `_` arm Rule 11 d-1 違反 → AndAssign/OrAssign unreachable + ExpAssign UnsupportedSyntaxError + NullishAssign unreachable で exhaustive 化) / F3 (Spec gap = ExpAssign × Member anyhow! → UnsupportedSyntaxError 経由 transparent error reporting) / F5 (Review insight = Cell 21 corollary semantic safety PRD section 追加) を本 T8 内 全 fix。
-- **Second review** (post-fix state、追加発見): F-SL-1 (Review insight = compound desugar match comment misleading clarify) / F-SL-2 (Implementation gap = TS_OLD_BINDING doc comment stale reference `build_update_setter_block` → `build_setter_desugar_block`) / F-SX-1 (Spec gap = TypeResolver compound Member arm field type completeness partial = receiver 軸 only resolve、comment clarify + 別 TODO `[I-218]` 起票) / F-EM-1 (Review insight = 11 ops orthogonality merge unit test 不足 → 7 op exhaustive mapping unit test 追加で structural verify 完成) / F-AT-1 (Review insight = Fallback path INV-3 1-evaluate compliance gap pre-existing、本 T8 setter dispatch path scope と orthogonal、別 TODO `[I-217]` 起票で Resolution direction = `is_side_effect_free` / `wrap_with_recv_binding` shared helper Fallback path 適用 詳細 record)。**Unit test 27 件 (= first 20 + second-review F-EM-1 で 7 op orthogonality mapping verify 追加)**: cells 20/22/23/25/26/27/28/29-d/29-e-d/33/34-c/35-d (compound) + Static defensive arms 4 件 + INV-3 FieldAccess recursive judgment + cell 21 SE-free + cell 21 IIFE (T8 cells、計 19 件) + T7 INV-3 back-port verify (`getInstance().value++` で IIFE form emit、1 件) + 7 op orthogonality merge mapping verify (MulAssign/DivAssign/ModAssign/BitAndAssign/BitXorAssign/RShiftAssign/ZeroFillRShiftAssign で B4 instance dispatch + BinOp 置換 verify、second-review F-EM-1 fix)。**Pre/post matrix**: Fix (silent Tier 2 → Tier 1 / Tier 2 honest reclassify) cells 21/21-IIFE/22/23/25/26/27/29-d/29-e-d/33/34-c/35-d、Preserve cells 20/28、T7 cell 43 IIFE back-port fix、**No regression**。**Final quality (post second-review fix)**: cargo test --lib 3274 pass (3247 baseline + 27 = 19 T8 + 1 T7 IIFE back-port + 7 second-review op orthogonality) / e2e 159 pass + 70 ignored / compile_test 3 pass / integration 122 pass / clippy 0 warning / fmt 0 diff / check-file-lines OK / Hono Tier-transition compliance = **Preservation** (clean 111 / errors 63 = T7 baseline 同一、no new compile errors、`prd-completion.md` broken-fix PRD allowed pattern)。**Defect Classification (Iteration v12 first + second review 累積 final)**: Spec gap 3 (= first review 2 + second F-SX-1) / Implementation gap 3 (= first 2 + second F-SL-2) / Review insight 4 (= first F5 + second F-SL-1/F-EM-1/F-AT-1)、全件本 T8 内 resolved or 別 TODO 起票 + PRD doc 詳細 record (= F-SX-1 → I-218、F-AT-1 → I-217)。**framework 改善 candidate**: Rule 10 default axis "TypeResolver visit coverage of operand-context expressions" の正式昇格 + audit script auto verify (Iteration v11/v12 連続 2 度発生 source、3 度目 prevention)。 |
-| **環境整備: 行数超過 4 file 構造的分割 + DRY refactor (non-PRD environmental cleanup)** | 2026-04-29 | **Architectural concern**: CLAUDE.md "0 errors / 0 warnings" の `./scripts/check-file-lines.sh` 1000 行 threshold violation (4 file: `type_resolution.rs` 1201 / `return_wrap.rs` 1176 / `type_resolver/expressions.rs` 1024 / `synthetic_registry/tests.rs` 1022) を **凝集度の高い責務分離** + **構造的 DRY 解消** で根本対応。**File 構造変化 (4 → 27 file)**: (1) `type_resolution/mod.rs` (data + impl + DRY helper `position_in_range`) + `tests/{basic_queries, narrowing_suppression, canonical_primitives}.rs` 3 split、(2) `return_wrap/{mod, context, wrapping, collection}.rs` (architectural concern 別 4 split + tests inline、context construction / leaf wrapping / SWC AST collection)、(3) `type_resolver/expressions/` を AST expr type 別 8 split (`mod` dispatcher + `binary` + `assignments` + `member` + `object` + `conditional` + `assertions` + `opt_chain` + `new_expr`) + `assertions.rs` 内 `resolve_type_assertion_inner` shared helper で TsAs/TsTypeAssertion DRY violation 解消、(4) `synthetic_registry/tests/` 6 file split (`mod` + `helpers` + `dedup` + `naming` + `scope` + `ops` + `integration`)。**構造的 DRY 解消 helpers**: `position_in_range(position, lo, hi) -> bool` (4 ヶ所の半開区間 check 集約)、`pub_field(name, ty) -> StructField` (20+ inline literal 集約)、`resolve_type_assertion_inner(type_ann, inner) -> ResolvedType` (TsAs/TsTypeAssertion 4-step logic 集約)。**`/check_job` 4-layer review + `/check_problem` で post-refactor cohesion violation 4 件 (Cond ↔ TsAs/TsTypeAssertion file 同居 + TsAs/TsTypeAssertion DRY + is_none_expr/coerce_string_literal 直接 test 不在 + position_in_range 直接 test 不在) 全 fix。**新 TODO 起票**: I-393 (`expected_types.insert + propagate_expected` pattern 17+ call site DRY 統合、別 PRD)、I-394 (`collect_*_leaf_types` ↔ `wrap_body_returns` SWC walker positional invariant DRY、別 PRD)。**Quality**: cargo test (lib) 3207 → 3220 (+13 branch coverage / boundary value analysis tests、regression 0)、clippy 0 warning、fmt 0 diff、check-file-lines OK、Hono bench 0 regression (semantic 変更なし、純 structural refactor)。 |
-| **PRD 2.7 (I-198 + I-199 + I-200 cohesive batch、framework Rule 10/11/12 + Rule 4 拡張 + TypeResolver coverage extension + ast-variants.md Prop/PropOrSpread/Decorator section 追加)** | 2026-04-27 | **Architectural concern**: framework Rule 改修 (Rule 10/11/12 + Rule 4 doc-first dependency order) + 拡張による coverage gap detection 完成 + structural enforcement (1 PRD = 1 architectural concern)。**T1〜T15 全 task 完了** + `/check_job` 4-layer review (formal initial invocation) で発見 9 課題を本質的に解決 (test coverage gap 6 件 + try_convert_as_hashmap inconsistency + Rule 3 SWC empirical 必須 wording 未実施 + plan/numbering ritual)。**主要変更**: `spec-stage-adversarial-checklist.md` Rule 4 sub-rule (4-1)(4-2)(4-3) + Rule 10 axis (i) AST dispatch hierarchy + Rule 11 AST node enumerate completeness check (sub-rule d-1〜d-4) + Rule 12 Mandatory application + structural enforcement (sub-rule e-1〜e-8) + **Rule 3 sub-rule (3-1)(3-2)(3-3) SWC parser empirical observation 必須** (Implementation Revision 2 lesson の self-applied integration)。`problem-space-analysis.md` non-matrix-driven 適用 spec 追加。`prd-template` skill Step 0c (Rule 10 application 必須 section) hard-code。`scripts/audit-ast-variant-coverage.py` (tree-sitter-rust 経由、`_` arm 全面禁止 + Tier sync verify) + `scripts/audit-prd-rule10-compliance.py` (yaml fenced code block parse + Rule 4 (4-3) doc-first dependency chain auto verify) + `.github/workflows/ci.yml` audit step + README branch protection 手順。`doc/grammar/ast-variants.md` に PropOrSpread (section 12) + Prop (section 13) + Decorator (section 20) 追加、PropName-TsTypeElement section 14-19 renumber、AutoAccessor entry を Tier 2 honest error reported via UnsupportedSyntaxError + I-201-A/B 言及に update。`src/pipeline/type_resolver/visitors.rs` (visit_class_body の StaticBlock arm + AutoAccessor explicit no-op + TsIndexSignature/Empty filter-out reason、`_` arm 削除) + `expressions.rs` (Object expr inner match で Prop::Method/Getter/Setter body の visit_block_stmt 経由 walk + visit_prop_method_function helper、Prop::Assign は Implementation Revision 2 で no-op) + `data_literals.rs` (3 site: convert_object_lit + convert_discriminated_union_object_lit + try_convert_as_hashmap、全 wildcard 削除 + UnsupportedSyntaxError 経由 Tier 2 honest error 統一)。**Implementation Revision 1 (Grammar gap、PropOrSpread section 不在)** + **Implementation Revision 2 (critical Spec gap、cell 15 Prop::Assign NA 誤認識を SWC parser empirical observation で覆し Tier 2 honest error reclassify)** を本 PRD scope 内 fix。**Test 完成**: TypeResolver layer 9 unit tests (StaticBlock typeof narrow / AutoAccessor no-op / Prop::Method/Getter/Setter body visit / Prop::Assign no-op + corollary / Prop::KeyValue/Shorthand regression) + Transformer layer 9 unit tests (cell 7/12-14/15/15-corollary/17-line:col + 10-11 regression) + SWC parser empirical regression test 3 件 (`tests/swc_parser_object_literal_prop_assign_test.rs`) + E2E fixture integration (`tests/e2e/scripts/prd-2.7/`、cell 6 = post-PRD I-204 として #[ignore]、cell 10/11 GREEN)。**Quality**: 3162 lib pass / 157 e2e pass + 30 ignored / 3 SWC parser pass、clippy 0 warning、fmt 0 diff、Hono bench clean 111 / errors 63 (0 regression)、audit-ast-variant-coverage.py PASS (本 PRD scope file)、audit-prd-rule10-compliance.py PASS (本 PRD doc self-applied)。**別 PRD 起票**: I-204 = Transformer StaticBlock emission strategy 改修 (cell 6 GREEN 化用、L1 候補)、I-203 = codebase-wide AST match exhaustiveness compliance (Rule 11 (d-1) 既存 codebase application)。 |
-| **I-184 (CI fresh-clone defect: stale gitignored template files post pool refactor)** | 2026-04-27 | CI compile_test 3 件 panic (`failed to write tests/compile-check/src/lib.rs: No such file or directory`) を起点に、`/check_job` Layer 4 trade-off review + 歴史的経緯調査で **post-pool-refactor で I-161 の「write-only artifact」前提が消滅** していたが gitignore のみ stale 化していた事実を文書化、Problem Space matrix で全 12 cell を網羅 enumerate して 4 件 ✗ cell を確定。**Approach A (asymmetric design)**: 各 subproject の access pattern を honest に反映 — compile-check は **template-buffer pattern** (毎 test `fs::write` 上書き → `*.rs` ignore + `.keep` で dir 保持)、e2e/rust-runner は **pool pattern** (`E2eRunnerPool`、template = read-only skeleton → `src/main.rs` を tracked stub 化、`.keep` 配置せず、pool init は `copy_runner_template_file("src/main.rs", ...)` 統一形)。両 subproject の `Cargo.lock` は test fixture reproducibility 保証のため tracked 化。**変更**: `.gitignore` 全面書き直し (asymmetric handling 根拠を comment 明記、stale `write_with_advancing_mtime` 言及削除)、両 `Cargo.lock` (`cargo generate-lockfile` で再生成し tracked)、`tests/compile-check/src/.keep` 新規、`tests/e2e/rust-runner/src/main.rs` を doc comment 付き stub として tracked 化、`tests/compile_test.rs` / `tests/e2e_test.rs` doc comment 整合更新。**True fresh-clone state verify** (両 Cargo.lock + compile-check src/lib.rs 削除、e2e tracked stub は保持): compile_test 3 pass / e2e_test 157 pass 29 ignored、`cd tests/e2e/rust-runner && cargo metadata && cargo generate-lockfile` が temp stub 作成なしで成功 (template が valid Cargo project)、clippy 0 warning、fmt 差分なし。**Lesson** (`backlog/I-184` 内 3 項目 fully recorded): (1) Stale gitignore は latent CI defect 温床 — refactor 時に access pattern 変化 file の git tracking state 整合 checklist が必要、(2) False symmetry を避ける — 表層 DRY は本質的差異を覆い隠し vestigial defensive coding を生む、(3) PRD `Background` に歴史的経緯を必ず記録。 |
-| **I-177-E + I-177-B + I-177-F batch (Plan η Step 1.5 + Step 2 + Step 2.5)** | 2026-04-26 | **I-177-E**: `SyntheticTypeRegistry::fork_dedup_state` で `types: BTreeMap::new()` を `types: self.types.clone()` に修正、builtin pre-registered union 型を fork から query 可能に。`SyntheticTypeDef` / `SyntheticTypeKind` に `Clone` derive 追加。`compute_complement_type` が `synthetic_enum_variants` query で正しく variants を取得できるようになり、typeof / instanceof / OptChain narrow guard with synthetic union の post-narrow EarlyReturnComplement event 押下が cohesive に。production code change ~3 行 + test 3 件追加 + E2E 1 fixture。**I-177-B**: `FileTypeResolution` に `resolve_var_type(name, span)` / `resolve_expr_type(expr)` canonical primitive を追加、3 production site (`Transformer::get_type_for_var` / `get_expr_type` / `transformer::return_wrap::collect_expr_leaf_types`) を canonical 経由に統一。「Ident は narrowed_type 優先 → expr_type fallback」knowledge を 1 箇所に集約し DRY violation 完全解消。production code change ~75 LOC (canonical helper) + 5 unit test。**I-177-F (scope 拡張済)**: `resolve_arrow_expr` / `resolve_fn_expr` / `visit_class_decl` constructor body / `visit_method_function` class method body の **4 site** で `for stmt in &body.stmts { ... }` を `self.visit_block_stmt(body)` に統一 (`visit_fn_decl` と完全 symmetric)、`current_block_end` を全 fn body 形式で set。production change 4 行 + 4 unit test (arrow form `#[ignore]` 解除 + fn_expr / class method / class constructor 新規) + 1 E2E fixture。**`/check_job` 4-layer review に基づく追加対応 (1 度目 + 2 度目)**: (1) Cell #5 (AnyEnum) NA 確定、(2) `apply_substitutions_to_items` doc-impl mismatch を call site comment 強化 → **I-177-G** (defense-in-depth) 起票、(3) test name prefix を全新規 test に統一、(4) cross-axis matrix completeness を non-matrix-driven PRD でも適用する framework 改善 → **I-198** 起票 (5 度の Spec gap chain で Severity reinforced)、(5) `/check_job deep deep` 2 度目で I-177-F の Cross-axis 直交軸 audit 不足 (class method / constructor 漏れ) を発見し本 PRD scope に編入、(6) `/check_job deep deep` 2 度目で TypeResolver coverage gap (static block / AutoAccessor / object literal method body) を発見 → **I-199 + I-200** 起票 (本 batch scope 外、TypeResolver coverage extension の broader 概念で別 PRD batch 化)。Hono bench 0 regression (clean 111 / errors 63 unchanged)。**次の作業**: PRD 3 (I-177 mutation propagation 本体、Tier 0 silent semantic change)、ただし I-199 + I-200 batch (TypeResolver coverage extension) と I-198 (framework Rule 10 拡張、Severity reinforced) を pre-Step 3 候補として user 判断 |
-| **I-177-D (TypeResolver `narrowed_type` suppression scope refactor、案 C、Plan η Step 1)** | 2026-04-26 | trigger-kind-based dispatch refactor (Primary 非 suppress / EarlyReturnComplement 維持 suppress) で I-161 T7 cohesion gap を architectural に解消。**Plan η framework の最初の適用**: prd-template skill + spec-stage-adversarial-checklist 10-rule + check-job-review-layers 4-layer + post-implementation-defect-classification 5-category を初実戦投入し、`/check_job` 2 度の review iteration で findings 全 fix。Tier 3-4 deferral として **I-194** (typeof if-block elision、I-177-A scope 拡張候補) / **I-195** (struct field literal coerce) / **I-196** (framework dimension 拡張) / **I-197** (test 名 prefix audit) を TODO 起票。T7 i177-d 5 E2E fixtures は post-I-048 + post-I-177-A + post-I-162 の合成 dependency により ignore scaffold で保持、T7-3 ignore annotation を 3-fix dependency (I-177-D / I-177 main / I-048) 明記に update |
-| **I-178 + I-183 + Rule corpus optimization batch** | 2026-04-25 | matrix-driven PRD framework (10-rule checklist + 4-layer review + 5-category defect classification) を整備、`.claude/rules/` 21 file + `.claude/skills/` 18 skill + `.claude/commands/` 9 command + CLAUDE.md に reference graph を確立。Tier 3-4 deferral として [I-184]〜[I-193] (10 件) を TODO 起票 |
-| **I-161 + I-171 batch (`&&=`/`||=` desugar + Bang truthy emission)** | 2026-04-22〜04-25 | narrow-related compile error の structural fix。**T7 で `narrowed_type` suppression scope の architectural cohesion gap を発見** → I-177-D PRD で解消済 (2026-04-26)。narrow-scope mutation propagation 欠陥が runtime 誤動作として顕在化 → I-177 (Tier 0 L1) として umbrella 化、3 sub-item (A/B/C) 集約 |
+詳細 audit trail 全文 = [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) `## Spec Review Iteration Log`。
 
 ---
 
-## 次の作業
+## /start 再開時の手順
 
-**優先順位は [`.claude/rules/todo-prioritization.md`](.claude/rules/todo-prioritization.md) (L1 > L2 > L3 > L4) および [`.claude/rules/ideal-implementation-primacy.md`](.claude/rules/ideal-implementation-primacy.md) (silent semantic change を最優先) に従う。**
+### Step 1: 状態確認
+1. **本 plan.md** を読む = 現在の状態 + 次着手 = T5-2
+2. **PRD doc を読む** = [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) (= 作業 reference doc、全 Iteration log + Task spec + Sub-commits 一覧)
+3. **TODO 確認** = [`TODO`](TODO) (本 PRD scope 外で起票済の I-395 / I-396 / I-397 等の follow-up scope item)
 
-### **`/start` 再開時の最優先 reference doc (2026-05-01 第三者 `/check_job` review 由来)**
+### Step 2: T5-2 着手 (PRD doc § Implementation Stage Tasks > T5-2 参照)
 
-**B2 PRD (I-224) Spec stage iteration v3 必要状態**: `report/I-224-spec-stage-v3-review-handoff.md` に詳細記録。
+**Work**:
+1. NEW C0 fixtures (cell-41 control-flow Tier 2 + cell-75 + cell-77 + cell-79) を green 化 (`cargo test --test e2e_test`)
+2. `tests/i224_invariants_test.rs::test_invariant_7_pub_fn_init_external_api_audit_post_t4` の `#[ignore]` 解除 + fill-in
+   - post-T4 state で `init()` call site 0 件 verify
+   - Hono bench Tier-transition compliance result classification = Improvement or Preservation 確認
+3. `/check_job` 4-layer review (Layer 1-4 全 0 findings 達成)
 
-`/start` 実行時の手順:
-1. **本 handoff doc を読む** = 議論経緯 + 16 findings + 5 review insights + H-2 Option α/β/γ 設計判断点 把握
-2. **user 判断確認** (= Option α 現状維持 / **Option β cohesive batch 推奨** / Option γ framework rule update のどれを採用するか)
-3. **iteration v3 着手** = handoff doc Section 4.2 の work breakdown (Critical 4 + High 8 + Medium 4 + Review insights 5 = 21 件 actions) を順次 resolve
-4. iteration v3 self-review pass + `audit-prd-rule10-compliance.py` PASS で Spec stage 真の完了判定
+**Completion criteria**:
+- NEW C0 cells (matrix # 41/75/77/79) e2e green
+- INV-7 test green
+- Hono bench Tier-transition compliance pass
+- Layer 1-4 全 0 findings
 
-### 実行順序 (prerequisite chain、案 β 確定 2026-05-01 = Universal infra leverage first + L1 mid-priority)
+**Commit message**: `[WIP] I-224 T5 完了: NEW C0 fixtures e2e green + INV-7 external API audit invariants test fill-in + 4-layer review pass`
 
-**案 β 採用根拠 (2026-05-01 user 承認、星取表 20/24 で最良判定)**:
-- **Leverage 最大化**: B2/B3 を最先で fix → 全 future PRD の e2e verification + class field 変換が **構造的に正しく** なる
-- **Methodology infra 早期 codify**: I-D (framework rule integration) を I-205 close 直後に整備 → 後続 PRD spec stage が第 1 反復で完成可能
-- **L1 Tier 0 (I-177) 中盤投入**: I-D 完了直後 = framework v2.x 安定後で I-177 spec stage の re-iteration risk 圧縮
-- **L1 silent (I-201-B) は I-201-A foundation 後**: decorator framework は AutoAccessor を leverage するため class dispatch group 完了が prerequisite
-- **代替案比較**: 案 α (Strict serial: 14/24)、案 γ (L1 first: 14/24、spec drift risk 高)、案 δ (Family batches: 18/24)。詳細は本 commit `[I-205 T14 着手判定 + 案 β 採用]` 議論 log 参照
+### Step 3: T5-2 完了後の chain
+T6a (I-154 doc + CI audit) → T7 (ESM harness upgrade) → T8 (Top-await synthesis) → T9 (Axis C1 e2e green + `[CLOSE]` PRD 完了)。
+
+---
+
+## 実行順序 (prerequisite chain、案 β = Universal infra leverage first + L1 mid-priority)
+
+**案 β 採用根拠** (2026-05-01 user 承認、星取表 20/24 で 4 案中最良判定): Leverage 最大化 (B2/B3 を最先で fix → 全 future PRD の e2e verification + class field 変換が構造的に正しくなる)、Methodology infra 早期 codify (I-D を I-205 close 直後に整備 → 後続 PRD spec stage が第 1 反復で完成可能)、L1 Tier 0 (I-177) 中盤投入 (I-D 完了直後 = framework v2.x 安定後で I-177 spec stage の re-iteration risk 圧縮)。
 
 ```
-[PRD 1: I-177-D — TypeResolver suppression scope refactor、案 C] (完了 2026-04-26)
-       │
-       ▼
-[PRD 1.5: I-177-E — TypeResolver synthetic fork inheritance gap fix] (完了 2026-04-26)
-       │
-       ▼
-[PRD 2: I-177-B (~75 LOC) — collect_expr_leaf_types query 順序 fix + canonical helper extract、non-matrix-driven] (完了 2026-04-26)
-       │
-       ▼
-[PRD 2.5: I-177-F — resolve_arrow_expr / resolve_fn_expr block_end traversal cohesion] (完了 2026-04-26)
-       │
-       ▼
-[PRD 2.7: I-198 + I-199 + I-200 cohesive batch — framework Rule 改修 (Rule 3/4/10/11/12) + TypeResolver coverage extension + ast-variants.md Prop/PropOrSpread/Decorator section 新規追加 + audit scripts CI 化] (完了 2026-04-27)
-       │
-       ▼
-[PRD 2.75: I-205 — Class member access dispatch with getter/setter methodology framework (Spec stage v7 final 完了 2026-04-28、Implementation Stage T1〜T13 完了 2026-05-01、T11 削除 2026-05-01)、**T14-T16 は案 β Phase 1-A 完了後に再開**]
-       │
-       ▼
-═══════════════════════════════════════════════════════════════════════════════
-   案 β Phase 1-A: I-205 T14 prerequisite (3 PRD 逐次起票、universal infra)
-═══════════════════════════════════════════════════════════════════════════════
-       │
-       ▼
-[PRD α-1 (新規): I-224 (B2) — Top-level executable script の Rust emission で `fn main()` 自動生成 (universal e2e infra、L3、全 future PRD verification benefit、即時 leverage 大)] **← 次着手 (案 β Phase 1-A の最初)**
-       │
-       ▼
-[PRD α-2 (新規): I-225 (B3) — Class field の literal-only initializer (annotation 無) で type inference 完成 (universal class field infra、L3 + `type-fallback-safety.md` 該当 L1 silent risk あり)]
-       │
-       ▼
-[PRD α-3 (新規): I-162 — Constructor synthesis `Self::new()` for no-explicit-constructor classes (L3、既 TODO entry)]
-       │
-       ▼
-═══════════════════════════════════════════════════════════════════════════════
-   案 β Phase 1-B: I-205 close (T14 → T15 → T16)
-═══════════════════════════════════════════════════════════════════════════════
-       │
-       ▼
-[I-205 T14: E2E fixtures green-ify (B2/B3/I-162 verified end-to-end、34 cells)]
-       │
-       ▼
-[I-205 T15: /check_job 4-layer review + 13-rule self-applied verify]
-       │
-       ▼
-[I-205 T16: Task-ID-based naming → semantic naming refactor + I-205 implementation 範囲内の `unwrap()` cleanup integrate]
-       │
-       ▼
-═══════════════════════════════════════════════════════════════════════════════
-   案 β Phase 1-C: Methodology infra codify
-═══════════════════════════════════════════════════════════════════════════════
-       │
-       ▼
-[新 PRD I-D: Framework rule integration cohesive batch (D-1 task-ID-based 命名禁止 + D-2 Iteration v18 framework 改善 4 件 + D-3 T7/T8 連続 framework 失敗 signal Rule 10 axis 昇格 + D-4 T5 Iteration v9 lessons + 案 β B2/B3/I-162 lessons + B2 Spec stage v3 framework gap candidates (= R-1 Cartesian product completeness verify + R-5 Spec gap PRD 起票 procedure + 改善 v3-4/5/6 = duplicate matrix detection + dispatch tree pseudocode validation + Spec stage Self-Review verdict consistency) integrate) + audit script auto verify] (L4、user 承認 2026-05-01、I-224 iteration v3 で scope 拡張 2026-05-01)
-       │
-       ▼
-[~~新 PRD I-226: Test harness ESM support + top-level await Tier 1~~ — **撤回 2026-05-01、I-224 Option β cohesive batch に統合**、test harness ESM upgrade (= `scripts/observe-tsc.sh --esm` flag、Spec stage trial 実装済) + top-level await Tier 1 synthesis (`#[tokio::main] async fn main()` capture) は I-224 PRD scope 内 T7/T8/T9 task で実施]
-       │
-       ▼
-═══════════════════════════════════════════════════════════════════════════════
-   案 β Phase 2: L1 Tier 0 priority (silent semantic change の最優先解消)
-═══════════════════════════════════════════════════════════════════════════════
-       │
-       ▼
-[PRD 3: I-177 mutation propagation 本体 (Tier 0 silent semantic change、L1) — F1/F3 body mutation、案 A vs 案 B 確定] **← L1 を I-A/I-B/I-201-A より先行 (案 β / 案 γ の良いところ吸収)**
-       │
-       ▼
-═══════════════════════════════════════════════════════════════════════════════
-   案 β Phase 3: Class dispatch group → L1 silent decorator
-═══════════════════════════════════════════════════════════════════════════════
-       │
-       ▼
-[PRD 2.76: I-A — Method static-ness IR field propagation (元 I-205 T11 (11-b)、`MethodSignature.is_static` field 追加 + Rule 9 (c-1) Field Addition Symmetric Audit、61 site)] (L3、user 承認 2026-05-01)
-       │
-       ▼
-[PRD 2.77: I-B — Class TypeName context detection unification (元 I-205 T11 (11-d) + (11-f) + I-214 統合、TypeResolver `RustType::ClassConstructor(String)` type marker + 全 Ident match sites unification + `Expr::AssociatedConst` 新 IR variant)] (L3、user 承認 2026-05-01)
-       │
-       ▼
-[PRD 2.8: I-201-A — AutoAccessor 単体 Tier 1 化 (decorator なし subset、I-205 + I-A + I-B + B3 framework leverage)] (L3、user 承認 2026-04-27)
-       │
-       ▼
-[PRD 2.9: I-202 — Object literal Prop::Method/Getter/Setter Tier 1 化 (Transformer 完全 emission)] (L3、user 承認 2026-04-27)
-       │
-       ▼
-[PRD 7: I-201-B — Decorator framework 完全変換 (TC39 Stage 3、L1 silent semantic change)] (user 承認 2026-04-27、I-201-A foundation leverage、案 β で Phase 4 narrow refinements より先 = L1 先行)
-       │
-       ▼
-═══════════════════════════════════════════════════════════════════════════════
-   案 β Phase 4: Narrow refinements (post-L1 cleanup)
-═══════════════════════════════════════════════════════════════════════════════
-       │
-       ▼
-[PRD 4: I-177-A — else_block_pattern Let-wrap (+ I-194 typeof if-block elision 拡張可)]
-       │
-       ▼
-[PRD 5: I-177-C — symmetric XOR early-return detection]
-       │
-       ▼
-[PRD 6: I-048 — closure ownership 推論 (T7-3 完全 GREEN-ify)]
-       │
-       ▼
+[完了] PRD 1〜2.7 (I-177-D / I-177-E / I-177-B / I-177-F / I-198+199+200 batch) — 2026-04-26〜27
+   ↓
+[完了] PRD 2.75 = I-205 (Class member access dispatch with getter/setter framework、T1-T13 完了) — 2026-05-01
+   T14-T16 は案 β Phase 1-A 完了後に再開 (= I-224 / I-225 / I-162 universal infra prerequisite block)
+   ↓
+═════ 案 β Phase 1-A: I-205 T14 prerequisite (3 PRD 逐次起票) ═════
+   ↓
+[進行中] PRD α-1 = I-224 (B2 fn main mechanism) — T5-1 完了 2026-05-08、T5-2 次着手
+   ↓
+[次] PRD α-2 = I-225 (B3 class field literal-only initializer type inference)
+   ↓
+[次] PRD α-3 = I-162 (constructor synthesis `Self::new()` for no-explicit-constructor classes)
+   ↓
+═════ 案 β Phase 1-B: I-205 close (T14 → T15 → T16) ═════
+   ↓
+[次] I-205 T14: E2E fixtures green-ify (B2/B3/I-162 verified end-to-end、34 cells)
+   ↓
+[次] I-205 T15: /check_job 4-layer review + 13-rule self-applied verify
+   ↓
+[次] I-205 T16: Task-ID-based naming → semantic naming refactor + I-205 範囲内 unwrap() cleanup
+   ↓
+═════ 案 β Phase 1-C: Methodology infra codify ═════
+   ↓
+[次] 新 PRD I-D: Framework rule integration cohesive batch (D-1〜D-4 + B2/B3/I-162 lessons + I-224 v3〜v10 framework gap candidates)
+   ↓
+═════ 案 β Phase 2: L1 Tier 0 priority ═════
+   ↓
+[次] PRD 3 = I-177 mutation propagation 本体 (Tier 0 silent semantic change、L1)
+   ↓
+═════ 案 β Phase 3: Class dispatch group → L1 silent decorator ═════
+   ↓
+[次] PRD 2.76 = I-A (Method static-ness IR field propagation、元 I-205 T11-b)
+   ↓
+[次] PRD 2.77 = I-B (Class TypeName context detection unification + Static field associated const emission、元 I-205 T11-d/f + I-214 統合)
+   ↓
+[次] PRD 2.8 = I-201-A (AutoAccessor 単体 Tier 1 化、decorator なし subset)
+   ↓
+[次] PRD 2.9 = I-202 (Object literal Prop::Method/Getter/Setter Tier 1 化)
+   ↓
+[次] PRD 7 = I-201-B (Decorator framework 完全変換、TC39 Stage 3、L1 silent semantic change)
+   ↓
+═════ 案 β Phase 4: Narrow refinements (post-L1 cleanup) ═════
+   ↓
+[次] PRD 4 = I-177-A (else_block_pattern Let-wrap + I-194 typeof if-block elision 拡張可)
+   ↓
+[次] PRD 5 = I-177-C (symmetric XOR early-return detection)
+   ↓
+[次] PRD 6 = I-048 (closure ownership 推論、T7-3 完全 GREEN-ify)
+   ↓
 Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 ```
 
-**PRD 凝集度原則 (2026-04-26 user 確定)**: 凝集度高 + 適切な粒度。1 PRD = 1 architectural concern。
+**PRD 凝集度原則**: 凝集度高 + 適切な粒度。1 PRD = 1 architectural concern。各 PRD の architectural concern + 着手順 rationale は下記「次の作業 table」+ TODO 参照。
 
-- **PRD 1.5 (I-177-E、完了)**: TypeResolver synthetic fork inheritance gap fix。`fork_dedup_state` を `union_dedup` 継承 + `types` 空 fork → 全 state clone 形式へ修正。
-- **PRD 2 (I-177-B、完了)**: `collect_expr_leaf_types` (`return_wrap.rs:419`) の query 順序を `narrowed_type → expr_type` に修正、Transformer 一般 path との整合性回復。canonical primitive `FileTypeResolution::resolve_var_type` / `resolve_expr_type` を追加し 3 site (`get_type_for_var` / `get_expr_type` / `collect_expr_leaf_types`) を統一。~75 LOC + 5 unit test。
-- **PRD 2.5 (I-177-F、完了)**: `resolve_arrow_expr` / `resolve_fn_expr` / `visit_class_decl` constructor / `visit_method_function` の 4 site の body 直接 stmt iterate を `visit_block_stmt` 経由に統一し `current_block_end` を全 fn body 形式で set (`visit_fn_decl` と完全 symmetric)。production change 4 行 + 4 unit test + 1 E2E。I-177-B の callable arrow form `#[ignore]` 解除完了。**`/check_job deep deep` audit (2026-04-26) で class method / constructor 漏れを発見 → 本 PRD scope に編入 (初版 PRD scope の Cross-axis 直交軸 audit 不足が判明、I-198 framework 改善 TODO に lesson reflect 済)。**
-- **PRD 2.7 (I-198 + I-199 + I-200 cohesive batch、完了 2026-04-27)**: framework Rule 改修 + structural enforcement の cohesive batch (Q4 + Q5 + **Q6 = Rule 4 改修** + **post-`/check_job` F1 = Q3 Rule 3 改修** = Implementation Revision 2 lesson の self-applied integration)。
-  - **Q4** (Rule 10 sub-rule (d) AST node enumerate completeness): `_` arm 全面禁止 + 既存 `UnsupportedSyntaxError` mechanism 統一 + `doc/grammar/ast-variants.md` single source of truth + audit-ast-variant-coverage.py CI 化
-  - **Q5** (Rule 10 sub-rule (e) Mandatory 化): 全 PRD Mandatory + matrix 不在の structural reason 明示 + machine-parseable format + Anti-pattern 明示禁止 list + `prd-template` skill hard-code + audit-prd-rule10-compliance.py CI 化 + merge gate
-  - **Q6** (Rule 4 sub-rule (f) doc-first dependency order): PRD 内 doc update task が code 改修 task の prerequisite (= single source of truth structural 維持) + audit-prd-rule10-compliance.py に Task List dependency chain auto verify 拡張
-  - TypeResolver coverage extension (StaticBlock visit + Prop::Method/Getter/Setter body resolve + AutoAccessor (b) Tier 2 error report 化で silent drop 排除) + `doc/grammar/ast-variants.md` Prop section 新規追加 (Grammar gap fix、Q6 doc-first compliance に従い T11 が T8/T9/T10 の prerequisite)
-  - 1 architectural concern = "framework Rule 改修 (Rule 10 + Rule 4) + 拡張による coverage gap detection 完成 + structural enforcement"。
-  - **Q3 (Prop::Assign) は本 PRD 内 NA cell + lock-in test で triple ideal 自動達成、別 PRD 不要**。
-  - **既存 codebase 全体の `_` arm refactor (I-203) と AutoAccessor 完全 Tier 1 化 (I-201-A) と decorator framework (I-201-B) と object literal Tier 1 化 (I-202) は (d) 構造分離 pattern で別 PRD 化**。
-- **PRD 2.76 (I-A、user 承認 2026-05-01)**: Method static-ness IR field propagation (元 I-205 T11 (11-b))。1 architectural concern = "MethodSignature.is_static field addition + Rule 9 (c-1) Field Addition Symmetric Audit"。`MethodSignature.is_static: bool` field 追加 (registry/mod.rs + ts_type_info/mod.rs) + 61 production construction site で symmetric propagate (I-205 T2 = `kind` field 追加と同 pattern) + `dispatch_static_member_*` 5 dispatch contexts (read / write / update / compound / logical) で `sigs.iter().filter(|s| s.is_static)` 適用、Mixed (static + instance) class context での instance method 誤 hit (`Foo.name` で instance getter `name` 誤 dispatch → `Foo::name()` associated fn 不在 compile error) を structural 解消。Spec stage matrix axis = `class shape (static-only / instance-only / mixed)` × `access kind (Read/Write/Update/Compound)` × `member kind (Getter/Setter/Method)`。Completion criteria 内に I-205 (11-c) Static defensive cells (Mixed class instance method 誤 hit cells) の matrix expansion + tsc oracle observation + per-cell E2E fixture lock-in を integrate。
-- **PRD 2.77 (I-B、user 承認 2026-05-01)**: Class TypeName context detection unification + Static field associated const emission integrate (元 I-205 T11 (11-d) + (11-f) + I-214 統合)。1 architectural concern = "Class TypeName receiver detection を TypeResolver type marker で unification + 全 Ident match sites を type marker query 経由に refactor + Static field IR-level emission integrate"。修正範囲: (1) TypeResolver layer = `RustType::ClassConstructor(name: String)` 新 variant + visit_ident で class TypeName + 非 shadow 検出 register、visit_paren / visit_ts_as / visit_ts_non_null で wrap unwrap & 同 register。(2) Transformer layer (codebase-wide refactor) = 全 Ident 直接 match sites (`member_dispatch::classify_member_receiver` Static gate / `calls.rs:213-225` Static method call dispatch / `resolve_member_access` Enum special case / その他 grep 必要) を type marker query に refactor、I-214 DRY violation + 3 latent gaps (interface filter / shadowing / inherited) 同時 fix。(3) IR layer = `Expr::AssociatedConst { ty: UserTypeRef, name: String }` 新 IR variant + Generator 1-to-1 emit (`ty :: name`)。(4) Read context dispatch = `ClassConstructor` + lookup miss (= field exist) → `AssociatedConst` emit (`Counter.DEFAULT` → `Counter::DEFAULT`)。(5) Write context dispatch = associated const は Rust 上 immutable のため Tier 2 honest error reclassify "write to static field" (即 mut static / OnceLock 等の strategy は別 PRD scope)。Spec stage matrix axis = `receiver shape (Ident / Paren / TsAs / TsNonNull / TsSatisfies)` × `class type (registered class / Enum / Interface / unregistered)` × `access pattern (Read field / Read method call / Write / Update / Compound)` × `field kind (static field / Getter / Setter / Method)`。Completion criteria 内に I-205 (11-c) Static defensive cells (Static field None case + receiver wrap variants) の matrix expansion + per-cell E2E fixture lock-in を integrate。
-- **PRD 2.8 (I-201-A、user 承認 2026-04-27)**: AutoAccessor 単体 Tier 1 化 (decorator なし subset、`accessor x: T = init` → `struct field + fn x() -> &T + fn set_x(&mut self, v: T)`、L3)。1 architectural concern = "AutoAccessor (decorator なし) class member emission completeness"。`doc/grammar/ast-variants.md` の AutoAccessor entry を Tier 2 → Tier 1 (decorator なし subset) に昇格。Decorator interaction 完全変換は PRD 7 (I-201-B) で別途達成 (1 PRD = 1 architectural concern 厳格適用)。本 PRD は新 PRD I-A (is_static field) + I-B (`AssociatedConst` + ClassConstructor type marker) を foundation として leverage。
-- **PRD 2.9 (I-202、user 承認 2026-04-27)**: Object literal `Prop::Method` / `Prop::Getter` / `Prop::Setter` Tier 1 化 (Transformer 完全 emission、L3)。post PRD 2.7 で Transformer convert_object_lit は Tier 2 honest error 状態、本 PRD で Tier 1 完全変換に拡張。1 architectural concern = "Object literal getter/setter/method emission completeness" (decorator なし、object literal context、I-201-A の class context と orthogonal)。
-- **PRD 3 (I-177 mutation propagation 本体、L1 Tier 0)**: F1/F3 narrow body 内 mutation の outer Option<T> propagation (Tier 0 silent semantic change)。matrix-driven。案 A (mutation-ref `match &mut x`) vs 案 B (writeback `x.take()`) を spec stage で empirical 確定。
-- **PRD 4 (I-177-A)**: `try_generate_narrowing_match` else_block_pattern bare match → Let-wrap 化、post-if narrow materialization。~20-30 LOC。**I-194 (typeof if-block elision) を scope 拡張候補として検討** (Phase 0 audit で発見の Transformer IR emission gap)。
-- **PRD 5 (I-177-C)**: `visit_if_stmt` (then XOR else) 拡張 + guards.rs symmetric direction handling。~10-15 LOC。
-- **PRD 6 (I-048)**: closure capture mode 推論 (move/FnMut/Fn)、T7-3 E0506 解消、closures/functions fixture unblock。要 spec stage 詳細化。
-- **PRD 7 (I-201-B、user 承認 2026-04-27、L1 silent semantic change)**: Decorator framework 完全変換 (TC39 Stage 3、AutoAccessor + class + method + property + parameter 全 application 共通)。**Audit (2026-04-27) で ts_to_rs は decorator 自体が完全未実装 = silent drop 状態と判明** (= Tier 1 silent semantic change = L1 Reliability Foundation)。1 architectural concern = "Decorator framework full coverage"。PRD 3 と両 L1 だが reachability 軸 (PRD 3 = narrow 機能を使う全 TS code 広域 / I-201-B = decorator 含む TS code 局所、Hono 使用状況要 audit) で PRD 3 先行が暫定 default。I-201-A (AutoAccessor 単体 emission strategy) を foundation として leverage。要 spec stage 詳細化 (decorator hook semantic = init/get/set/addInitializer の Rust 等価表現確立)。
-- **I-203 (Codebase-wide AST match exhaustiveness compliance、user 承認 2026-04-27、audit driven priority)**: PRD 2.7 で確定する Rule 10(d) 真の ideal (`_ => ` arm 全面禁止 + 共通 macro `unsupported_arm!()` + doc-code sync audit script + CI 化) の **既存 codebase 全体への application**。1 architectural concern = "Codebase-wide AST match exhaustiveness compliance"、(d) 構造分離 pattern で PRD 2.7 と独立。priority = audit 結果 driven (silent drop 含むなら L1、含まないなら L3)。実施: PRD 2.7 batch close 後の早期 audit、結果次第で PRD chain 内位置確定 (L1 = PRD 3 / I-201-B reachability 軸比較、L3 = PRD 7 後 deferred)。
+---
 
-### 着手順の導出原則
+## 次の作業 table (priority order)
 
-1. I-144 Dual verdict framework で `TS ✓ / Rust ✗` として分離された narrow-related compile error は I-144 context が fresh なうちに優先 (I-177-D / I-177)
-2. Phase A roadmap (Step 5 → Step 6 → Step 7) で compile_test skip 直接削減
-3. Phase B (RC-11 OBJECT_LITERAL_NO_TYPE 28件 = Hono 全 error の 45%) は Phase A 完了後
-4. L4 latent items (runtime 同一 / reachability なし) は notes 欄に退避
+| 優先度 | レベル | PRD | architectural concern (= 1 PRD = 1 concern) |
+|--------|-------|-----|---------------------------------------------|
+| **進行中** | L3 | **I-224 (B2 fn main mechanism)** T5-2〜T9 | top-level executable script の Rust emission で `fn main()` 自動生成 + Option β (top-await Tier 1 + ESM harness) cohesive batch |
+| 次優先 1 | L3 | **I-225 (B3)** | Class field の literal-only initializer (annotation 無) で type inference 完成 |
+| 次優先 2 | L3 | **I-162** | Constructor synthesis `Self::new()` for no-explicit-constructor classes |
+| 次優先 3 | L2 | **I-205 T14〜T16** | Class member access dispatch with getter/setter framework 完了 (e2e green-ify + naming refactor) |
+| 次優先 4 (post-I-205 close) | L4 | **I-D Framework rule integration cohesive batch** | task-ID 命名禁止 + Iteration v18 改善 4 件 + T7/T8 framework gap + T5 lessons + Iteration v9/v10 lessons + B2/B3/I-162 lessons (cohesive batch) |
+| L1 Tier 0 | L1 | **PRD 3 (I-177 mutation propagation)** | F1/F3 narrow body 内 mutation の outer Option<T> propagation (silent semantic change 解消) |
+| Class group | L3 | **PRD 2.76 (I-A) + 2.77 (I-B) + 2.8 (I-201-A) + 2.9 (I-202)** | Method static-ness IR field / Class TypeName context detection / AutoAccessor / Object literal getter/setter |
+| L1 silent | L1 | **PRD 7 (I-201-B)** | Decorator framework 完全変換 (TC39 Stage 3) |
+| Narrow refinements | L3 | **PRD 4-6 (I-177-A / I-177-C / I-048)** | typeof Let-wrap / symmetric XOR / closure ownership 推論 |
+| Phase A continuations | L3 | **I-162 → Step 5 → I-015 → I-158+I-159 → Step 6 → I-143 / Step 7 / Phase B** | compile_test skip 解消 chain |
 
-### 着手順 table
-
-| 優先度 | レベル | PRD | 内容 | 根拠 |
-|--------|-------|-----|------|------|
-| 0 (完了) | L4 | **PRD 1.5 + PRD 2 + PRD 2.5: I-177-E + I-177-B + I-177-F batch (synthetic fork + leaf type cohesion + arrow/fn-expr block_end)** | I-177-E: fork_dedup_state を全 state clone 化。I-177-B: canonical primitive を 3 site 統一 (DRY 完全解消)。I-177-F: resolve_arrow_expr / resolve_fn_expr の body traversal を visit_block_stmt 経由に統一、current_block_end を arrow / fn-expr 内でも set | 2026-04-26 完了。I-177-D + 本 batch で TypeResolver-IR cohesion + Synthetic registry cohesion + leaf type lookup cohesion + body traversal cohesion を確立 |
-| 0 (完了) | L3 | **PRD 2.7: I-198 + I-199 + I-200 cohesive batch (framework Rule 改修 + TypeResolver coverage extension + ast-variants.md Prop/PropOrSpread/Decorator section 追加 + audit scripts CI 化)** | 2026-04-27 完了。Implementation stage T1〜T15 全 task + formal `/check_job` 4-layer review + 9 課題本質 fix (F1〜F10)。Implementation Revision 1 (PropOrSpread Grammar gap) + Revision 2 (cell 15 Prop::Assign critical Spec gap) self-applied integration。Spec gap chain trajectory **5→3→0→1→0→1→0** completion |
-| **次着手 (進行中)** | **L2** | **PRD 2.75: I-205 残タスク T14-T16 — Class member access dispatch with getter/setter framework 完了** | T14 (E2E fixtures green-ify、T1-T10/T12/T13 dependency、I-162 prerequisite block 明示) → T15 (`/check_job` 4-layer review + 13-rule self-applied verify) → **T16 (Task-ID-based naming → semantic naming refactor + 実装分割再考、I-205 scope 内 cleanup last task、user 指示 2026-05-01 由来 + Option 3 split で別 PRD I-D 切り出し)** → I-205 close | T1-T10 完了 2026-05-01、T11 削除 2026-05-01 (新 PRD I-A/I-B へ migrate)、T12 完了 2026-05-01 (Iteration v19 = Class Method Getter body `.clone()` 自動挿入)、T13 完了 2026-05-01 (Iteration v20 = B6/B7 lock-in verify + INV-5 Option B audit + 5 NEW integration tests + 3 NEW boundary value tests、production 0 LOC change)。本来の architectural concern は T1-T10 で実質達成、T12-T15 は framework foundation 内 completeness verification、T16 は subsequent quality 改善 (= file/fn 命名 + 実装分割 ideal 化) |
-| **次優先 0a (post-I-205 close)** | **L4** | **新 PRD I-D: Framework rule integration cohesive batch (I-205 lesson source 全統合)** | (D-1) Task-ID-based 命名禁止 framework rule + audit-task-id-naming.py CI gate + skill 命名 guidance / (D-2) Iteration v18 framework 改善 4 件 = Rule 3 (3-2) Spec stage Mandatory enforcement + Spec への逆戻り 前倒し検出 framework rule 化 + Rule 5 (5-1) fixture content empirical + Builtin name conflict detection / (D-3) T7/T8 連続 framework 失敗 signal = Rule 10 axis "TypeResolver visit coverage of operand-context expressions" 正式 default axis 昇格 + audit script auto verify / (D-4) T5 Iteration v9 lessons = Rule 9 (c) 拡張 + INV-7 候補 (Pass 1 ↔ Pass 2 data preservation invariant) + Rule 9 (a) Tier 1+Tier 2 symmetric enumeration | user 承認 2026-05-01 + 拡張案 2026-05-01 Iteration v19 light review。1 PRD = 1 architectural concern = "framework rule level structural enforcement of I-205 lesson source candidates" cohesive batch、I-205 で蓄積された framework gap candidates を清算する form。L4 framework infra、I-205 close 後 deferred、T16 完了で codebase が semantic 命名統一済の状態で起票 ideal |
-| **次優先 1 (post-I-205)** | **L3** | **新 PRD 2.76: I-A — Method static-ness IR field propagation (元 I-205 T11 (11-b))** | `MethodSignature.is_static: bool` field 追加 + Rule 9 (c-1) Field Addition Symmetric Audit (61 site、I-205 T2 = `kind` field 追加と同 pattern) + `dispatch_static_member_*` 5 dispatch contexts で Mixed class context での instance method 誤 hit を structural 解消 | user 承認 2026-05-01 (元 I-205 T11 削除に伴う独立 PRD 起票決定、`note.after.md` archive 参照)。1 PRD = 1 architectural concern = "Method static-ness IR field propagation"、新 PRD I-B と sequential (PRD 2.76 → 2.77)。Spec stage で matrix axis = `class shape` × `access kind` × `member kind` 確定 |
-| **次優先 2 (post-PRD 2.76)** | **L3** | **新 PRD 2.77: I-B — Class TypeName context detection unification + Static field associated const emission integrate (元 I-205 T11 (11-d) + (11-f) + I-214 統合)** | TypeResolver `RustType::ClassConstructor(String)` 新 type marker + 全 Ident match sites unification (member_dispatch / calls.rs / resolve_member_access Enum case / その他 Ident match sites) + `Expr::AssociatedConst { ty: UserTypeRef, name: String }` 新 IR variant + Generator 1-to-1 emit (`ty :: name`)。I-214 DRY violation + 3 latent gaps (interface filter / shadowing / inherited) も同時 fix | user 承認 2026-05-01 (元 I-205 T11 (11-d) + (11-f) + I-214 を「Class TypeName receiver detection を TypeResolver type marker で unification」の 1 architectural concern として cohesive 統合)。codebase-wide structural fix、IR + TypeResolver layer evolution、I-205 framework foundation を leverage |
-| **次優先 3 (post-PRD 2.77)** | **L3** | **PRD 2.8: I-201-A — AutoAccessor 単体 Tier 1 化 (decorator なし subset)** | TS 5.0+ stable AutoAccessor 構文 (`accessor x: T = init`) の decorator なし subset を Rust に完全変換 (`struct field + fn x() -> &T + fn set_x(&mut self, v: T)`)。ast-variants.md AutoAccessor entry を Tier 2 → Tier 1 (decorator なし subset) 昇格。Decorator interaction は PRD 7 (I-201-B) で別途達成 | user 承認 2026-04-27 (PRD 2.7 (d) 構造分離方針 + audit 2026-04-27 で decorator framework 未実装が判明、I-201 を I-201-A/I-201-B に分割)。1 PRD = 1 architectural concern 厳格適用、新 PRD I-A (is_static field) + I-B (`AssociatedConst` + ClassConstructor type marker) を foundation として leverage |
-| **次優先 4 (post-PRD 2.8)** | **L3** | **PRD 2.9: I-202 — Object literal Prop::Method/Getter/Setter Tier 1 化** | post PRD 2.7 で Transformer convert_object_lit は Tier 2 honest error 状態、本 PRD で Tier 1 完全変換に拡張 (object literal の anonymous struct 表現 strategy 確立) | user 承認 2026-04-27 (Q2 (d) 構造分離方針)。class context (I-201-A) と orthogonal な architectural concern = "Object literal getter/setter/method emission completeness" |
-| **0a (Tier 0)** | **L1** | **PRD 3: I-177 mutation propagation 本体 (narrow emission v2、L1 silent semantic change)** | I-144 T6-3 inherited の shadow-mutation-propagation 欠陥を structural fix。F1/F3 narrow body 内 mutation の outer Option<T> propagation を案 A (mutation-ref `match &mut x`) vs 案 B (writeback `x.take()`) で確定 | I-161 T3 実装で latent defect が runtime 誤動作として顕在化、Tier 0 silent semantic change 該当。matrix-driven |
-| **0b (Tier 1)** | **L3** | **PRD 4: I-177-A (else_block_pattern Let-wrap 化)** | typeof/instanceof/OptChain × `then_exit + else_non_exit` × post-narrow primitive use の bare match → Let-wrap 化、INV-2 違反解消 (~20-30 LOC)。**I-194 (typeof if-block elision) を scope 拡張候補として検討** | I-171 T5 で発見、Plan η Step 4 |
-| **0c (Tier 1)** | **L3** | **PRD 5: I-177-C (symmetric XOR early-return detection)** | `visit_if_stmt` (then XOR else) 拡張 + guards.rs symmetric direction handling (~10-15 LOC) | Plan η Step 5、narrow framework 対称性完成 |
-| **0d (Tier 1)** | **L3** | **PRD 6: I-048 (closure ownership 推論)** | closure capture mode (move/FnMut/Fn) 推論。T7-3 E0506 解消、closures/functions fixture unblock。要 spec stage 詳細化 | Plan η Step 6、`closures` / `functions` fixture unskip、T7-3 完全 GREEN-ify |
-| **次優先 (Tier 1、post-PRD 6)** | **L1** | **PRD 7: I-201-B — Decorator framework 完全変換 (TC39 Stage 3、L1 silent semantic change)** | ts_to_rs では decorator 自体が完全未実装 = silent drop 状態 (audit 2026-04-27)。decorator semantic (init/get/set/addInitializer hook) の Rust 等価表現確立、AutoAccessor + class + method + property + parameter 全 application 共通 framework 構築 | user 承認 2026-04-27 (audit 結果 driven)。PRD 3 と両 L1 だが reachability 軸 (PRD 3 広域 / I-201-B 局所) で PRD 3 先行が暫定 default、Hono decorator 使用状況 audit で再評価可能。I-201-A foundation を leverage |
-| **audit driven (post-PRD 2.7)** | **L1 候補 / L3** | **I-203: Codebase-wide AST match exhaustiveness compliance (Rule 10(d) compliance、既存 `_` arm 全 audit + explicit enumerate fix)** | PRD 2.7 で確定する Rule 10(d) 真の ideal (`_` arm 全面禁止 + 共通 macro `unsupported_arm!()` + doc-code sync audit script) の既存 codebase 全体 application。silent drop 候補が含まれるかを audit で確定し priority reclassify | user 承認 2026-04-27 ((d) 構造分離 pattern)。PRD 2.7 batch close 後の早期 audit 実施、結果次第で PRD chain 内位置確定 (L1 = PRD 3 / I-201-B reachability 軸比較、L3 = PRD 7 後 deferred) |
-| 1 | L3 | **I-162** | class without explicit constructor → `Self::new()` 自動合成 | I-144 T2 instanceof narrow の Rust 側 E2E lock-in が本 defect で block。`class Dog {}` → `struct Dog {}` 止まりで `Dog::new()` 不在で E0599 |
-| 2 | L3 | **Phase A Step 5** (I-026 / I-029 / I-030) | 型 assertion / null as any / any-narrowing enum 変換 | `type-assertion`, `trait-coercion`, `any-type-narrowing` unskip (3 fixture 直接削減) |
-| 3 | L3 | **I-015** | Hono types.rs `Input['out']` indexed access 解決失敗 (E0405) | `src/ts_type_info/resolve/indexed_access.rs:271`。Hono types.rs で 1 件だが dir compile blocker |
-| 4 | L3 | **I-158 + I-159 batch** | Non-loop labeled stmt + 内部 emission 変数 user namespace hygiene | I-154 変数版 + I-153 labeled block 対応。I-158 が I-153 emission と interaction のため I-158 先行推奨 |
-| 5 | L3 | **Phase A Step 6** (I-028 / I-033 / I-034) | intersection 未使用型パラメータ (E0091) + charAt/repeat/toFixed method 変換 | `string-methods`, `intersection-empty-object`, `type-narrowing` unskip |
-| 6 | L3 | **I-143 meta-PRD** | `??` 演算子の問題空間完全マトリクス + 8 未解決セル (a〜h) | I-143-a〜h 未着手。I-143-b (`any ?? T`) は I-050 依存、他は独立 |
-| 7 | L3 | **I-142 Step 4 C-5 / C-6 + Phase A Step 7 (I-071)** | I-144 非吸収の small cleanup (C-7 は I-050 依存) + `instanceof-builtin` unskip 用 builtin 型 impl 生成 | C-5/C-6 は test quality 改善 (handoff doc)、I-071 は Phase A 最終 step (1 fixture unskip) |
-| 8 | L3 | **Phase B (RC-11)** (I-003 / I-004 / I-005 / I-006) | expected type 伝播の不完全性 (OBJECT_LITERAL_NO_TYPE 28件) | Hono 全 error の 45%、Phase A 完了後の最大インパクト category |
-
-**注**: 各 PRD で `prd-template` skill + `.claude/rules/problem-space-analysis.md` + `.claude/rules/spec-first-prd.md` + `.claude/rules/spec-stage-adversarial-checklist.md` (10-rule) + `.claude/rules/check-job-review-layers.md` (4-layer) を適用する。
+詳細 architectural concern + 着手順 rationale + completion criteria は各 PRD の TODO entry / backlog/ doc 参照。
 
 ### 次点 / L4 deferred (上記 table 外)
+- I-013 + I-014 batch (RC-5 abstract class 変換パス)、I-140 (TypeDef::Alias)、I-050 umbrella (Any coercion)、I-146 (`return undefined` on void fn)、I-074 / I-160 / I-165〜I-170 / I-168 / I-172 / I-177-G (= 各 L4 latent items、TODO 参照)
+- **I-395** = Class expression conversion (anonymous class lifting、I-201-A / I-201-B 系 cohesive batch 候補)
+- **I-396** = Module-level destructuring pattern proper conversion (I-016 silent drop family、5-axis matrix-driven PRD 候補)
+- **I-397** = e2e harness `should_auto_append_main_call` detection edge cases (low priority infra)
 
-- **I-013 + I-014 batch** (L3、RC-5 abstract class 変換パス欠陥) — class inheritance 系、抱え込み依存が強いため独立 PRD 着手時に整備
-- **I-140** (L3、TypeDef::Alias variant 追加) — `type MaybeStr = string \| undefined` alias 経由の Option 認識。I-134 / I-056 と batch 可能
-- **I-050 umbrella** (L3、Any coercion) — I-143-b + I-050-b + I-050-c が依存。structural 母体として設計維持
-- **I-146** (L3、`return undefined` on void fn) — `keyword-types` unskip の残条件
-- **I-074** (L4、`Item::StructInit` broken window) — pipeline-integrity 違反、PRD 化候補
-- **I-160** (L4、Walker defense-in-depth Expr-embedded Stmt::Break) — 現時点 reachability なし
-- **I-165 / I-166 / I-167 / I-170** (L4 narrow precision umbrella) — I-144 後の latent imprecision、runtime 動作同一、Rust 精度のみ向上
-- **I-168** (L4、`NarrowEvent::Reset` event 未消費) — Hono で顕在化なし pre-existing imprecision
-- **I-172** (L4、bench 非決定性) — test / bench infra、別 PRD
-- **I-177-G** (L4、`apply_substitutions_to_items` round-trip mutation safety、defense-in-depth) — 現状 reachability なし、I-177-E fork inheritance fix で顕在化候補に。I-177-E + I-177-B batch close 由来 (2026-04-26)
-- **I-198 + I-199 + I-200 batch** — **PRD 2.7 として進行中 (Spec stage、user 承認 2026-04-27)**。本 deferred section から進行中作業へ昇格。
-- **I-201-A (AutoAccessor 単体 Tier 1 化、decorator なし subset)** — **PRD 2.8 として next-priority 1 (L3、user 承認 2026-04-27)**。本 deferred section から next-priority へ昇格。
-- **I-202 (Object literal Prop::Method/Getter/Setter Tier 1 化)** — **PRD 2.9 として next-priority 2 (L3、user 承認 2026-04-27)**。本 deferred section から next-priority へ昇格。
-- **I-201-B (Decorator framework 完全変換、TC39 Stage 3)** — **PRD 7 として post-PRD 6 next-priority (L1 silent semantic change、user 承認 2026-04-27)**。audit 2026-04-27 で decorator framework 未実装 = silent drop 状態が判明、L1 priority。本 deferred section から PRD chain へ昇格。
-- **I-203 (Codebase-wide AST match exhaustiveness compliance — 既存 `_` arm 全 audit + explicit enumerate fix)** — **PRD 2.7 完了後の早期 audit 実施 (audit driven priority、L1 候補 = silent drop 含む / L3 = silent drop 不在)、user 承認 2026-04-27**。Rule 10(d) 真の ideal の codebase-wide application、(d) 構造分離 pattern で本 entry に分離。audit 結果次第で PRD chain 内挿入位置確定 (L1 確定なら PRD 3 / I-201-B と reachability 軸比較、L3 確定なら PRD 7 後 deferred)。
-- **I-206 〜 I-211 batch (PRD I-205 Spec stage Discovery 由来 6 件、user 確定 2026-04-28)** — PRD I-205 Spec stage で発見、本 PRD I-205 では Tier 2 honest error reclassify 化、Tier 1 化は別 architectural concern として split 確定:
-  - **I-206** (L3、Class inheritance dispatch — B7 inherited accessor の Tier 1 化) — I-013 + I-014 (abstract class 変換パス) と cohesive batch 候補
-  - **I-207** (L3、Destructure pattern dispatch — class instance / getter destructure) — I-202 (Object literal) と cohesive 候補
-  - **I-208** (L3、Class Method body T-aware comprehensive `.clone()` insertion C2 pattern) — I-048 closure ownership 推論完了後 next 候補 (cell 80 nested closure body は I-048 と integrate 必須)
-  - **I-209** (L3、Function reference semantic — class regular method `obj.x` no-paren reference の Tier 1 化) — I-048 完了後 closure wrap strategy で leverage
-  - **I-210** (L3、typeof of class instance member の Tier 1 化 — runtime string return semantic) — Hono bench reachability audit で priority 確定
-  - **I-211** (L3、`in` operator on class instance の Tier 1 化 — property reflection semantic) — Hono reachability 低想定、I-206 完了後 inherited property 対応で integrate
-- **I-212 (Framework convergence metric framework PRD)** — L4 framework infra、PRD I-205 iteration v7 F-deep-deep-8 由来 (`spec-stage-adversarial-checklist.md` v1.3 → v1.6 連続 revision の収束判定 mechanism 不在)、user 確定 2026-04-28。framework rule 改修頻度 audit (e.g., 6 revision in 1 month threshold 超過) で L3 promote 余地。
-- **I-214 (`convert_call_expr` static method call dispatch DRY violation + 3 latent gaps)** — **新 PRD I-B (PRD 2.77) に内包 (2026-05-01 user 確定)**、L3 (Hono reachability audit 後 L1 promote 余地)、PRD I-205 T6 Iteration v10 third-review (`/check_problem`) 由来、user 確定 2026-04-28。`src/transformer/expressions/calls.rs:213-225` (I-378 T9 由来 Static method call dispatch) と T6 で導入された `classify_member_receiver` shared helper の DRY violation + calls.rs 側の 3 latent gaps (a) is_interface filter なし / (b) `get_expr_type` None gate なし (= shadowing 不防止) / (c) `lookup_method_sigs_in_inheritance_chain` 不使用 (= inherited static method call で `Sub::method` emit、compile error)。修正方針: 新 PRD I-B (Class TypeName context detection unification) 内で TypeResolver `RustType::ClassConstructor(String)` 新 type marker 経由に refactor、calls.rs:213-225 を含む全 Ident match sites を type marker query に統一 = I-214 DRY + 3 latent gaps を architectural cohesion 高で解消。元 T11 (11-b/c/d/f) cohesive batch 案は新 PRD I-A / I-B 分離 (= 凝集度高、新 PRD I-A = `is_static` field propagation = 1 architectural concern、新 PRD I-B = TypeName context detection unification = 1 architectural concern) で取り扱う。
-- **I-215 (`arr.length = v` write Tier 2 silent gap — TS truncate semantic vs Rust E0609)** — L4 (Localized、Vec/Array specific syntax のみ、Hono reachability 低想定)、PRD I-205 T6 Iteration v10 third-review 由来、user 確定 2026-04-28。Read 側 `arr.length` (T5 既存 `arr.len() as f64`) と Write 側 `arr.length = v` (現状 `Expr::Assign { FieldAccess, value }` で E0609 emit) の対応度 asymmetric。修正方針: オプション A (Tier 1 truncate/clear/resize emission) / オプション B (Tier 2 honest error reclassify)、Hono reachability audit で priority 確定。
-- **I-216 (`!(b.x = 5)` bang on B4 setter assignment Tier 2 behavioral change の structural enforcement)** — L4 (Localized、`!(assign-expr)` syntax は anti-pattern で Hono reachability 極低想定)、PRD I-205 T6 Iteration v10 third-review 由来、user 確定 2026-04-28。T6 で B4 plain assign が `Expr::MethodCall { set_x, [value] }` に変わった結果、`convert_bang_assign` (binary.rs:509) destructure pattern が fail、Layer 4 fall-through で `!MethodCall` (= `!void`) compile error。Pre/post T6 両方とも Tier 2、silent semantic change なし。修正方針: オプション A (`convert_bang_assign` を MethodCall setter dispatch に拡張) / オプション B (Tier 2 honest error reclassify)、reachability ゼロなら scope 外 + 永続 ignore 候補。
-- **I-219 (TypeResolver `resolve_member_type` returns Unknown for class member getter access — Spec gap)** — L3 (architectural concern: TypeResolver type tracking completeness for class member access via getter)、PRD I-205 T8 second-review F-SX-1 で予測、T9 Iteration v14 deep-deep review で再確認、user 確定 2026-04-30。`src/pipeline/type_resolver/expressions/member.rs::resolve_member_type` は registry の `lookup_field_type` 経由で fields のみ check、class methods (Getter/Setter) は skip → `c.value` の expr_types[member_span] は Unknown。Side effect: ??=/&&=/||= × class member の RHS expected_type propagation が動作せず、TypeResolver が rhs を inner T で coerce できない (= silent type widening risk for unusual rhs types)。T9 では sigs から Getter return type を直接抽出する self-contained 回避を採用 (TypeResolver 拡張は scope 外)。**修正方針**: `resolve_member_type` で fields lookup miss 後 methods registry を check、Getter sig の return_type を type-of-member-access として返却。Read context (`resolve_member_expr`) + assign context (`resolve_assign_expr` is_propagating_op block) 両 path で benefit。**Caveat**: 非対称 setter (= `set value(v: T)` accepts T but `get value(): Option<T>` returns Option<T>) で Read context type tracking と Write context expected propagation が divergent、要 separate treatment (= `resolve_member_type_for_write` 別 helper 候補)。Subsequent PRD で取り扱う、本 T9 では sigs-based extraction で代替済。
-- **I-220 (Setter accept type asymmetry vs getter return type — pre-existing pattern T6/T7/T8/T9 共通 latent gap)** — L4 (Localized、TS asymmetric setter syntax は corner case、Hono reachability 低想定)、PRD I-205 T9 Iteration v14 deep-deep review 由来、user 確定 2026-04-30。`set value(v: T)` accepts T while `get value(): Option<T>` returns Option<T> の asymmetric class definition で、T9 `wrap_setter_value` は lhs_type = getter return type を見て Some-wrap、setter accept type と一致しない → Some(rhs) 渡しが setter expecting T に対し type mismatch (Rust E0308 catch)。T6 `dispatch_member_write` も raw value passing で同類 issue。**修正方針**: setter sig (= MethodKind::Setter sig with params[0].ty) を抽出する extract_setter_accept_type helper を追加、wrap_setter_value で getter return type ではなく setter accept type を見る形に refactor。T6/T7/T8/T9 全 dispatch helpers で同 fix を symmetric apply。reachability audit で priority 確定。
-- **I-221 (Top-level Module-level statement path uses expression-context dispatch — pre-existing infrastructure gap)** — L4 (infra、E2E fixture suboptimal Rust output、functional Tier 1)、PRD I-205 T8/T9 E2E fixture probe 由来、user 確定 2026-04-30。Top-level `obj.x ??= 42;` / `obj.x += v;` 等の statement が convert_stmt path ではなく convert_expr path 経由で処理される模様 (= TailExpr 付き Block emit、Stmt::Expr で discard)。Functional Tier 1 だが Rust output に余分な TailExpr 残存。Pre-existing (T8 cells 21/27 でも同 pattern 観察)。**修正方針**: top-level Module statement processing path で convert_stmt 経由を確認、必要なら expression-context fallback を統一。**T14 scope 候補** (E2E fixtures green-ify と cohesive)。
+---
 
-### Batching 検討
+## 直近の完了作業 (audit trail summary)
 
-未着手 batch 候補 (上記 table 内 PRD 着手時に再検討):
+実装詳細は git log、設計判断 archive は [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) に集約。
 
-- **I-158 + I-159**: namespace hygiene 系 (I-154 と同系)。I-158 先行推奨 (I-153 emission との interaction)
-- **I-143 + I-050-b + I-050-c**: `??` / Any / Synthetic union coercion が共通 `resolve_expr` / `propagate_expected` 基盤を持つ
-- **I-140 + I-134 + I-056**: type alias 関連、`TypeDef::Alias` variant 新設で DRY 可能
-- **I-013 + I-014**: abstract class 変換パス (強依存、`generate_child_of_abstract()` 拡張)
-- **I-165 / I-166 / I-167 / I-170**: narrow precision umbrella (`VarId` binding identity + CFG analysis の基盤を共有)
+| PRD / Phase | 日付 | 後続への影響 |
+|-------------|------|-------------|
+| **I-224 T5-1 + /check_job (3 iter) + /check_problem (2 round) cumulative structural fixes** (NonTrigger split / convert_expr passthroughs / per-declarator routing / classify_decl_var_path 削除 / TsAs/TsSatisfies/TsTypeAssertion expected_type propagation / destructuring Tier 2 honest reject / `prd-completion.md` Tier-transition wording 拡張 / TODO I-395-397 起票 / PRD Iteration v10 entry) | 2026-05-08 | i-224 e2e harness 40 fixtures wiring (14 GREEN + 27 ignored)、I-205 cell-09 unblock、INV-1 fill-in、cell-12/24 silent-drop Tier 1 fix、Hono bench 107/72 (Tier-transition Improvement compliance)。詳細 = PRD doc Iteration v9/v10 |
+| **I-224 T1〜T4** (`__ts_main` collision validator / IR enums + helper / fn main synthesis + rename + substitute + Axis B/E probes / transform_module refactor + pub fn init 廃止 + namespace_lint extraction) | 2026-05-06〜07 | INV-2/3/4/5/6 invariants test fill-in、Spec への逆戻り Iteration v8 (T2 完了時 I-228 sub-entries 4 件)、Hono Tier-transition Preservation。詳細 = PRD doc Iteration v8 + git log |
+| **I-205 T13** (B6/B7 corner cells Tier 2 reclassify lock-in + INV-5 Option B audit + 5 NEW integration tests) | 2026-05-01 | INV-5 visibility consistency (Option B、production 0 LOC change)、cargo lib 3358 |
+| **I-205 T12** (Class Method Getter body C1 `.clone()` 自動挿入、Iteration v18 + v19) | 2026-05-01 | Decision Table C 完全 cover、cell 78 NA reclassify、cell 74 fixture rename、T16 + 別 PRD I-D 切り出し |
+| **I-205 T10** (Internal `this.x` dispatch、E2 context、Iteration v16 + v17 deep-deep review) | 2026-05-01 | INV-2 (External/Internal dispatch path symmetry) 構造的達成、`body_requires_mut_self_borrow` recursive walker、TODO I-219〜I-223 起票 |
+| **I-205 T9** (Logical compound `??=` `&&=` `\|\|=` Member target setter dispatch、Iteration v14 + v15) | 2026-04-30 | `ReceiverCalls` enum refactor、TODO I-219〜I-221 起票 |
+| **I-205 T8** (Compound assign Member target setter dispatch + INV-3 1-evaluate compliance + DRY refactor + member_dispatch.rs 6-file split、Iteration v12) | 2026-04-29 | TODO I-217 / I-218 起票 |
+| **環境整備** (4 file 構造的分割 + DRY refactor、行数超過解消) | 2026-04-29 | 4 → 27 file split、TODO I-393 / I-394 起票 |
+| **PRD 2.7 (I-198 + I-199 + I-200 batch)** framework Rule 改修 + TypeResolver coverage extension + ast-variants.md Prop section 追加 + audit scripts CI 化 | 2026-04-27 | framework Rule 3/4/10/11/12 拡張、Implementation Revision 1 (PropOrSpread Grammar gap) + Revision 2 (cell 15 Prop::Assign Spec gap) self-applied integration |
+| **I-184** (CI fresh-clone defect: stale gitignored template files post pool refactor) | 2026-04-27 | `.gitignore` asymmetric handling + Cargo.lock tracked、PRD `Background` に歴史的経緯記録の lesson |
+| **I-177-E + I-177-B + I-177-F batch** (Plan η Step 1.5 + Step 2 + Step 2.5) | 2026-04-26 | `synthetic fork inheritance` fix + `FileTypeResolution` canonical primitive + arrow/fn-expr `visit_block_stmt` 統一 |
+| **I-177-D** (TypeResolver `narrowed_type` suppression scope refactor、案 C、Plan η Step 1) | 2026-04-26 | trigger-kind-based dispatch refactor、Plan η framework 初実戦投入 |
+| **I-178 + I-183 + Rule corpus optimization batch** | 2026-04-25 | matrix-driven PRD framework 整備 (10-rule checklist + 4-layer review + 5-category defect classification) |
+| **I-161 + I-171 batch** (`&&=`/`\|\|=` desugar + Bang truthy emission) | 2026-04-22〜04-25 | I-177 umbrella 起票 (Tier 0 L1) |
 
 ---
 
 ## 次の PRD 着手前の参照ポイント
 
-新規 PRD 着手時は `prd-template` skill + 関連 rule (`problem-space-analysis.md` / `spec-first-prd.md` / `spec-stage-adversarial-checklist.md` / `check-job-review-layers.md`) を適用する。
-
-特定 PRD 用の handoff doc:
-
-- **Phase A Step 5 / 6 / 7**: 下記「開発ロードマップ」section + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)
-- **I-144 設計判断 (archive)**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) (CFG narrowing analyzer / NarrowTypeContext trait / EmissionHint dispatch / coerce_default table / closure reassign Policy A)
-- **I-142 Step 4 残余 (C-5〜C-9)**: [`doc/handoff/I-142-step4-followup.md`](doc/handoff/I-142-step4-followup.md)
-- **I-158 / I-159**: TODO 参照
-- **I-143 meta-PRD (`??` 完全仕様)**: TODO I-143 本体 + a〜h 未解決セル
-
----
-
-## 設計判断の引継ぎ
-
-後続 PRD 向けの設計判断アーカイブは [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) に集約。新規 PRD 着手時は関連 section を事前レビュー、実装が設計判断と乖離していたら該当 section を最新化 (削除は禁止 — 過去の設計判断は reference として保持)。
+- **I-224 (現 PRD)**: PRD doc + Iteration v8/v9/v10 entries (Spec への逆戻り audit trail)
+- **I-225 / I-162 (次 PRD)**: TODO 内 entry + 案 β chain
+- **I-205 T14-T16 (post case-β-1A)**: `backlog/I-205-getter-setter-dispatch-framework.md` の T11 削除 + 新 PRD I-A/I-B migration 注記
+- **PRD I-D (Framework rule integration cohesive batch)**: I-205 close 後 deferred、I-224 v3〜v10 framework gap candidates 含む
+- **PRD 3 (I-177 本体)**: matrix-driven、案 A (mutation-ref) vs 案 B (writeback) を spec stage で empirical 確定
+- **Phase A Step 5/6/7**: 「開発ロードマップ」section + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)
+- **設計判断 archive**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) (削除禁止 — 過去判断は reference として保持、実装乖離時は最新化)
 
 ---
 
@@ -541,92 +210,50 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 ### Phase A: コンパイルテスト skip 解消
 
-compile_test の skip リストを全解消し、変換品質のゲートを確立する。skip 解消後は新たな skip 追加を原則禁止とし、回帰検出を自動化する。
+compile_test の skip リストを全解消し、変換品質のゲートを確立する。
 
 **完了済 (Step 0〜4 + I-153/I-154 + pre-Step-3)**: 詳細は git log + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) 参照。
 
-**永続 skip (設計制約 4 件)**:
+**永続 skip (設計制約 4 件)**: `callable-interface-generic-arity-mismatch` / `indexed-access-type` / `vec-method-expected-type` / `external-type-struct`。
 
-- `callable-interface-generic-arity-mismatch` — 意図的 error-case (INV-4)
-- `indexed-access-type` — マルチファイル用 (`test_multi_file_fixtures_compile` でカバー)
-- `vec-method-expected-type` — no-builtins mode 限定の設計制約
-- `external-type-struct` — no-builtins mode 限定の設計制約 (with-builtins 側は Step 1 で解消済)
+**effective residual (10 fixture)**: trait-coercion, any-type-narrowing, type-narrowing, instanceof-builtin, intersection-empty-object, closures, functions, keyword-types, string-methods, type-assertion。
 
-**effective residual (10 fixture)**: trait-coercion, any-type-narrowing, type-narrowing, instanceof-builtin, intersection-empty-object, closures, functions, keyword-types, string-methods, type-assertion
-
-#### 次の Step
-
+**次の Step**:
 ```
-Step 5 (type conversion + null)       I-026 + I-029 + I-030
-  ↓ I-158 / I-159 (hygiene follow-ups、並行可能)
-Step 6 (string + intersection)        I-028 + I-033 + I-034
-  ↓
-Step 7 (builtin impl)                 I-071
+Step 5 (型変換 + null)              I-026 + I-029 + I-030
+Step 6 (string + intersection)     I-028 + I-033 + I-034
+Step 7 (builtin impl)               I-071
 ```
 
-#### Step 5-7 詳細 (未着手)
+| Step | 修正対象 | 主要 issue | unskip target |
+|------|---------|-----------|---------------|
+| 5 | 型 assertion / null/any 変換 / any-narrowing enum | I-026 / I-029 / I-030 | type-assertion, trait-coercion, any-type-narrowing |
+| 6 | string method / intersection mapped type | I-028 / I-033 / I-034 | string-methods, intersection-empty-object, type-narrowing |
+| 7 | builtin 型 impl 生成 (Date, RegExp 等) | I-071 | instanceof-builtin |
 
-**Step 5: 型変換 + null セマンティクス** — Tier 2、型変換パイプライン
+**残 fixture × 解消依存** (Step 経由不能): closures (I-048)、keyword-types (I-146)、functions (I-319)。
 
-| イシュー | 修正箇所 | 内容 |
-|----------|---------|------|
-| I-026 | 型 assertion 変換 | `as unknown as T` の中間 `unknown` を消去して直接キャスト |
-| I-029 | null/any 変換 | `null as any` → `None` が `Box<dyn Trait>` 文脈で型不一致 |
-| I-030 | `build_any_enum_variants()` (`any_narrowing.rs:85`) | any-narrowing enum の値代入で型強制 |
+### Phase B: RC-11 expected type 伝播 (OBJECT_LITERAL_NO_TYPE)
 
-- unskip: `type-assertion`, `trait-coercion`, `any-type-narrowing`
-
-**Step 6: string メソッド + intersection** — Tier 2、独立した小修正群
-
-| イシュー | 修正箇所 | 内容 |
-|----------|---------|------|
-| I-033 | `methods.rs` | `charAt` → `chars().nth()`, `repeat` → `.repeat()` マッピング追加 |
-| I-034 | `methods.rs` | `toFixed(n)` → `format!("{:.N}", v)` 変換 |
-| I-028 | `intersections.rs:132-145` | mapped type の非 identity 値型で型パラメータ T が消失 (E0091) |
-
-- unskip: `string-methods`, `intersection-empty-object`, `type-narrowing`
-
-**Step 7: ビルトイン型 impl 生成** — Tier 2、大規模
-
-| イシュー | 修正箇所 | 内容 |
-|----------|---------|------|
-| I-071 | `external_struct_generator/` + generator | ビルトイン型（Date, RegExp 等）の impl ブロック生成 |
-
-- unskip: `instanceof-builtin`
-
-#### 残 fixture × 解消依存
-
-| fixture | 解消 Step / 依存 | メモ |
-|---------|-----------------|------|
-| closures | I-048 (所有権推論) | I-020 Box wrap 解消済、残: move/FnMut |
-| keyword-types | I-146 | I-025 implicit None 解消済、残: `return undefined` on void |
-| functions | I-319 (Vec index move) | I-020 Box wrap 解消済 |
-| type-assertion / trait-coercion / any-type-narrowing | Step 5 | — |
-| string-methods / intersection-empty-object | Step 6 | — |
-| type-narrowing | Step 6 | Step 1 (I-007) 依存済 |
-| instanceof-builtin | Step 7 | — |
-| vec-method-expected-type | — | 設計制約 (永続 skip) |
-| external-type-struct (no-builtins) | — | 設計制約 (永続 skip) |
-
-### Phase B: RC-11 expected type 伝播 (OBJECT_LITERAL_NO_TYPE 28件)
-
-Phase A 完了後、Hono ベンチマーク最大カテゴリ (全エラーの 45%) に着手。I-004 (imported 関数), I-005 (匿名構造体), I-006 (.map callback) を対象とする。
+Phase A 完了後、Hono ベンチマーク最大カテゴリ (全エラーの 45%) に着手。I-004 (imported 関数), I-005 (匿名構造体), I-006 (.map callback)。
 
 ---
 
 ## リファレンス
 
-- 最上位原則: [`.claude/rules/ideal-implementation-primacy.md`](.claude/rules/ideal-implementation-primacy.md)
-- 優先度ルール: [`.claude/rules/todo-prioritization.md`](.claude/rules/todo-prioritization.md)
-- TODO 記載標準: [`.claude/rules/todo-entry-standards.md`](.claude/rules/todo-entry-standards.md)
-- PRD workflow: [`.claude/rules/spec-first-prd.md`](.claude/rules/spec-first-prd.md) + [`.claude/rules/problem-space-analysis.md`](.claude/rules/problem-space-analysis.md)
-- Spec stage 完了 verification: [`.claude/rules/spec-stage-adversarial-checklist.md`](.claude/rules/spec-stage-adversarial-checklist.md) (10-rule)
-- Implementation stage 完了 verification: [`.claude/rules/check-job-review-layers.md`](.claude/rules/check-job-review-layers.md) (4-layer)
-- 設計整合性: [`.claude/rules/design-integrity.md`](.claude/rules/design-integrity.md) + [`.claude/rules/prd-design-review.md`](.claude/rules/prd-design-review.md)
+- **最上位原則**: [`.claude/rules/ideal-implementation-primacy.md`](.claude/rules/ideal-implementation-primacy.md)
+- **優先度ルール**: [`.claude/rules/todo-prioritization.md`](.claude/rules/todo-prioritization.md)
+- **TODO 記載標準**: [`.claude/rules/todo-entry-standards.md`](.claude/rules/todo-entry-standards.md)
+- **PRD workflow**: [`.claude/rules/spec-first-prd.md`](.claude/rules/spec-first-prd.md) + [`.claude/rules/problem-space-analysis.md`](.claude/rules/problem-space-analysis.md)
+- **Spec stage 完了 verification**: [`.claude/rules/spec-stage-adversarial-checklist.md`](.claude/rules/spec-stage-adversarial-checklist.md) (12-rule)
+- **Implementation stage 完了 verification**: [`.claude/rules/check-job-review-layers.md`](.claude/rules/check-job-review-layers.md) (4-layer)
+- **設計整合性**: [`.claude/rules/design-integrity.md`](.claude/rules/design-integrity.md) + [`.claude/rules/prd-design-review.md`](.claude/rules/prd-design-review.md)
+- **完了基準**: [`.claude/rules/prd-completion.md`](.claude/rules/prd-completion.md) (Tier-transition compliance wording 含む)
 - **設計判断 archive**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)
-- PRD handoff: `doc/handoff/*.md`
-- Grammar reference: `doc/grammar/{ast-variants,rust-type-variants,emission-contexts}.md`
-- TODO 全体: [`TODO`](TODO)
-- ベンチマーク履歴: `bench-history.jsonl`
-- エラー分析: `scripts/inspect-errors.py`
-- 実装調査 report: `report/*.md`
+- **PRD handoff**: `doc/handoff/*.md`
+- **Grammar reference**: `doc/grammar/{ast-variants,rust-type-variants,emission-contexts}.md`
+- **TODO 全体**: [`TODO`](TODO)
+- **進行中 PRD doc**: [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md)
+- **ベンチマーク履歴**: `bench-history.jsonl`
+- **エラー分析**: `scripts/inspect-errors.py`
+- **実装調査 report**: `report/*.md`

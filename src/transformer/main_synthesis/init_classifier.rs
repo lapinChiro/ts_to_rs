@@ -1,6 +1,6 @@
 //! Decl::Var initializer classification — [`InitKind`] / [`DeclVarPath`] enums
 //! and the [`classify_init_kind`] / [`expr_init_kind`] / [`has_side_effect_init`]
-//! / [`classify_decl_var_path`] helpers.
+//! / [`classify_per_decl_path`] / [`all_decls_captured`] helpers.
 //!
 //! Extracted from `mod.rs` to keep the file under the 1000-line file-line check
 //! threshold while preserving Rule 11 (d-1) self-applied compliance — every
@@ -8,14 +8,29 @@
 //!
 //! ## Partition map
 //!
-//! [`InitKind`] partitions Decl::Var initializers into 4 disjoint classes:
+//! [`InitKind`] partitions Decl::Var initializers into 5 disjoint classes:
 //!
 //! - **`Lit`** — Rust `const`-compatible literals (`Num` / `Bool` / `Str` /
 //!   `Null` / `BigInt`, plus `-Lit::Num` / `-Lit::BigInt`).
-//! - **`NonTrigger`** — function / class definitions (`Arrow` / `Fn` / `Class`),
-//!   aggregate literals (`Object` / `Array`), and type-only wrappers
-//!   (`TsAs` / `TsConstAssertion` / etc., recursively classified via
-//!   [`expr_init_kind`]). No observable module-load side effect.
+//! - **`NonTriggerDef`** — function / class definitions (`Arrow` / `Fn` /
+//!   `Class`). Bodies execute only on invocation / instantiation; module-load
+//!   has no observable side effect. Emitted by `convert_var_decl_module_level`
+//!   as `Item::Fn` (Arrow / FnExpr) or top-level class shapes — never
+//!   captured into the synthesized fn main body.
+//! - **`NonTriggerData`** — aggregate literals (`Object` / `Array`) and
+//!   type-only wrappers around them. Module-load has no observable side
+//!   effect (no calls, no I/O), but the emission path differs from
+//!   `NonTriggerDef`: in **executable mode** the data declaration is
+//!   captured into the synthesized fn main body as a `let` binding (=
+//!   preserves the TS module-level binding visible at runtime, structurally
+//!   symmetric with the side-effect Var Decl path); in library mode it
+//!   stays in `LibraryMode` (= existing `convert_var_decl_module_level`
+//!   path which currently silently drops Object / Array — pre-existing
+//!   I-016 owner). The split from `NonTriggerDef` exists because
+//!   data literals in executable scripts (e.g., `const v: T = { ... };`
+//!   followed by `console.log(v.x);`) MUST be captured to preserve runtime
+//!   semantics; treating them as `NonTriggerDef` would silently drop the
+//!   binding and produce E0425 "cannot find value" downstream.
 //! - **`AwaitInit`** — `Expr::Await` (or any expression containing `await`
 //!   reachable without crossing a function boundary).
 //! - **`SideEffect`** — anything else (`Call` / `Ident` / `New` / `Member` /
@@ -24,12 +39,17 @@
 //! [`DeclVarPath`] determines the emission path:
 //!
 //! - **`LibraryMode`** — existing `convert_var_decl_module_level` path
-//!   (`Item::Const` for Lit, `Item::Fn` for Arrow / Fn, silent drop for
-//!   Object / Array / Class / type-wrapped — pre-existing I-016 owner).
+//!   (`Item::Const` for Lit, `Item::Fn` for Arrow / Fn, top-level class for
+//!   Class definition; silent drop for Object / Array literals in library
+//!   mode — pre-existing I-016 owner).
 //! - **`ToplevelConst`** — same `Item::Const` emission as `LibraryMode` but
 //!   in executable-mode contexts.
 //! - **`FnMainBodyCapture`** — captured into the synthesized fn main body as
-//!   [`super::MainStmt::Let`] / [`super::MainStmt::LetAwait`].
+//!   [`super::MainStmt::Let`] / [`super::MainStmt::LetAwait`]. Reached by
+//!   side-effect / await inits, AND by `NonTriggerData` (Object / Array
+//!   aggregate literals) in executable mode (= the I-224 T5-1 Spec-stage
+//!   逆戻り extension that resolves the cell-12 / cell-24 silent-drop Tier 1
+//!   semantic loss).
 
 use swc_ecma_ast::{Expr, Lit, UnaryOp, VarDecl};
 
@@ -37,54 +57,63 @@ use super::await_walker::expr_contains_await_recursive;
 
 /// Decl::Var initializer expression classification.
 ///
-/// Drives [`classify_decl_var_path`] (Library / Toplevel-const / Fn-main-body-capture)
+/// Drives [`classify_per_decl_path`] (Library / Toplevel-const / Fn-main-body-capture)
 /// and contributes to [`super::is_executable_mode`] (the A3 partition trigger).
 ///
 /// **Multi-declarator note**: when a `VarDecl` contains multiple declarators
 /// (`const a = 1, b = 2;`), this classifier walks every declarator and applies
-/// the ANY-rule precedence (`AwaitInit > SideEffect > NonTrigger > Lit`) per
-/// the I-228-d Spec stage 逆戻り 2026-05-07 fix (extended with `NonTrigger`
-/// by T3-4 e2e regression fix).
+/// the ANY-rule precedence
+/// (`AwaitInit > SideEffect > NonTriggerData > NonTriggerDef > Lit`) per the
+/// I-228-d Spec stage 逆戻り 2026-05-07 fix (extended with `NonTrigger`
+/// by T3-4 e2e regression fix; further split into `NonTriggerDef` /
+/// `NonTriggerData` by T5-1 Spec stage 逆戻り 2026-05-08 to resolve the
+/// cell-12 / cell-24 Object literal silent-drop Tier 1 semantic loss).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InitKind {
     /// `Expr::Lit(Lit::Num/Bool/Str/Null/BigInt)` or `-Lit::Num/-Lit::BigInt` —
     /// Rust `const` compatible literals.
     Lit,
-    /// Initializer expressions that introduce **no observable runtime side
-    /// effect at TypeScript module-load time**. Includes:
+    /// **Function / closure / class definitions** — `Expr::Arrow`, `Expr::Fn`,
+    /// `Expr::Class` (and their type-only wrappers via [`expr_init_kind`]
+    /// recursive walk). Bodies execute only when invoked / instantiated, not
+    /// at declaration time → no observable runtime side effect at TypeScript
+    /// module-load time → does not trigger executable mode.
     ///
-    /// - **Function/closure/class definitions**: `Expr::Arrow`, `Expr::Fn`,
-    ///   `Expr::Class`. The bodies execute only when invoked / instantiated,
-    ///   not at declaration time.
-    /// - **Type-only wrappers**: `Expr::TsAs`, `Expr::TsConstAssertion`,
-    ///   `Expr::TsTypeAssertion`, `Expr::TsNonNull`, `Expr::TsInstantiation`,
-    ///   `Expr::TsSatisfies`, `Expr::Paren` — these are AST decorators with
-    ///   no runtime semantics; the inner expression's classification is
-    ///   inherited (recursive walk via [`expr_init_kind`]).
-    /// - **Aggregate literals**: `Expr::Object`, `Expr::Array` — currently
-    ///   silently dropped by `convert_var_decl_module_level`'s `_ =>
-    ///   continue` fall-through (= I-016 owner; pre-existing gap), so they
-    ///   contribute no runtime semantics regardless of whether classified
-    ///   as `NonTrigger` or `SideEffect`. Treating them as `NonTrigger`
-    ///   prevents the rename gate from firing falsely on library-mode
-    ///   modules whose only non-Lit Decl::Var items are pure data
-    ///   declarations like `const Phase = { Stringify: 1, ... } as const;`.
+    /// Emitted by `convert_var_decl_module_level` as standalone `Item::Fn`
+    /// (Arrow / FnExpr) or top-level class shapes — never captured into the
+    /// synthesized fn main body. Routes to `LibraryMode` regardless of
+    /// `is_executable_mode`.
     ///
-    /// These shapes are NOT executable-mode triggers and are emitted by
-    /// `convert_var_decl_module_level` as standalone `Item::Fn` items
-    /// (Arrow / Fn) or silently dropped (Object / Array / Class — pre-existing).
-    /// They are never captured into the synthesized fn main body.
+    /// Split out from the original `NonTrigger` variant by I-224 T5-1 Spec
+    /// stage 逆戻り 2026-05-08 to keep the function/class-definition emission
+    /// path (= top-level `Item::Fn`) distinct from the data-literal capture
+    /// path (= `NonTriggerData` → `FnMainBodyCapture` in executable mode).
+    NonTriggerDef,
+    /// **Aggregate data literals** — `Expr::Object`, `Expr::Array` (and their
+    /// type-only wrappers via [`expr_init_kind`] recursive walk). No
+    /// observable runtime side effect at module-load time (no calls, no I/O
+    /// in literal construction itself), so does not trigger executable mode.
     ///
-    /// This variant resolves a Spec gap discovered during T3-4 e2e
-    /// verification: classifying every non-Lit init as `SideEffect` falsely
-    /// triggered `is_executable_mode=true` (= rename gate fired) for
-    /// library-mode modules whose only non-Lit Decl::Var items were
-    /// declarations / type-only wrappers / function definitions. The runtime
-    /// semantics are `Lit`-equivalent (no module-load side effect → no exec
-    /// trigger), but the Rust emission path differs (`Item::Fn` instead of
-    /// `Item::Const`, or silent drop), so a separate variant is structurally
-    /// honest.
-    NonTrigger,
+    /// **Emission path differs by mode**:
+    /// - **Library mode** (`is_executable_mode=false`): routes to
+    ///   `LibraryMode` (= existing `convert_var_decl_module_level` path
+    ///   which currently silently drops Object / Array — pre-existing I-016
+    ///   owner; resolved by a follow-up PRD scope, not I-224 T5-1).
+    /// - **Executable mode** (`is_executable_mode=true`): routes to
+    ///   `FnMainBodyCapture` so the data declaration becomes a `let` binding
+    ///   inside the synthesized fn main body. This preserves the TS
+    ///   module-level binding visible to subsequent top-level statements
+    ///   (= cell-12 / cell-24 Tier 1 silent-drop fix: previously `const v: T
+    ///   = { ... };` was dropped, leaving `console.log(v.x)` referencing an
+    ///   undefined `v` and producing E0425 downstream).
+    ///
+    /// **Why split from `NonTriggerDef`**: the function/class-definition
+    /// path (`Item::Fn` etc.) MUST stay at top level (Rust functions are not
+    /// expressible as fn-main-body `let` bindings), while data literals MUST
+    /// be captured into fn main when other top-level execution exists. The
+    /// two paths share the "no module-load side effect" property but
+    /// require structurally different Rust emission.
+    NonTriggerData,
     /// `Expr::Await(_)` — top-level await initializer (Axis C1).
     AwaitInit,
     /// Any other expression (Call / Ident / New / Member / Bin / etc.) —
@@ -104,8 +133,11 @@ pub(crate) enum DeclVarPath {
     /// is hoisted to top-level). INV-1 source-order preservation holds because Lit
     /// init has no observable runtime side effect.
     ToplevelConst,
-    /// Executable mode + side-effect / await init: captured into [`super::MainStmt::Let`] /
-    /// [`super::MainStmt::LetAwait`] and emitted inside the synthesized fn main body.
+    /// Executable mode + side-effect / await / data-literal init: captured into
+    /// [`super::MainStmt::Let`] / [`super::MainStmt::LetAwait`] and emitted
+    /// inside the synthesized fn main body. Reached by `InitKind::SideEffect`,
+    /// `InitKind::AwaitInit`, **and** `InitKind::NonTriggerData` (= I-224 T5-1
+    /// Spec stage 逆戻り 2026-05-08 cell-12 / cell-24 Tier 1 silent-drop fix).
     FnMainBodyCapture,
 }
 
@@ -119,7 +151,7 @@ pub(crate) enum DeclVarPath {
 /// constant expressible form (Rust `const` 適合)" but the bullet enumeration
 /// includes `Lit::Regex`, which is **NOT** Rust-const-compatible
 /// (`regex::Regex::new("...")` is a runtime call, not a `const fn`). Following
-/// the prefix's design intent (the load-bearing semantic — `classify_decl_var_path`
+/// the prefix's design intent (the load-bearing semantic — `classify_per_decl_path`
 /// routes `InitKind::Lit` to `DeclVarPath::ToplevelConst` = `Item::Const` emit,
 /// which fails to compile for Regex), this implementation matches **only the
 /// Rust-const-compatible Lit variants** (`Num` / `Bool` / `Str` / `Null` /
@@ -140,7 +172,7 @@ pub(crate) enum DeclVarPath {
 /// Panics if `var.decls` is empty or the first declarator has no init expression.
 /// Both shapes are caller-precondition violations: ambient `declare const x: T;`
 /// and uninitialized `let x;` are filtered upstream by `has_side_effect_init` /
-/// `classify_decl_var_path` defensive guards. The `unreachable!` macro records
+/// `classify_per_decl_path` defensive guards. The `unreachable!` macro records
 /// the precondition explicitly so any future bypass-path caller surfaces as a
 /// loud panic instead of a silent misclassification.
 pub(crate) fn classify_init_kind(var: &VarDecl) -> InitKind {
@@ -148,13 +180,14 @@ pub(crate) fn classify_init_kind(var: &VarDecl) -> InitKind {
         unreachable!(
             "VarDecl must have at least 1 declarator (TS parser invariant); callers \
              must guard against empty-decls Var via has_side_effect_init / \
-             classify_decl_var_path before calling this predicate"
+             classify_per_decl_path before calling this predicate"
         );
     };
     let mut has_init_in_any_declarator = false;
     let mut has_await = false;
     let mut has_side_effect = false;
-    let mut has_non_trigger = false;
+    let mut has_non_trigger_data = false;
+    let mut has_non_trigger_def = false;
     for decl in &var.decls {
         let Some(init) = decl.init.as_deref() else {
             // Mid-list no-init declarator (e.g., `let a = 1, b;`): TS allows for
@@ -186,7 +219,8 @@ pub(crate) fn classify_init_kind(var: &VarDecl) -> InitKind {
         }
         match expr_init_kind(init) {
             InitKind::Lit => {}
-            InitKind::NonTrigger => has_non_trigger = true,
+            InitKind::NonTriggerDef => has_non_trigger_def = true,
+            InitKind::NonTriggerData => has_non_trigger_data = true,
             InitKind::SideEffect => has_side_effect = true,
             // AwaitInit is unreachable in practice — the
             // `expr_contains_await_recursive` short-circuit above sets
@@ -200,34 +234,50 @@ pub(crate) fn classify_init_kind(var: &VarDecl) -> InitKind {
     }
     // Precondition violation guard: VarDecl with ALL declarators having no init
     // (= declare-marked Var or empty-init multi-declarator) must be filtered by
-    // upstream defensive guards (`has_side_effect_init` / `classify_decl_var_path`)
+    // upstream defensive guards (`has_side_effect_init` / `classify_per_decl_path`)
     // before reaching this predicate. Reaching here with no initialized declarator
     // indicates a caller-side bug; loud panic surfaces it immediately rather than
     // silently misclassifying.
     if !has_init_in_any_declarator {
         unreachable!(
             "TS Decl::Var requires init in at least one declarator (callers must guard \
-             against all-no-init Var via has_side_effect_init / classify_decl_var_path \
+             against all-no-init Var via has_side_effect_init / classify_per_decl_path \
              defensive guards before calling classify_init_kind)"
         );
     }
-    // Precedence: AwaitInit > SideEffect > NonTrigger > Lit (= I-228-d ANY-rule
-    // per PRD spec revision 2026-05-07, extended with NonTrigger partition by
-    // T3-4). Multi-declarator with mixed init shapes (e.g.,
+    // Precedence: AwaitInit > SideEffect > NonTriggerData > NonTriggerDef >
+    // Lit (= I-228-d ANY-rule per PRD spec revision 2026-05-07, extended with
+    // NonTrigger partition by T3-4, further split into NonTriggerDef /
+    // NonTriggerData by I-224 T5-1 Spec stage 逆戻り 2026-05-08 to resolve
+    // the cell-12 / cell-24 silent-drop Tier 1 semantic loss).
+    //
+    // Multi-declarator with mixed init shapes (e.g.,
     // `const a = 1, b = compute();`) classifies based on the union of all
     // declarators' shapes: ANY AwaitInit → AwaitInit, ANY SideEffect →
-    // SideEffect, ANY NonTrigger → NonTrigger, all Lit → Lit. ToplevelConst
-    // routing requires unanimous Lit; FnMainBodyCapture captures the entire
-    // VarDecl into fn main body when ANY declarator is SideEffect or AwaitInit.
-    // NonTrigger stays in `LibraryMode` regardless of executable_mode (= the
-    // NonTrigger declarator's emission path is independent of the synthesized
-    // fn main body) — see `classify_decl_var_path` for the routing.
+    // SideEffect, ANY NonTriggerData → NonTriggerData, ANY NonTriggerDef →
+    // NonTriggerDef, all Lit → Lit. The NonTriggerData over NonTriggerDef
+    // precedence is structurally honest: a mixed VarDecl (`const a = () => 1,
+    // b = { x: 1 };`) carries a runtime-visible binding (the data) that must
+    // be captured in executable mode; the function-definition declarator's
+    // `Item::Fn` emission path can be retained alongside via the existing
+    // `convert_var_decl_module_level` routing (multi-declarator emission is
+    // already split per-declarator in that path; see `capture_var_decl_into_main_stmts`
+    // for the symmetric per-declarator capture in the FnMainBodyCapture branch).
+    //
+    // ToplevelConst routing requires unanimous Lit; FnMainBodyCapture captures
+    // the entire VarDecl into fn main body when ANY declarator is SideEffect /
+    // AwaitInit / NonTriggerData (in executable mode). NonTriggerDef stays in
+    // `LibraryMode` regardless of executable_mode (= the function/class-def
+    // declarator's emission path is independent of the synthesized fn main
+    // body) — see `classify_per_decl_path` for the full routing table.
     if has_await {
         InitKind::AwaitInit
     } else if has_side_effect {
         InitKind::SideEffect
-    } else if has_non_trigger {
-        InitKind::NonTrigger
+    } else if has_non_trigger_data {
+        InitKind::NonTriggerData
+    } else if has_non_trigger_def {
+        InitKind::NonTriggerDef
     } else {
         InitKind::Lit
     }
@@ -262,17 +312,31 @@ fn expr_init_kind(expr: &Expr) -> InitKind {
             InitKind::Lit
         }
 
-        // === NonTrigger: function / class definitions, aggregate literals ===
-        // Function definitions: bodies execute only on invocation.
-        Expr::Arrow(_) | Expr::Fn(_) | Expr::Class(_) => InitKind::NonTrigger,
-        // Aggregate literals: currently silently dropped by
-        // `convert_var_decl_module_level` (I-016 owner). No runtime
-        // semantics are emitted regardless of whether classified as
-        // NonTrigger or SideEffect; classifying as NonTrigger prevents the
-        // rename gate from firing falsely on modules whose only non-Lit
-        // Decl::Var items are pure data declarations like `const Phase = {
-        // ... } as const;`.
-        Expr::Object(_) | Expr::Array(_) => InitKind::NonTrigger,
+        // === NonTriggerDef: function / class definitions ===
+        // Bodies execute only on invocation / instantiation. Emitted by
+        // `convert_var_decl_module_level` as standalone `Item::Fn` /
+        // top-level class shapes; never captured into fn main body.
+        Expr::Arrow(_) | Expr::Fn(_) | Expr::Class(_) => InitKind::NonTriggerDef,
+        // === NonTriggerData: aggregate literals ===
+        // Object / Array literal construction has no observable module-load
+        // side effect (no calls, no I/O). In **library mode** these flow
+        // through `convert_var_decl_module_level`'s `_ => continue`
+        // fall-through and are silently dropped (= pre-existing I-016 owner;
+        // resolved by a follow-up PRD scope, not I-224 T5-1). In
+        // **executable mode** (`is_executable_mode=true`) they route to
+        // `FnMainBodyCapture` per `classify_per_decl_path` so the data
+        // declaration becomes a `let` binding inside the synthesized fn
+        // main body — this resolves the cell-12 / cell-24 silent-drop Tier 1
+        // semantic loss (= the structural extension introduced by I-224 T5-1
+        // Spec stage 逆戻り 2026-05-08).
+        //
+        // Despite the executable-mode capture, `has_side_effect_init` still
+        // returns false for `NonTriggerData` (Object / Array do NOT trigger
+        // executable mode by themselves), so a pure data module like
+        // `const Phase = { Stringify: 1, ... } as const;` stays in library
+        // mode. The capture only fires when other top-level execution
+        // (Stmt::Expr or SideEffect Var) has already triggered exec mode.
+        Expr::Object(_) | Expr::Array(_) => InitKind::NonTriggerData,
 
         // === Type-only wrappers: recurse on inner ===
         Expr::Paren(p) => expr_init_kind(&p.expr),
@@ -369,44 +433,126 @@ pub(crate) fn has_side_effect_init(var: &VarDecl) -> bool {
     )
 }
 
-/// Classifies a Decl::Var into a [`DeclVarPath`] given the module-level
-/// `is_executable_mode` value.
+// **Removed by `/check_job deep deep` 2026-05-08 structural fix**:
+// `classify_per_decl_path` (= the legacy VarDecl-level aggregating
+// classifier with ANY-rule precedence) was deleted entirely. Production
+// callers were migrated to [`classify_per_decl_path`] by the prior
+// `/check_job deep` iteration; remaining test usages were migrated to
+// either [`classify_per_decl_path`] or to direct [`classify_init_kind`]
+// partition assertions. The dual-classifier maintenance burden is removed
+// and the codebase now has a single canonical routing helper per
+// `ideal-implementation-primacy.md` (= no test-only retention of code
+// production no longer requires).
+
+/// Classifies a single [`VarDeclarator`] into a [`DeclVarPath`] given the
+/// module-level `is_executable_mode` flag and the parent VarDecl's `declare`
+/// flag. Decides the routing path **independently per declarator**, enabling
+/// mixed Def+Data multi-declarator VarDecls (e.g., `const f = () => 1, x = {
+/// a: 1 };`) to route Arrow → `LibraryMode` (= top-level `Item::Fn`) AND
+/// Object → `FnMainBodyCapture` (= `MainStmt::Let` inside fn main body)
+/// simultaneously.
 ///
-/// See [`DeclVarPath`] for the path semantics; the table here records the full
-/// `(is_executable_mode, init_kind)` Cartesian product:
+/// See [`DeclVarPath`] for the path semantics; the per-declarator decision
+/// table is the same `(is_executable_mode, InitKind)` Cartesian product the
+/// removed `classify_per_decl_path` documented:
 ///
-/// | is_executable_mode | InitKind::Lit | InitKind::NonTrigger | InitKind::SideEffect | InitKind::AwaitInit |
-/// |---|---|---|---|---|
-/// | `false` (library) | LibraryMode | LibraryMode | LibraryMode | LibraryMode (AST-impossible per `swc_parser_top_level_await_test`) |
-/// | `true` (executable) | ToplevelConst | LibraryMode (= `Item::Fn` / silent drop via `convert_var_decl_module_level`) | FnMainBodyCapture | FnMainBodyCapture |
+/// | is_executable_mode | Lit           | NonTriggerDef | NonTriggerData    | SideEffect        | AwaitInit                    |
+/// |--------------------|---------------|---------------|-------------------|-------------------|------------------------------|
+/// | `false` (library)  | LibraryMode   | LibraryMode   | LibraryMode       | LibraryMode       | LibraryMode (AST-impossible) |
+/// | `true` (executable)| ToplevelConst | LibraryMode   | FnMainBodyCapture | FnMainBodyCapture | FnMainBodyCapture            |
 ///
-/// **`NonTrigger` rationale**: Arrow / FnExpr initializers emit `Item::Fn` at
-/// the top level via `convert_var_decl_module_level::convert_arrow_var_decl`
-/// (or the FnExpr → synthetic FnDecl path added by T3-2). Object / Array /
-/// Class literal initializers and type-only wrappers (`as const`, etc.) are
-/// either silently dropped by the existing path's `_ => continue` fallback
-/// (pre-existing I-016 owner) or routed unchanged. They are NOT captured
-/// into the synthesized fn main body — their declaration semantics are
-/// independent of executable mode, so they always route to `LibraryMode`
-/// regardless of `is_executable_mode`.
-pub(crate) fn classify_decl_var_path(var: &VarDecl, is_executable_mode: bool) -> DeclVarPath {
-    // Defensive: ambient / no-init Var has no init expression to classify and
-    // emits via the existing library-mode path (no fn main capture). This
-    // mirrors the guard in [`has_side_effect_init`] so callers can pass any
-    // `&VarDecl` without precondition checks.
-    if var.declare || var.decls.first().is_none_or(|d| d.init.is_none()) {
+/// AST-impossible note: `(false, AwaitInit)` cannot occur because top-level
+/// `await` shifts the module into executable mode by the
+/// `has_side_effect_init` predicate that drives `is_executable_mode`. This is
+/// structurally locked in by `tests/swc_parser_top_level_await_test.rs`.
+///
+/// **`NonTriggerDef` rationale**: Arrow / FnExpr initializers emit `Item::Fn`
+/// at the top level via `convert_var_decl_module_level::convert_arrow_var_decl`
+/// (or the FnExpr → synthetic FnDecl path added by T3-2). Class expression
+/// initializers similarly emit top-level class shapes. These cannot be
+/// expressed as fn-main-body `let` bindings, so they always route to
+/// `LibraryMode` regardless of `is_executable_mode`.
+///
+/// **`NonTriggerData` rationale (I-224 T5-1 Spec stage 逆戻り 2026-05-08)**:
+/// Object / Array literal initializers and type-only wrappers around them
+/// carry runtime-visible bindings that subsequent top-level statements may
+/// reference (e.g., `const v: T = { ... }; console.log(v.x);`). In library
+/// mode they remain in `LibraryMode` (= currently silent-dropped by the
+/// existing `convert_var_decl_module_level` `_ => continue` fall-through;
+/// pre-existing I-016 owner, resolved by a follow-up PRD scope). In
+/// executable mode they route to `FnMainBodyCapture` so the binding becomes
+/// a `let` inside the synthesized fn main body, preserving the runtime
+/// visibility that the user's downstream `Stmt::Expr` references depend on.
+/// This resolves the cell-12 / cell-24 silent-drop Tier 1 semantic loss.
+///
+/// **Lesson source**: `/check_job deep` review iteration v2 2026-05-08 found
+/// that an earlier VarDecl-level routing (`classify_per_decl_path`) forced
+/// mixed Def+Data into a single path (NonTriggerData precedence over
+/// NonTriggerDef → whole VarDecl routes to `FnMainBodyCapture` → Arrow
+/// becomes Rust closure literal `let f = || 1.0;` inside fn main, losing the
+/// top-level `fn f() -> f64 { 1.0 }` emission path). The per-declarator
+/// routing achieves the architecturally cleanest separation: each
+/// declarator's emission path is decided by its own `InitKind`, regardless
+/// of sibling declarators in the same VarDecl.
+///
+/// **Reachability note**: Hono codebase has 0 instances of mixed Def+Data
+/// multi-declarator VarDecl (verified by `grep -rE` 2026-05-08), and the
+/// I-224 matrix doesn't enumerate this pattern as a separate cell. The fix
+/// is architecturally honest rather than reachability-driven; per
+/// `ideal-implementation-primacy.md` the structural correctness wins over
+/// reachability rationalization.
+pub(crate) fn classify_per_decl_path(
+    decl: &swc_ecma_ast::VarDeclarator,
+    is_executable_mode: bool,
+    parent_var_declare: bool,
+) -> DeclVarPath {
+    if parent_var_declare {
         return DeclVarPath::LibraryMode;
     }
-    let init_kind = classify_init_kind(var);
-    match (is_executable_mode, init_kind) {
-        (false, _) => DeclVarPath::LibraryMode,
-        (true, InitKind::Lit) => DeclVarPath::ToplevelConst,
-        // NonTrigger: emit via existing convert_var_decl_module_level path
-        // (= `Item::Fn` for Arrow/Fn, silent drop for Object/Array/Class /
-        // type-wrapped — pre-existing I-016 owner). No fn main capture.
-        (true, InitKind::NonTrigger) => DeclVarPath::LibraryMode,
-        (true, InitKind::SideEffect) | (true, InitKind::AwaitInit) => {
-            DeclVarPath::FnMainBodyCapture
-        }
+    let Some(init) = decl.init.as_deref() else {
+        return DeclVarPath::LibraryMode;
+    };
+    if !is_executable_mode {
+        return DeclVarPath::LibraryMode;
     }
+    // Per-declarator init kind: `expr_contains_await_recursive` short-circuit
+    // mirrors the VarDecl-level `classify_init_kind` precedence (AwaitInit
+    // wins over expr_init_kind output when await is present anywhere in the
+    // init's recursive walk).
+    let kind = if expr_contains_await_recursive(init) {
+        InitKind::AwaitInit
+    } else {
+        expr_init_kind(init)
+    };
+    match kind {
+        InitKind::Lit => DeclVarPath::ToplevelConst,
+        InitKind::NonTriggerDef => DeclVarPath::LibraryMode,
+        InitKind::NonTriggerData => DeclVarPath::FnMainBodyCapture,
+        InitKind::SideEffect | InitKind::AwaitInit => DeclVarPath::FnMainBodyCapture,
+    }
+}
+
+/// Returns `true` iff **every** declarator in `var` is bound for
+/// [`DeclVarPath::FnMainBodyCapture`] (= captured into the synthesized fn
+/// main body). Used by `try_capture_module_item_into_main_stmts` to decide
+/// whether `transform_module_item` should also process the VarDecl (=
+/// `false` return) for LibraryMode / ToplevelConst declarators that the
+/// existing `convert_var_decl_module_level` per-init dispatch path emits.
+///
+/// **T5-1 deep review structural fix 2026-05-08**: per-declarator routing
+/// signal that enables mixed Def+Data multi-declarator VarDecls to route
+/// Arrow → top-level `Item::Fn` AND Object → fn-main-body `let` binding
+/// simultaneously. See [`classify_per_decl_path`] for the lesson source.
+pub(crate) fn all_decls_captured(var: &VarDecl, is_executable_mode_flag: bool) -> bool {
+    if var.declare {
+        // declare-marked: all decls are LibraryMode (no init runtime
+        // semantics), `transform_module_item` handles ambient emission.
+        return false;
+    }
+    var.decls.iter().all(|d| {
+        matches!(
+            classify_per_decl_path(d, is_executable_mode_flag, var.declare),
+            DeclVarPath::FnMainBodyCapture
+        )
+    })
 }

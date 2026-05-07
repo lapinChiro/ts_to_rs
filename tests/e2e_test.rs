@@ -133,9 +133,14 @@ impl E2eRunnerInstance {
             })
             .to_string_lossy();
         let exec_path = exec_dir.join(format!("{stem}_exec.ts"));
+        let suffix = if should_auto_append_main_call(ts_source) {
+            "\nmain();\n"
+        } else {
+            ""
+        };
         TempFile::new(
             exec_path.display().to_string(),
-            &format!("{ts_source}\nmain();\n"),
+            &format!("{ts_source}{suffix}"),
         )
     }
 
@@ -144,9 +149,14 @@ impl E2eRunnerInstance {
         copy_ts_fixture_files(source_dir, &exec_dir)
             .unwrap_or_else(|e| panic!("failed to copy TS fixture files: {e}"));
         let exec_path = exec_dir.join("main_exec.ts");
+        let suffix = if should_auto_append_main_call(main_ts) {
+            "\nmain();\n"
+        } else {
+            ""
+        };
         TempFile::new(
             exec_path.display().to_string(),
-            &format!("{main_ts}\nmain();\n"),
+            &format!("{main_ts}{suffix}"),
         )
     }
 
@@ -161,6 +171,123 @@ impl E2eRunnerInstance {
             .unwrap_or_else(|e| panic!("failed to create TS exec dir {}: {e}", exec_dir.display()));
         exec_dir
     }
+}
+
+/// Decides whether to auto-append `\nmain();\n` to the TS source for tsx
+/// execution.
+///
+/// The legacy auto-append convention (recorded in
+/// `backlog/I-224-top-level-fn-main-mechanism.md` cell # 3) added `main();`
+/// unconditionally so fixtures defining `function main(): void { ... }`
+/// without a call site would still execute the body — paralleling the Rust
+/// side where `fn main` is the binary entry point implicitly invoked by
+/// `cargo run`.
+///
+/// I-224 T5-1 (2026-05-08) introduced fixtures where the convention breaks:
+/// - **Cells without `function main` definition** (e.g., A1+B0
+///   `console.log("hello world");`): auto-appending `main();` causes
+///   `ReferenceError: main is not defined` in tsx.
+/// - **Cells with explicit `main();` call site** (e.g., cell-31 multi-call
+///   boundary value, cell-22 with `main();` at end): auto-appending would
+///   double-call and produce extra stdout lines.
+///
+/// Detection rules (in order):
+/// 1. **Already calls main**: source contains a top-of-line `main(...)` call.
+///    Skip the append (avoid double-invocation).
+/// 2. **Has main definition**: source contains `function main(`,
+///    `async function main(`, `const main = `, `let main:`, etc. at the top
+///    of a line. Append `main();` (preserve auto-append convention).
+/// 3. **Neither**: skip the append (no main exists; auto-append would error).
+///
+/// **Existing fixture compatibility**: all `tests/e2e/scripts/*.ts` fixtures
+/// (excluding `i-224/`) define `function main` without calling it, matching
+/// rule #2 → still auto-append → no behavioral change. The detection only
+/// changes behavior for fixtures matching rule #1 or #3, both of which are
+/// new in `i-224/`.
+///
+/// **Comment skipping**: lines starting with `//` are skipped to avoid
+/// false-positive matches on documented examples (e.g., `// function main(...)
+/// is preserved`).
+fn should_auto_append_main_call(ts_source: &str) -> bool {
+    if has_top_level_main_call(ts_source) {
+        return false;
+    }
+    has_main_definition(ts_source)
+}
+
+fn has_top_level_main_call(ts_source: &str) -> bool {
+    for line in ts_source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") || trimmed.is_empty() {
+            continue;
+        }
+        // Top-of-line `main(` call site. Word-boundary by virtue of
+        // `trim_start()` putting `main` at the very start (no preceding
+        // identifier chars). Avoids matching `__ts_main()`, `mainHelper()`,
+        // member access `obj.main()`, etc.
+        if trimmed.starts_with("main(") {
+            return true;
+        }
+        // Also detect `await main(`, `void main(`, etc. which are valid
+        // top-level call patterns. Conservative match: require the leading
+        // keyword followed by space + `main(`.
+        for prefix in ["await main(", "void main("] {
+            if trimmed.starts_with(prefix) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn has_main_definition(ts_source: &str) -> bool {
+    for line in ts_source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") || trimmed.is_empty() {
+            continue;
+        }
+        // `function main(`, `async function main(`, `function main<`,
+        // `function main:` (rare TS shape but possible), and the `export`
+        // counterparts.
+        for prefix in [
+            "function main(",
+            "function main:",
+            "function main<",
+            "function main ",
+            "async function main(",
+            "async function main:",
+            "async function main<",
+            "async function main ",
+            "export function main(",
+            "export function main:",
+            "export async function main(",
+            "export async function main:",
+            "export default function main(",
+            "export default async function main(",
+        ] {
+            if trimmed.starts_with(prefix) {
+                return true;
+            }
+        }
+        // `const|let|var main = ...`, `const|let|var main: T = ...`.
+        for prefix in [
+            "const main = ",
+            "const main: ",
+            "let main = ",
+            "let main: ",
+            "var main = ",
+            "var main: ",
+            "export const main = ",
+            "export const main: ",
+            "export let main = ",
+            "export let main: ",
+        ] {
+            if trimmed.starts_with(prefix) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn copy_ts_fixture_files(source_dir: &Path, destination_dir: &Path) -> std::io::Result<()> {
@@ -437,6 +564,87 @@ fn assert_lines_match(
             "{stream} mismatch for '{name}':\n{diff}\nTS {stream}:\n{ts_output}\nRust {stream}:\n{rust_output}\nGenerated Rust:\n{rs_source}"
         );
     }
+}
+
+// ===== should_auto_append_main_call detection lock-in =====
+
+#[test]
+fn auto_append_main_call_function_def_no_call_appends() {
+    // Legacy convention: `function main` def + no call → auto-append.
+    let src = "function main(): void { console.log('x'); }\n";
+    assert!(should_auto_append_main_call(src));
+}
+
+#[test]
+fn auto_append_main_call_async_function_def_no_call_appends() {
+    let src = "async function main(): Promise<void> { console.log('x'); }\n";
+    assert!(should_auto_append_main_call(src));
+}
+
+#[test]
+fn auto_append_main_call_const_arrow_def_no_call_appends() {
+    // B1b form: `const main = () => { ... };` — same legacy convention.
+    let src = "const main = (): void => { console.log('x'); };\n";
+    assert!(should_auto_append_main_call(src));
+}
+
+#[test]
+fn auto_append_main_call_explicit_call_skips_append() {
+    // I-224 cell-31 multi-call boundary value: skip auto-append to avoid
+    // tripling the call count.
+    let src = "function main(): void { console.log('x'); }\nmain();\nmain();\n";
+    assert!(!should_auto_append_main_call(src));
+}
+
+#[test]
+fn auto_append_main_call_no_main_def_skips_append() {
+    // I-224 cell-09 (A1+B0): top-level Stmt::Expr only, no `main` definition.
+    // Auto-appending would cause `ReferenceError: main is not defined` in
+    // tsx.
+    let src = "console.log('hello world');\n";
+    assert!(!should_auto_append_main_call(src));
+}
+
+#[test]
+fn auto_append_main_call_interface_main_only_skips_append() {
+    // I-224 cell-12 (A1+B3): `interface main { ... };` is type-only — not a
+    // function definition. Auto-append is unsafe.
+    let src = "interface main { value: number; }\nconst v: main = { value: 42 };\nconsole.log(v.value);\n";
+    assert!(!should_auto_append_main_call(src));
+}
+
+#[test]
+fn auto_append_main_call_ts_main_collision_def_skips_append() {
+    // I-224 cell-13 (A1+B4): user defines `function __ts_main` (collision
+    // candidate), no `function main`. Auto-append on `__ts_main` would
+    // ReferenceError on `main`.
+    let src =
+        "function __ts_main(): void { console.log('x'); }\nconsole.log('top');\n__ts_main();\n";
+    assert!(!should_auto_append_main_call(src));
+}
+
+#[test]
+fn auto_append_main_call_main_helper_no_false_positive() {
+    // Word-boundary safety: `function mainHelper` should NOT trigger the
+    // `function main(` detection because `mainHelper` follows `main`. The
+    // current heuristic uses `starts_with("function main(")` which requires
+    // an open paren immediately after `main`, so `mainHelper` is filtered.
+    let src = "function mainHelper(): void { console.log('x'); }\n";
+    assert!(!should_auto_append_main_call(src));
+}
+
+#[test]
+fn auto_append_main_call_export_function_main_no_call_appends() {
+    let src = "export function main(): void { console.log('x'); }\n";
+    assert!(should_auto_append_main_call(src));
+}
+
+#[test]
+fn auto_append_main_call_comment_with_function_main_skips() {
+    // Comment containing `function main(...)` must not trigger the
+    // detection — only actual code.
+    let src = "// see function main(): void below\nconsole.log('x');\n";
+    assert!(!should_auto_append_main_call(src));
 }
 
 #[test]
@@ -2126,8 +2334,15 @@ fn test_e2e_cell_i205_08_inherited_getter() {
 }
 
 #[test]
-#[ignore = "I-205 Spec stage red state lock-in、Implementation Stage T14 で green 化予定 (cell 09)"]
 fn test_e2e_cell_i205_09_static_getter() {
+    // Unblocked by I-224 T5-1 (2026-05-08): the previous block was the
+    // missing fn main synthesis (`pub fn init` mechanism produced library
+    // mode output → cargo run E0601). Now that I-224 T1-T4 land the fn main
+    // synthesis dispatch, the static getter `Config.version` cell compiles
+    // and runs to completion. The B2 architectural concern (fn main
+    // mechanism) is the only prerequisite that depends solely on I-224 —
+    // cells with `new C()` constructors still depend on I-162 (= future
+    // PRD α-3).
     run_cell_e2e_test("i-205", "cell-09-static-getter");
 }
 
@@ -2305,4 +2520,287 @@ fn test_e2e_cell_i205_72_getter_body_vec_clone() {
 #[ignore = "I-205 T12 implementation 完了 (D6 Option<non-Copy> `.clone()` insertion、20 unit tests 全 pass、Iteration v18 で fixture rename `Cache` → `OptCache` 適用)、E2E green は I-162 prerequisite で block、T14 で unignore (cell 74)"]
 fn test_e2e_cell_i205_74_getter_body_option_non_copy() {
     run_cell_e2e_test("i-205", "cell-74-getter-body-option-non-copy");
+}
+
+// ===== I-224 cells (Top-level fn main mechanism + Option B cohesive batch) =====
+
+#[test]
+#[ignore = "I-224 cell-01 (matrix # 1, A0+B0+C0): library mode regression. \
+            No exec trigger -> no fn main synthesized -> harness E0601. \
+            Tier 2 honest preservation per spec; harness pattern N/A."]
+fn test_e2e_cell_i224_01_empty_library() {
+    run_cell_e2e_test("i-224", "cell-01-empty-library");
+}
+
+#[test]
+fn test_e2e_cell_i224_02_user_sync_main_only() {
+    run_cell_e2e_test("i-224", "cell-02-user-sync-main-only");
+}
+
+#[test]
+fn test_e2e_cell_i224_03_user_async_main_only() {
+    run_cell_e2e_test("i-224", "cell-03-user-async-main-only");
+}
+
+#[test]
+#[ignore = "I-224 cell-04 (matrix # 7, A0+B3+C0): non-fn user main \
+            (interface) + library mode. No exec trigger -> no fn main -> \
+            harness E0601. Tier 2 honest preservation."]
+fn test_e2e_cell_i224_04_non_fn_main_no_exec() {
+    run_cell_e2e_test("i-224", "cell-04-non-fn-main-no-exec");
+}
+
+#[test]
+#[ignore = "I-224 cell-05 (matrix # 9, A0+B4+C0): __ts_main collision Tier \
+            2 honest reject. Transpile correctly returns UnsupportedSyntaxError; \
+            INV-5 lock-in covers it; harness pattern N/A."]
+fn test_e2e_cell_i224_05_ts_main_collision_no_exec() {
+    run_cell_e2e_test("i-224", "cell-05-ts-main-collision-no-exec");
+}
+
+#[test]
+fn test_e2e_cell_i224_09_stmt_expr_only_no_main() {
+    run_cell_e2e_test("i-224", "cell-09-stmt-expr-only-no-main");
+}
+
+#[test]
+fn test_e2e_cell_i224_10_stmt_expr_with_user_sync_main() {
+    run_cell_e2e_test("i-224", "cell-10-stmt-expr-with-user-sync-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-11 (matrix # 15, A1+B2+C0): async user main \
+            __ts_main() substitute call inside #[tokio::main] async fn \
+            main body. T3-3 implements identifier substitute (sync); T8 \
+            adds .await wrapping. Until T8 the call drops the Future and \
+            the user 'from async main' line is silently lost. Unignore \
+            after T8."]
+fn test_e2e_cell_i224_11_stmt_expr_with_user_async_main() {
+    run_cell_e2e_test("i-224", "cell-11-stmt-expr-with-user-async-main");
+}
+
+#[test]
+fn test_e2e_cell_i224_12_stmt_expr_with_non_fn_main() {
+    // T5-1 Spec 逆戻り 2026-05-08 silent-drop fix lock-in.
+    run_cell_e2e_test("i-224", "cell-12-stmt-expr-with-non-fn-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-13 (matrix # 19, A1+B4+C0): __ts_main collision \
+            Tier 2 reject (= same handling as cell-05). Harness pattern \
+            N/A; INV-5 lock-in covers it."]
+fn test_e2e_cell_i224_13_stmt_expr_with_ts_main_collision() {
+    run_cell_e2e_test("i-224", "cell-13-stmt-expr-with-ts-main-collision");
+}
+
+#[test]
+#[ignore = "I-224 cell-14 (matrix # 12, A1+B0+C1 top-level await): T7-T8 \
+            scope (test harness ESM upgrade + top-await synthesis logic). \
+            Unignore after T8."]
+fn test_e2e_cell_i224_14_top_await_no_main() {
+    run_cell_e2e_test("i-224", "cell-14-top-await-no-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-15 (matrix # 14, A1+B1+C1): Axis C1 + B1 sync user \
+            main + top-await mixed wrapping. T7-T8 scope."]
+fn test_e2e_cell_i224_15_top_await_sync_main() {
+    run_cell_e2e_test("i-224", "cell-15-top-await-sync-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-16 (matrix # 16, A1+B2+C1): Axis C1 + B2 async user \
+            main. T7-T8 scope."]
+fn test_e2e_cell_i224_16_top_await_async_main() {
+    run_cell_e2e_test("i-224", "cell-16-top-await-async-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-17 (matrix # 18, A1+B3+C1): Axis C1 + B3 non-fn \
+            main. T7-T8 scope."]
+fn test_e2e_cell_i224_17_top_await_non_fn_main() {
+    run_cell_e2e_test("i-224", "cell-17-top-await-non-fn-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-18 (matrix # 20, A1+B4+C1): collision in Axis C1 \
+            context. T7-T8 scope."]
+fn test_e2e_cell_i224_18_top_await_ts_main_collision() {
+    run_cell_e2e_test("i-224", "cell-18-top-await-ts-main-collision");
+}
+
+#[test]
+#[ignore = "I-224 cell-19 (matrix # 21, A2+B0+C0): Lit init only library \
+            mode. No exec trigger -> no fn main -> harness E0601. Tier 2 \
+            honest preservation."]
+fn test_e2e_cell_i224_19_decl_var_lit_init_no_main() {
+    run_cell_e2e_test("i-224", "cell-19-decl-var-lit-init-no-main");
+}
+
+#[test]
+fn test_e2e_cell_i224_20_decl_var_lit_with_user_main() {
+    run_cell_e2e_test("i-224", "cell-20-decl-var-lit-with-user-main");
+}
+
+#[test]
+fn test_e2e_cell_i224_21_decl_var_side_effect_init_no_main() {
+    run_cell_e2e_test("i-224", "cell-21-decl-var-side-effect-init-no-main");
+}
+
+#[test]
+fn test_e2e_cell_i224_22_decl_var_with_user_sync_main() {
+    run_cell_e2e_test("i-224", "cell-22-decl-var-with-user-sync-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-23 (matrix # 35, A3+B2+C0): SideEffect + async user \
+            main. Same async substitute issue as cell-11; T8 .await \
+            wrapping required."]
+fn test_e2e_cell_i224_23_decl_var_with_user_async_main() {
+    run_cell_e2e_test("i-224", "cell-23-decl-var-with-user-async-main");
+}
+
+#[test]
+fn test_e2e_cell_i224_24_decl_var_with_non_fn_main() {
+    // T5-1 Spec 逆戻り 2026-05-08 silent-drop fix counterpart to cell-12.
+    run_cell_e2e_test("i-224", "cell-24-decl-var-with-non-fn-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-27a (matrix # 51, A5a+B0+C0): Stmt::Empty silent skip \
+            in library mode. No exec trigger -> no fn main -> harness \
+            E0601. Tier 2 honest preservation per spec."]
+fn test_e2e_cell_i224_27a_empty_stmt() {
+    run_cell_e2e_test("i-224", "cell-27a-empty-stmt");
+}
+
+#[test]
+#[ignore = "I-224 cell-27b (matrix # 61, A5b+B0+C0): debugger Tier 2 honest \
+            reclassify (T4-2 wording = `debugger statement has no Rust \
+            equivalent (use panic!() for a hard stop or std::dbg!() for \
+            value tracing per the user's intent)`). The e2e harness uses \
+            the abort-mode transpile() Rust API which returns Err on \
+            UnsupportedSyntaxError, so the harness cannot exercise this \
+            cell. The Tier 2 honest error wording is locked in by unit \
+            tests in `src/transformer/statements/tests/loops.rs` (T4-2 \
+            adversarial review)."]
+fn test_e2e_cell_i224_27b_debugger_stmt() {
+    run_cell_e2e_test("i-224", "cell-27b-debugger-stmt");
+}
+
+#[test]
+fn test_e2e_cell_i224_28_mixed_no_main() {
+    run_cell_e2e_test("i-224", "cell-28-mixed-no-main");
+}
+
+#[test]
+fn test_e2e_cell_i224_29_mixed_with_user_sync_main() {
+    run_cell_e2e_test("i-224", "cell-29-mixed-with-user-sync-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-30 (matrix # 76, A6+B2+C1): mixed + async user main \
+            + top-await. T7-T8 cohesive scope."]
+fn test_e2e_cell_i224_30_mixed_top_await_async_main() {
+    run_cell_e2e_test("i-224", "cell-30-mixed-top-await-async-main");
+}
+
+#[test]
+fn test_e2e_cell_i224_31_multiple_main_calls() {
+    // Matrix # 13 boundary value (multi-call sub-case for INV-2): two
+    // main() call sites both substituted to __ts_main().
+    run_cell_e2e_test("i-224", "cell-31-multiple-main-calls");
+}
+
+#[test]
+#[ignore = "I-224 cell-32 (matrix # 32, A3+B0+C1 await init): T8 \
+            MainStmt::LetAwait emission required. Unignore after T8-2."]
+fn test_e2e_cell_i224_32_decl_var_await_init_no_main() {
+    run_cell_e2e_test("i-224", "cell-32-decl-var-await-init-no-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-34 (matrix # 34, A3+B1+C1): await init + sync user \
+            main + top-await mixed wrapping (INV-3 (c) edge case). T8-2 \
+            scope."]
+fn test_e2e_cell_i224_34_decl_var_await_init_sync_main() {
+    run_cell_e2e_test("i-224", "cell-34-decl-var-await-init-sync-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-36 (matrix # 36, A3+B2+C1): await init + async user \
+            main. T8 scope."]
+fn test_e2e_cell_i224_36_decl_var_await_init_async_main() {
+    run_cell_e2e_test("i-224", "cell-36-decl-var-await-init-async-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-38 (matrix # 38, A3+B3+C1): await init + non-fn \
+            main. T8 scope."]
+fn test_e2e_cell_i224_38_decl_var_await_init_non_fn_main() {
+    run_cell_e2e_test("i-224", "cell-38-decl-var-await-init-non-fn-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-40 (matrix # 40, A3+B4+C1): await init + collision. \
+            T7-T8 cohesive scope."]
+fn test_e2e_cell_i224_40_decl_var_await_init_ts_main_collision() {
+    run_cell_e2e_test("i-224", "cell-40-decl-var-await-init-ts-main-collision");
+}
+
+#[test]
+#[ignore = "I-224 cell-41 (matrix # 41, A4+B0+C0): control-flow at top-level \
+            Tier 2 honest reclassify (T4-2 wording). Transpile correctly \
+            returns error; harness pattern N/A."]
+fn test_e2e_cell_i224_41_control_flow_no_main() {
+    run_cell_e2e_test("i-224", "cell-41-control-flow-no-main");
+}
+
+#[test]
+#[ignore = "I-224 cell-72 (matrix # 72, A6+B0+C1): mixed + top-await. \
+            T7-T8 cohesive scope."]
+fn test_e2e_cell_i224_72_mixed_no_main_top_await() {
+    run_cell_e2e_test("i-224", "cell-72-mixed-no-main-top-await");
+}
+
+#[test]
+#[ignore = "I-224 cell-74 (matrix # 74, A6+B1+C1): mixed + sync user main \
+            + top-await (INV-3 (c) edge case)."]
+fn test_e2e_cell_i224_74_mixed_sync_main_top_await() {
+    run_cell_e2e_test("i-224", "cell-74-mixed-sync-main-top-await");
+}
+
+#[test]
+#[ignore = "I-224 cell-75 (matrix # 75, A6+B2+C0): mixed + async user main, \
+            no top-await. Same async substitute issue as cell-11/cell-23; \
+            T8 .await wrapping required."]
+fn test_e2e_cell_i224_75_mixed_async_main_no_top_await() {
+    run_cell_e2e_test("i-224", "cell-75-mixed-async-main-no-top-await");
+}
+
+#[test]
+fn test_e2e_cell_i224_77_mixed_non_fn_main_no_top_await() {
+    // T5-1 Spec 逆戻り 2026-05-08 silent-drop fix counterpart.
+    run_cell_e2e_test("i-224", "cell-77-mixed-non-fn-main-no-top-await");
+}
+
+#[test]
+#[ignore = "I-224 cell-78 (matrix # 78, A6+B3+C1): mixed + non-fn + \
+            top-await. T7-T8 cohesive scope."]
+fn test_e2e_cell_i224_78_mixed_non_fn_main_top_await() {
+    run_cell_e2e_test("i-224", "cell-78-mixed-non-fn-main-top-await");
+}
+
+#[test]
+#[ignore = "I-224 cell-79 (matrix # 79, A6+B4+C0): mixed + collision Tier \
+            2 reject. Harness pattern N/A; INV-5 lock-in covers it."]
+fn test_e2e_cell_i224_79_mixed_ts_main_collision_no_top_await() {
+    run_cell_e2e_test("i-224", "cell-79-mixed-ts-main-collision-no-top-await");
+}
+
+#[test]
+#[ignore = "I-224 cell-80 (matrix # 80, A6+B4+C1): mixed + collision in \
+            Axis C1 context. T7-T8 cohesive scope."]
+fn test_e2e_cell_i224_80_mixed_ts_main_collision_top_await() {
+    run_cell_e2e_test("i-224", "cell-80-mixed-ts-main-collision-top-await");
 }

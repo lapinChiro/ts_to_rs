@@ -240,6 +240,18 @@ impl<'a> Transformer<'a> {
             ast::Expr::Cond(cond) => self.convert_cond_expr(cond),
             ast::Expr::Unary(unary) => self.convert_unary_expr(unary),
             ast::Expr::TsAs(ts_as) => {
+                // `x as T` has three handling modes:
+                // - `T` is a primitive cast target (`F64` / `Bool`): emit
+                //   `Expr::Cast` so codegen produces `<inner> as f64` /
+                //   `<inner> as bool`.
+                // - `T` resolves to any other Rust type: passthrough but
+                //   propagate `T` as the expected type for the inner
+                //   conversion (= cors-style symmetric with TsSatisfies /
+                //   TsTypeAssertion handling, /check_problem 2026-05-08).
+                //   Object literal inner exprs benefit from the named struct
+                //   resolution.
+                // - `T` cannot be resolved (Err from convert_ts_type): bare
+                //   passthrough to inner.
                 match convert_ts_type(&ts_as.type_ann, self.synthetic, self.reg()) {
                     Ok(target_ty) if matches!(target_ty, RustType::F64 | RustType::Bool) => {
                         let inner = self.convert_expr(&ts_as.expr)?;
@@ -248,7 +260,8 @@ impl<'a> Transformer<'a> {
                             target: target_ty,
                         })
                     }
-                    _ => self.convert_expr(&ts_as.expr),
+                    Ok(target_ty) => self.convert_expr_with_expected(&ts_as.expr, Some(&target_ty)),
+                    Err(_) => self.convert_expr(&ts_as.expr),
                 }
             }
             ast::Expr::OptChain(opt_chain) => self.convert_opt_chain_expr(opt_chain),
@@ -257,6 +270,57 @@ impl<'a> Transformer<'a> {
                 Ok(Expr::Await(Box::new(inner)))
             }
             ast::Expr::TsNonNull(ts_non_null) => self.convert_expr(&ts_non_null.expr),
+            // Type-only AST wrappers — runtime semantic = inner expression's
+            // value, so passthrough by recursing on inner. Symmetric with
+            // [`TsAs`] / [`TsNonNull`] above. Added for I-224 T5-1 review
+            // (2026-05-08) post-`/check_job` Layer 4 finding: NonTriggerData
+            // (Object/Array literal) wrapped in these wrappers gets captured
+            // into fn main body and reaches `convert_expr`; without these
+            // arms the previous `_ => Err` fall-through caused 6 Hono file
+            // compile regressions (compress / csrf / serve-static / ... had
+            // `const X = [...] as const` / `as <type>` / `satisfies T`
+            // patterns at module level + a SideEffect-trigger sibling Var,
+            // routing the wrapped form into capture).
+            //
+            // - `TsConstAssertion` (`x as const`): freezes the inner literal's
+            //   types (= TS-only annotation, no runtime effect). Inner Array /
+            //   Object literal converts directly to Rust `vec!`/struct.
+            // - `TsTypeAssertion` (`<T>x` legacy form): same as TsAs, no
+            //   runtime effect.
+            // - `TsSatisfies` (`x satisfies T`): TS type check, no runtime
+            //   effect.
+            // - `TsInstantiation` (`x<T>`): TS-only generic instantiation
+            //   marker, no runtime effect.
+            //
+            // (`Paren` is already handled earlier in this match — line 229.)
+            ast::Expr::TsConstAssertion(t) => self.convert_expr(&t.expr),
+            ast::Expr::TsTypeAssertion(t) => {
+                // `<T>x` legacy form: propagate the asserted type as
+                // `expected_type` to the inner conversion so Object / Array
+                // literal inits resolve to the named struct (= cors-style
+                // pattern recovery, /check_job deep deep 2026-05-08).
+                if let Ok(ty) = convert_ts_type(&t.type_ann, self.synthetic, self.reg()) {
+                    self.convert_expr_with_expected(&t.expr, Some(&ty))
+                } else {
+                    self.convert_expr(&t.expr)
+                }
+            }
+            ast::Expr::TsSatisfies(t) => {
+                // `x satisfies T`: propagate the satisfies type as
+                // `expected_type` to the inner conversion. For Object literal
+                // inner expressions, this enables resolution to the named
+                // struct (= cors-style `const opts = { ... } satisfies
+                // CORSOptions` pattern), which previously failed with
+                // "object literal requires a type annotation to determine
+                // struct name" because the inner Object literal was
+                // converted without expected type context.
+                if let Ok(ty) = convert_ts_type(&t.type_ann, self.synthetic, self.reg()) {
+                    self.convert_expr_with_expected(&t.expr, Some(&ty))
+                } else {
+                    self.convert_expr(&t.expr)
+                }
+            }
+            ast::Expr::TsInstantiation(t) => self.convert_expr(&t.expr),
             _ => Err(anyhow!("unsupported expression: {:?}", expr)),
         }?;
 

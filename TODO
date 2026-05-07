@@ -183,6 +183,60 @@ OBJECT_LITERAL_NO_TYPE 全体で 28件（2026-04-21 T6-6 後 bench 実測、I-14
 
   - 🔗 PRD I-205 T14 (本 entry の direct beneficiary)、I-224 (top-level fn main mechanism、I-205 T14 sister prerequisite)、I-162 (constructor synthesis、I-205 T14 sister prerequisite)、I-201-A (AutoAccessor Tier 1 化、本 entry と field type inference の architectural concern overlap、I-201-A spec stage で本 entry の completion を leverage 可能)、`type-fallback-safety.md` (Any/Value fallback 安全性分析)
 
+- **[I-395]** **Class expression `const X = class { ... }` conversion (anonymous class lifting、L3、I-224 T5-1 deep deep review 由来 2026-05-08)** — `convert_expr` の `Expr::Class(_)` arm が `_ => Err("unsupported expression: Class(...)")` に fall-through し、Class expression を init とする Var Decl が Tier 2 honest reject される。
+
+  **Empirical evidence (2026-05-08 Hono bench)**: `router/reg-exp-router/prepared-router.ts:95:1` (= `export const buildInitParams = ({paths}) => { const RegExpRouterWithMatcherExport = class<T> extends RegExpRouter<T> { buildAndExportAllMatchers() { return this.buildAllMatchers() } } ... }` line 98 inner var decl) で Class expression が arrow function body 内 inner var decl に出現、`convert_var_decl` (`src/transformer/statements/mod.rs:237`) → `convert_expr_with_expected` → `convert_expr` `_ => Err` で reject。Hono 全 codebase で本 pattern reachability=1 file (本 ssg 系列の adapter 実装には不在、prepared-router のみ)。
+
+  **解決方針 (3 option)**:
+  - **(A) Anonymous class lifting**: synthetic name (`__ts_anon_class_<N>`) を生成し、Class expression を Item::Class として top-level emit + 元 expression を `Expr::Ident(synthetic_name)` に置換。const var decl の場合は binding 名を流用 (`const X = class { ... }` → `struct X { ... } impl X { ... } let X = X;` 不要、binding 名 = struct 名で OK)。**Pros**: 構造的、TS Class expression semantic を Rust struct + impl で完全 preserve。**Cons**: extends / decorators / generics / methods を Class 本体 conversion 経由で emit する必要 = significant scope (`src/transformer/classes/mod.rs` の class declaration 経路再利用が必要)。
+  - **(B) Tier 2 honest reject + structured wording**: Class expression at expression position は `UnsupportedSyntaxError::new("anonymous class expression at expression position requires top-level class declaration; rewrite as `class X { ... }; const ref = X;`", span)` で honest reject。**Pros**: scope 小 (~5 LOC + test)、user に rewrite guide。**Cons**: `convert_expr` `_ => Err` の wording を改善するだけで semantic 変換不在、prepared-router 修正には user 介入必要。
+  - **(C) Convert to `let __anon_<N> = ClassRef;` and emit class as Item**: option A の simplified form、binding 名から synthetic name を derive。
+
+  **推奨**: option B を T5-2 sub-task or 単独 PRD で先行、option A は I-201-A (AutoAccessor decorator なし subset Tier 1 化、class architectural concern と overlap) と cohesive batch で検討。
+
+  **Resolution direction**: Class expression conversion は I-201-A (AutoAccessor) / I-201-B (decorator framework) の class architectural concern 群と coordination が必要 (= 同 `src/transformer/classes/` infrastructure を leverage)。本 entry は I-201-A spec stage で sub-architectural concern として scope 内検討候補、または I-201 後の独立 PRD として deferred。
+
+  - 🔗 PRD I-201-A (AutoAccessor Tier 1 化、class architectural concern overlap)、I-201-B (decorator framework、class hooks)、I-016 (silent drop pre-existing owner、本 Class expression `_ => Err` arm の origin)
+  - **影響範囲**: `src/transformer/expressions/mod.rs:284` `convert_expr` `_ => Err` arm + 候補 `src/transformer/classes/` (class declaration conversion path) の anonymous variant 対応
+  - **発見経緯**: I-224 T5-1 完了後の `/check_job` deep deep review (2026-05-08) で Hono bench `clean=107 / errors=72` の残 1 file regression 起因、root cause analysis で arrow body 内 inner var decl の Class expression が pre-existing convert_expr gap と判明 (T5-1 NonTrigger split / per-decl routing fix とは orthogonal)
+
+- **[I-396]** **Module-level destructuring var decl pattern conversion (Tier 1 化、L3、I-224 T5-1 /check_problem 由来 2026-05-08)** — `const { a, b } = compute();` / `const [x, y] = compute();` form の module-level Decl::Var が capture path 経由で `Tier 2 honest reject` される (= `/check_problem` 2026-05-08 で silent drop → honest error に structural fix 完了、Tier-transition Improvement)。proper destructuring pattern conversion は **未実装** = follow-up scope。
+
+  **Empirical evidence (2026-05-08 Hono bench)**: `adapter/bun/ssg.ts:6:7` (`const { write } = Bun`) + `adapter/deno/serve-static.ts:6:7` (`const { open, lstatSync, errors } = Deno`) で Tier 2 honest error (`module-level destructuring var decl with executable trigger requires destructuring pattern conversion; rewrite as ...`) が発火、user code rewrite guide 提示状態。
+
+  **解決方針 (2 option)**:
+  - **(A) Object/Array destructuring → 個別 let binding emission**: `const { a, b } = expr;` を `let __ts_destructure_<N> = expr; let a = __ts_destructure_<N>.a; let b = __ts_destructure_<N>.b;` に展開、`const [x, y] = expr;` を `let __ts_destructure_<N> = expr; let x = __ts_destructure_<N>.0; let y = __ts_destructure_<N>.1;` に展開 (Rust tuple は positional access)。**Pros**: 構造的、TS destructuring semantic を Rust let bindings + member access で完全 preserve。**Cons**: rest pattern (`const { a, ...rest } = expr;`) / default (`const { a = 1 } = expr;`) / nested destructuring (`const { a: { b } } = expr;`) の包括対応 = significant scope。
+  - **(B) Tier 2 honest reject 維持 (現状)**: 現状 `/check_problem` 2026-05-08 で導入の Tier 2 honest error wording で user に rewrite guide 提示、proper conversion は deferred。
+
+  **推奨**: option A を独立 PRD で実装 (Object simple destructuring + Array simple destructuring + nested + rest + default の 5-axis matrix-driven PRD、estimated ~200-400 LOC + 20-30 unit/E2E tests)。Inner var decl (statements/mod.rs:237 `convert_var_decl`) も同 silent drop 状態の可能性ありで併せて scope 内検討。
+
+  **Resolution direction**: I-016 (module-level Object/Array literal silent drop) と同 architectural concern (= TS pattern → Rust binding emission strategy)、cohesive batch 候補。
+
+  - 🔗 I-016 (Object/Array literal silent drop owner、本 entry と同 architectural concern)、I-224 T5-1 (本 Tier-transition の origin fix、`src/transformer/main_synthesis/mod.rs::capture_var_decl_into_main_stmts` 内 destructuring guard)、`src/transformer/statements/mod.rs:237` `convert_var_decl` (inner var decl の destructuring 同 silent 状態の可能性)
+  - **影響範囲**: `src/transformer/main_synthesis/mod.rs::capture_var_decl_into_main_stmts:765-779` (現状 destructuring guard が Tier 2 reject)、`src/transformer/statements/mod.rs:237::convert_var_decl` (inner var decl の destructuring path)、`src/transformer/expressions/patterns.rs` (potential new helper for destructuring lift logic)
+  - **発見経緯**: I-224 T5-1 `/check_problem` review (2026-05-08) で capture path silent skip を Tier 2 honest reject に structural fix した際、Hono bench で Tier 1 silent → Tier 2 honest Improvement を確認。proper conversion は別 architectural concern として scope 外 deferred、TODO 化
+
+- **[I-397]** **e2e harness `should_auto_append_main_call` detection edge cases (auto-append helper improvement、L4、I-224 T5-1 /check_problem 由来 2026-05-08)** — `tests/e2e_test.rs::should_auto_append_main_call` / `has_main_definition` / `has_top_level_main_call` の substring-based detection が以下 edge case で false-positive / false-negative する可能性:
+
+  - **Block comment 内の `function main(`**: `/** function main(): void { ... } */` 内に `function main(` 文字列があると、行 trim 後 `* function main(` で start_with 検出されないが、複数行 block comment 内で `function main(` が単独行に存在すると true 判定 (= false positive)
+  - **Multi-line `function main` definition**: `function\n  main(\n  x: number\n)` の改行混入は `function main(` substring が連続文字列にならず false negative
+  - **Block comment-wrapped main call**: `/* main(); */` 後の trim → `* main();` で skip されないが substring detect 不在 (= currently OK by accident)
+
+  **Empirical reachability (2026-05-08 verified)**: `grep -rE "^\s*(export\s+)?(async\s+)?function\s+main\s*[(:<]" /tmp/hono-clean/src` = 0 hits (Hono codebase 全体)、`tests/e2e/scripts/i-224/*.ts` = 11 hits 全て single-line `function main(` form (block comment / multi-line patterns 不在)。実用 impact 0、heuristic improvement に分類。
+
+  **解決方針 (2 option)**:
+  - **(A) Proper TS parser-based detection**: SWC parser を invoke して module body から actual `function main` declaration の existence + call site を syntactic に確認。**Pros**: 100% 正確、edge case 0。**Cons**: harness が transpile() の outer で SWC parser を invoke する重い化 (= test runtime impact)、scope 大。
+  - **(B) Block comment stripping pre-pass**: substring check の前に `/* ... */` を空文字に置換する simple regex-free state machine pass を追加。**Pros**: 軽量 (~30 LOC)、edge case 大半 cover。**Cons**: 完全ではない (例: nested block comment `/* /* */ */` 等)、heuristic 維持。
+  - **(C) 現状維持 + documentation**: 0 reachability 確認済み、tests/e2e_test.rs に edge case を comment 化して将来の fixture 追加時に注意喚起。
+
+  **推奨**: option C (= 現状維持 + doc 追加)、option A は test infrastructure 改修 PRD で他 e2e harness 改善と batch 化候補 (low priority)。
+
+  **Resolution direction**: 0 reachability で実用 impact 不在のため defer 妥当。test infrastructure 改修 PRD (e2e harness modernization) で batch 検討候補。
+
+  - 🔗 I-224 T5-1 (本 helper の origin fix、`tests/e2e_test.rs::should_auto_append_main_call`)、I-180 (E2E harness async-main multi-execution、test infra 改修系 sister concern)
+  - **影響範囲**: `tests/e2e_test.rs::should_auto_append_main_call` / `has_main_definition` / `has_top_level_main_call` (lines ~166-260)
+  - **発見経緯**: I-224 T5-1 `/check_problem` review (2026-05-08) で auto-append detection の robustness 検討、Hono / fixture reachability=0 confirmed → defer
+
 ---
 
 ## Tier 2: L3 残り + L4（修正コスト小）

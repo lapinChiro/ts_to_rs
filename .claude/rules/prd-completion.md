@@ -35,12 +35,25 @@ When reporting PRD work as "complete".
   - Pre-PRD state: existing Tier 2 errors (or Tier 1 silent semantic change) for <feature>
   - Post-PRD state: Tier 1 (compile-pass + tsc runtime stdout 一致) for <feature>
   - Hono bench result classification:
-    - **Improvement** (allowed): existing related errors transition Tier-2 → Tier-1
-      (clean files count 増加 / errors count 減少 が **expected**、regression ではない)
+    - **Improvement (Tier 2 → Tier 1)** (allowed): existing related Tier 2 errors
+      transition to Tier 1 GREEN (= clean files count 増加 / errors count 減少 が
+      **expected**、regression ではない)
+    - **Improvement (Tier 1 silent → Tier 2 honest)** (allowed、I-224 T5-1
+      `/check_problem` 2026-05-08 source 確定): existing **silent semantic loss**
+      (Tier 1 silent semantic change、e.g., var decl silent drop / wrapper passthrough
+      type info loss) が **honest error reporting** (Tier 2 honest error with
+      transparent wording) に transition。clean files count **減少 / errors count 増加** = surface result だが per `ideal-implementation-primacy.md` /
+      `conversion-correctness-priority.md` Tier 1 silent loss は最高 priority defect
+      class、Tier 2 honest error は user に transparent 修正 guide を提示するため
+      **Improvement** に分類。**前提**: 該当 file が Pre-PRD で既に not-clean state
+      (= 他 errors を含む) で本 PRD scope の Tier 2 honest error 追加で clean count
+      不変、または PRD architectural concern boundary 内で silent → honest の
+      structural transition (= 本 PRD Spec 内に明示的に記載)。
     - **Preservation** (allowed): existing related errors unchanged (Hono が <feature> を
       使用していない場合の正常な観測結果)
-    - **New compile errors** (prohibited): 本 PRD 修正範囲外の features に対して
-      新たな compile error 導入は **regression** = 完了 block
+    - **New compile errors on previously-clean files** (prohibited): 本 PRD 修正
+      範囲外 features に対して、Pre-PRD で **clean だった file** が新たに compile
+      error を導入される = **regression** = 完了 block
 ```
 
 ### 判定基準
