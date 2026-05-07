@@ -9,13 +9,13 @@
 
 ---
 
-## 現在の状態 (2026-05-07 post I-224 T2 完了 + adversarial deep review 適用 = main_synthesis foundation module + 73 unit tests + dispatch arm 1-to-1 mapping integration test + INV-3 (C0 partial) / INV-6 invariants test fill-in + L1/L2 self-applied fix 全反映)
+## 現在の状態 (2026-05-07 post I-224 T2 完了 + adversarial deep review 3 round + Spec stage 逆戻り Iteration v8 batch fix (I-228 系 4 sub-entries 全 resolve + Layer 3 extension fix Object computed key + Class shape outer-context await) = main_synthesis foundation module + 105 unit tests + dispatch arm 1-to-1 mapping integration test + INV-3 (C0 partial) / INV-6 invariants test fill-in + recursive Await walker (38 Expr + Class + ClassMember + PropName 全 enumerate per Rule 11 (d-1)) + ExportDecl-wrapped Decl::Var Axis A trigger + multi-declarator iter ANY-rule classification)
 
 | 指標 | 値 |
 |------|-----|
 | Hono bench clean | **111/158 (70.3%)** = T7/T8/T9/T10/T12 baseline と同一 (Preservation、T2 production module は dead code from production POV until T4 integration、Hono への影響 0 件) |
 | Hono bench errors | **63** (baseline と同一、no new compile errors、本 PRD scope 外への regression 0 件) |
-| cargo test (lib) | 3448 pass / 0 fail / 0 ignored (T1-3 baseline 3372 + 76 NEW = 64 baseline + 9 declare-marked + 3 deep-review fix tests = Regex narrow + #[should_panic] precondition + Regex exec mode lock-in) |
+| cargo test (lib) | 3477 pass / 0 fail / 0 ignored (T1-3 baseline 3372 + 105 NEW = 64 baseline + 9 declare-marked + 3 deep-review + 17 Spec stage 逆戻り I-228 fix tests + 12 Layer 3 extension fix tests = nested-await walker 8 + ExportDecl wrap 4 + multi-declarator iter 5 + Object computed key 6 + Class shape 7) |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
 | cargo test (E2E) | 159 pass + 70 `#[ignore]` |
@@ -25,7 +25,7 @@
 | cargo test (i205_invariants_test) | **2 pass / 5 ignored** |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
-| ./scripts/check-file-lines.sh | OK (全 .rs file < 1000 行、main_synthesis/mod.rs = 977 / main_synthesis/tests.rs = 742 行) |
+| ./scripts/check-file-lines.sh | OK (全 .rs file < 1000 行、main_synthesis/{mod.rs = 953 / await_walker.rs = 287 / user_main.rs = 265 / tests/mod.rs = 266 / tests/i228_spec_modori.rs = 838} 行 = 5 file directory module split で Iteration v8 fix volume を吸収) |
 
 **bench 非決定性**: ±1 clean / ±2 errors の noise variance を [I-172] として記録 (test/bench infra defect、別 PRD)。
 

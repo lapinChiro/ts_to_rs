@@ -1,264 +1,350 @@
+//! I-224 Spec stage 逆戻り Iteration v8 tests for the 4 I-228 sub-entries
+//! (nested top-level await / Lit::Regex narrow / ExportDecl-wrapped Decl::Var
+//! side-effect / multi-declarator iter ANY-rule) plus the Layer 3 extension
+//! findings (Object computed property key, Class shape outer-context await).
+//!
+//! Section comments group tests by the originating sub-entry / extension so
+//! a future regression maps back to the fix scope. Extracted from `tests.rs`
+//! to keep individual files under the 1000-line file-line check threshold.
+
 use super::*;
-use crate::parser::parse_typescript;
-use crate::pipeline::SyntheticTypeRegistry;
-use crate::transformer::test_fixtures::TctxFixture;
 
-// --- Helpers for predicate-only tests (no Transformer instantiation) ---
+// ===== I-228 Spec stage 逆戻り batch fix tests (2026-05-07) =====================
+//
+// Spec stage 逆戻り (`spec-first-prd.md` 「Spec への逆戻り」procedure) で 4
+// sub-entries (I-228 main + I-228-b/c/d) の Spec gap を全 fix。本セクションの
+// tests は revised spec の structural lock-in (= future regression を fail で
+// 検出) を提供する。
 
-fn parse(src: &str) -> Module {
-    parse_typescript(src).expect("test source should parse")
-}
+// ---- I-228 main: nested top-level await detection (recursive walker) ----
 
-/// Constructs a Transformer instance from `src` and runs `collect_top_level_executions`.
-/// Returns `(main_stmts, user_main_kind, has_top_level_await)`.
-fn collect(src: &str) -> (Vec<MainStmt>, UserMainKind, bool) {
-    let f = TctxFixture::from_source(src);
-    let tctx = f.tctx();
-    let mut synthetic = SyntheticTypeRegistry::new();
-    let mut t = Transformer::for_module(&tctx, &mut synthetic);
-    t.collect_top_level_executions(f.module())
-        .expect("collect_top_level_executions should succeed for test fixtures")
-}
-
-// === classify_init_kind (Equivalence partitioning + Boundary) ============================
-
-/// Returns the first concrete (= non-ambient, non-empty-init) `VarDecl` in the
-/// module body. Skips `declare const x: T;` (ambient) and `let x;` (no-init)
-/// so test sources can prefix declarations with `declare const ...` for type
-/// context without polluting the predicate target.
-fn first_var_decl(module: &Module) -> &VarDecl {
-    for item in &module.body {
-        if let ModuleItem::Stmt(Stmt::Decl(Decl::Var(var))) = item {
-            if var.declare {
-                continue;
-            }
-            if var.decls.first().is_none_or(|d| d.init.is_none()) {
-                continue;
-            }
-            return var;
-        }
-    }
-    panic!("expected at least one concrete (non-ambient, non-empty-init) Decl::Var");
+#[test]
+fn has_top_level_await_nested_in_call_args() {
+    // `console.log(await getNum())` — outer Stmt::Expr is Call (not Await).
+    // Pre-fix returned false (= AST shape direct miss); post-fix recursive walker
+    // returns true.
+    let m = parse(
+        "async function getNum(): Promise<number> { return 42; }\n\
+         function show(n: number): void { }\n\
+         show(await getNum());\n",
+    );
+    assert!(has_top_level_await(&m));
 }
 
 #[test]
-fn classify_init_kind_lit_number() {
-    let m = parse("const x = 42;");
-    assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::Lit);
+fn has_top_level_await_nested_in_decl_var_init() {
+    // `const c = double(await getNum())` — outer Decl::Var.init is Call (not Await).
+    let m = parse(
+        "async function getNum(): Promise<number> { return 42; }\n\
+         function double(n: number): number { return n * 2; }\n\
+         const c: number = double(await getNum());\n",
+    );
+    assert!(has_top_level_await(&m));
 }
 
 #[test]
-fn classify_init_kind_lit_string() {
-    let m = parse("const x = 'hi';");
-    assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::Lit);
+fn has_top_level_await_nested_in_unary() {
+    // `const c = -await x` — outer is Unary, inner is Await.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         const c: number = -await x;\n",
+    );
+    assert!(has_top_level_await(&m));
 }
 
 #[test]
-fn classify_init_kind_lit_bool() {
-    let m = parse("const x = true;");
-    assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::Lit);
+fn has_top_level_await_nested_in_paren() {
+    // `(await x);` — outer is Paren, inner is Await.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         (await x);\n",
+    );
+    assert!(has_top_level_await(&m));
 }
 
 #[test]
-fn classify_init_kind_lit_null() {
-    let m = parse("const x = null;");
-    assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::Lit);
+fn has_top_level_await_nested_in_ts_as() {
+    // `await x as number` — TsAs wraps Await.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         (await x as number);\n",
+    );
+    assert!(has_top_level_await(&m));
 }
 
 #[test]
-fn classify_init_kind_lit_negative_number() {
-    let m = parse("const x = -42;");
-    assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::Lit);
+fn has_top_level_await_nested_in_bin_op() {
+    // `await x + 1` — Bin's left operand is Await.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         (await x + 1);\n",
+    );
+    assert!(has_top_level_await(&m));
 }
 
 #[test]
-fn classify_init_kind_side_effect_call() {
-    let m = parse("declare function f(): number;\nconst x = f();");
+fn has_top_level_await_nested_in_array_element() {
+    // `[await x, 2]` — Array element is Await.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         [await x, 2];\n",
+    );
+    assert!(has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_nested_in_object_keyvalue_value() {
+    // `({ k: await x });` — Object KeyValue's value is Await.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         ({ k: await x });\n",
+    );
+    assert!(has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_nested_in_object_keyvalue_computed_key() {
+    // `({ [await x]: 1 });` — Object KeyValue's key is computed with Await.
+    // Computed keys are evaluated at the outer (enclosing) context, so this is
+    // a top-level await trigger. (`/check_job` Layer 3 finding 2026-05-07:
+    // initial walker missed computed keys; subsequent fix added recursion.)
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         ({ [await x]: 1 });\n",
+    );
+    assert!(has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_nested_in_object_method_computed_key() {
+    // `({ [await x](): void {} });` — Object Method's key is computed with Await.
+    // The method body is a boundary (= nested async context), but the computed
+    // key IS evaluated in the outer context, so this triggers top-level await.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         ({ [await x](): void {} });\n",
+    );
+    assert!(has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_skips_object_method_body() {
+    // Method body is a boundary: `await` inside the body does NOT trigger
+    // top-level await. Static key + body await = no detection.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         ({ async k(): Promise<void> { await x; } });\n",
+    );
+    assert!(!has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_nested_in_object_spread() {
+    // `({ ...await x });` — Object Spread of await result.
+    let m = parse(
+        "declare const x: Promise<{ a: number }>;\n\
+         ({ ...await x });\n",
+    );
+    assert!(has_top_level_await(&m));
+}
+
+// ---- Class shape: super_class / decorators / member computed keys ----
+//
+// I-228 main scope extension (2026-05-07): Decl::Class / Expr::Class were
+// previously treated as full boundaries by the walker, missing await reachable
+// in **outer-context** sub-Exprs (super_class call args, decorators, member
+// computed keys). Method bodies remain a boundary (= separate async context).
+
+#[test]
+fn has_top_level_await_decl_class_super_class_await() {
+    // `class C extends makeBase(await getBaseTag()) {}` — bare top-level Class
+    // declaration with await inside the super_class expression. The class
+    // definition runs makeBase at module-load time in the outer async context.
+    let m = parse(
+        "async function getBaseTag(): Promise<number> { return 1; }\n\
+         function makeBase(t: number) { return class { tag = t; }; }\n\
+         class C extends makeBase(await getBaseTag()) {}\n",
+    );
+    assert!(has_top_level_await(&m));
+}
+
+#[test]
+fn is_executable_mode_decl_class_super_class_await_is_executable() {
+    // Same fixture as above — super_class await also triggers executable mode
+    // (= dispatch tree consistency: has_top_level_await=true requires
+    // is_executable_mode=true to avoid the structurally-unreachable arm panic).
+    let m = parse(
+        "async function getBaseTag(): Promise<number> { return 1; }\n\
+         function makeBase(t: number) { return class { tag = t; }; }\n\
+         class C extends makeBase(await getBaseTag()) {}\n",
+    );
+    assert!(is_executable_mode(&m));
+}
+
+#[test]
+fn has_top_level_await_class_skips_method_body() {
+    // Method body is a boundary: `await` inside the method body does NOT trigger
+    // top-level await. (= cf. nested function body skip test above.)
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         class C { async m(): Promise<void> { await x; } }\n",
+    );
+    assert!(!has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_export_class_super_class_await() {
+    // ExportDecl-wrapped Class with super_class await — same outer-context
+    // detection as bare Decl::Class case.
+    let m = parse(
+        "async function getTag(): Promise<number> { return 1; }\n\
+         function makeBase(t: number) { return class { tag = t; }; }\n\
+         export class C extends makeBase(await getTag()) {}\n",
+    );
+    assert!(has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_class_member_computed_key_await() {
+    // `class C { [await x](): void {} }` — member's computed property key
+    // contains await at the outer (class-definition) context.
+    let m = parse(
+        "declare const x: Promise<string>;\n\
+         class C { [await x](): void {} }\n",
+    );
+    assert!(has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_class_skips_property_initializer() {
+    // `class C { p: number = await x; }` — invalid TS (`await` rejected in class
+    // field initializer regardless of `is_static`: non-static runs in instance
+    // construction sync context, static runs in class-definition sync context).
+    // Walker conservatively skips ClassProp.value to avoid over-detection on
+    // SWC-parseable but tsc-invalid sources. Test asserts `false` to lock in the
+    // skip behavior.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         class C { p: number = await x; }\n",
+    );
+    assert!(!has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_class_simple_no_await_is_false() {
+    // Sanity: class without any outer-context await stays library mode.
+    let m = parse(
+        "class Base {}\n\
+         class C extends Base { p: number = 1; }\n",
+    );
+    assert!(!has_top_level_await(&m));
+    assert!(!is_executable_mode(&m));
+}
+
+#[test]
+fn has_top_level_await_skips_nested_function_body() {
+    // Boundary check: `await` inside a function body is NOT a top-level await
+    // (= different async context). The recursive walker stops at Fn / Arrow /
+    // Class boundaries.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         async function helper(): Promise<number> { return await x; }\n\
+         helper();\n",
+    );
+    assert!(!has_top_level_await(&m));
+}
+
+#[test]
+fn has_top_level_await_skips_arrow_body() {
+    // Same boundary check for arrow function.
+    let m = parse(
+        "declare const x: Promise<number>;\n\
+         const helper = async (): Promise<number> => await x;\n\
+         helper();\n",
+    );
+    assert!(!has_top_level_await(&m));
+}
+
+// ---- I-228-c: ExportDecl-wrapped Decl::Var with side-effect init ----
+
+#[test]
+fn is_executable_mode_export_decl_side_effect_init_is_executable() {
+    // `export const c = compute();` — ExportDecl-wrapped Decl::Var with
+    // side-effect init. Pre-fix returned false (= ModuleDecl skipped); post-fix
+    // recognizes as Axis A3 trigger.
+    let m = parse(
+        "function compute(): number { return 7; }\n\
+         export const c: number = compute();\n",
+    );
+    assert!(is_executable_mode(&m));
+}
+
+#[test]
+fn is_executable_mode_export_decl_lit_init_is_library() {
+    // `export const X = 1;` — Lit init is library-mode-orthogonal (= existing
+    // path emits `pub const X: f64 = 1.0;` correctly).
+    let m = parse("export const X: number = 1;\n");
+    assert!(!is_executable_mode(&m));
+}
+
+#[test]
+fn has_top_level_await_export_decl_await_init() {
+    // `export const c = await fetch();` — ExportDecl-wrapped await init.
+    let m = parse(
+        "declare function fetchData(): Promise<number>;\n\
+         export const c: number = await fetchData();\n",
+    );
+    assert!(has_top_level_await(&m));
+}
+
+#[test]
+fn is_executable_mode_export_decl_fn_is_library() {
+    // `export function f() {}` — Fn declaration via ExportDecl is library-mode-
+    // orthogonal (= no side effect).
+    let m = parse("export function f(): void { }\n");
+    assert!(!is_executable_mode(&m));
+}
+
+// ---- I-228-d: multi-declarator VarDecl with mixed init ----
+
+#[test]
+fn classify_init_kind_multi_declarator_mixed_lit_and_side_effect_is_side_effect() {
+    // `const a = 1, b = compute();` — first Lit, second SideEffect.
+    // ANY-rule precedence (I-228-d fix): SideEffect since ANY non-Lit triggers.
+    let m = parse(
+        "function compute(): number { return 7; }\n\
+         const a: number = 1, b: number = compute();\n",
+    );
     assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::SideEffect);
 }
 
 #[test]
-fn classify_init_kind_side_effect_ident() {
-    let m = parse("declare const y: number;\nconst x = y;");
-    assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::SideEffect);
+fn classify_init_kind_multi_declarator_all_lit_is_lit() {
+    // `const a = 1, b = 2;` — all Lit, classify as Lit.
+    let m = parse("const a: number = 1, b: number = 2;\n");
+    assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::Lit);
 }
 
 #[test]
-fn classify_init_kind_await_init() {
-    let m = parse("declare const p: Promise<number>;\nconst x = await p;");
+fn classify_init_kind_multi_declarator_with_await_is_await_init() {
+    // `const a = 1, b = await fetch();` — second declarator has await.
+    // ANY-rule: AwaitInit (highest precedence).
+    let m = parse(
+        "declare function fetchData(): Promise<number>;\n\
+         const a: number = 1, b: number = await fetchData();\n",
+    );
     assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::AwaitInit);
 }
 
 #[test]
-fn classify_init_kind_unary_minus_non_lit_is_side_effect() {
-    // Boundary: -<non-literal> is side-effect, not Lit (classify_init_kind only
-    // collapses -Lit::Num/-Lit::BigInt to Lit; -<call> stays SideEffect).
-    let m = parse("declare function f(): number;\nconst x = -f();");
-    assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::SideEffect);
-}
-
-#[test]
-fn classify_init_kind_lit_regex_is_side_effect() {
-    // T2 deep-review fix (PRD design-intent reconciliation): regex literal is NOT
-    // Rust-const-compatible (`Regex::new(...)` is a runtime call), so it falls
-    // through to InitKind::SideEffect → FnMainBodyCapture path → Rust-compilable
-    // `let r = Regex::new("ab").unwrap();` emission. PRD line 970 bullet
-    // enumeration mistakenly included Lit::Regex; the prefix's "Rust const 適合"
-    // design intent wins, and Spec-stage cleanup is tracked alongside [I-228].
-    let m = parse("const r = /ab/g;");
-    assert_eq!(classify_init_kind(first_var_decl(&m)), InitKind::SideEffect);
-}
-
-#[test]
-#[should_panic(expected = "TS Decl::Var requires init")]
-fn classify_init_kind_panics_on_no_init_var() {
-    // Defensive precondition test: classify_init_kind documents that callers must
-    // filter no-init Var (`declare const x: T;`) via has_side_effect_init /
-    // classify_decl_var_path defensive guards before calling. Bypassing those
-    // guards (e.g., a future caller that constructs the VarDecl directly) must
-    // trigger a loud `unreachable!` panic rather than a silent misclassification.
-    // This test locks the panic message in.
-    let m = parse("declare const x: number;");
-    let var = match m.body.first() {
-        Some(ModuleItem::Stmt(Stmt::Decl(Decl::Var(v)))) => v.as_ref(),
-        other => panic!("test fixture mismatch — expected ambient Decl::Var, got {other:?}"),
-    };
-    // Sanity: confirm the precondition-violating shape.
-    assert!(var.declare, "test fixture must be ambient (declare-marked)");
-    assert!(
-        var.decls.first().is_some_and(|d| d.init.is_none()),
-        "test fixture must have no init",
-    );
-    // Bypass upstream defensive guards and call classify_init_kind directly —
-    // expected to panic per docstring's "Panics" section.
-    let _ = classify_init_kind(var);
-}
-
-// === has_side_effect_init ================================================================
-
-#[test]
-fn has_side_effect_init_lit_is_false() {
-    let m = parse("const x = 42;");
-    assert!(!has_side_effect_init(first_var_decl(&m)));
-}
-
-#[test]
-fn has_side_effect_init_side_effect_is_true() {
-    let m = parse("declare function f(): number;\nconst x = f();");
-    assert!(has_side_effect_init(first_var_decl(&m)));
-}
-
-#[test]
-fn has_side_effect_init_await_is_true() {
-    // AwaitInit is treated as side-effect for executable-mode trigger purposes
-    // (Axis C1 cells must reach is_executable_mode=true).
-    let m = parse("declare const p: Promise<number>;\nconst x = await p;");
-    assert!(has_side_effect_init(first_var_decl(&m)));
-}
-
-// === classify_decl_var_path (Decision Table) ==============================================
-
-#[test]
-fn classify_decl_var_path_library_lit() {
-    let m = parse("const x = 42;");
-    assert_eq!(
-        classify_decl_var_path(first_var_decl(&m), false),
-        DeclVarPath::LibraryMode
-    );
-}
-
-#[test]
-fn classify_decl_var_path_library_side_effect_unreachable_via_predicate() {
-    // The (false, SideEffect) cell of the table maps to LibraryMode in code
-    // even though `is_executable_mode` would return true for such a module —
-    // reaching this combination requires bypassing the predicate (e.g., direct
-    // unit test). We verify the table consistency here.
-    let m = parse("declare function f(): number;\nconst x = f();");
-    assert_eq!(
-        classify_decl_var_path(first_var_decl(&m), false),
-        DeclVarPath::LibraryMode
-    );
-}
-
-#[test]
-fn classify_decl_var_path_executable_lit_is_toplevel_const() {
-    let m = parse("const x = 42;");
-    assert_eq!(
-        classify_decl_var_path(first_var_decl(&m), true),
-        DeclVarPath::ToplevelConst
-    );
-}
-
-#[test]
-fn classify_decl_var_path_executable_side_effect_is_capture() {
-    let m = parse("declare function f(): number;\nconst x = f();");
-    assert_eq!(
-        classify_decl_var_path(first_var_decl(&m), true),
-        DeclVarPath::FnMainBodyCapture
-    );
-}
-
-#[test]
-fn classify_decl_var_path_executable_await_is_capture() {
-    let m = parse("declare const p: Promise<number>;\nconst x = await p;");
-    assert_eq!(
-        classify_decl_var_path(first_var_decl(&m), true),
-        DeclVarPath::FnMainBodyCapture
-    );
-}
-
-// === is_executable_mode (AST variant exhaustiveness + Boundary) ==========================
-
-#[test]
-fn is_executable_mode_empty_module_is_library() {
-    let m = parse("");
-    assert!(!is_executable_mode(&m));
-}
-
-#[test]
-fn is_executable_mode_a0_declarations_only_is_library() {
+fn is_executable_mode_multi_declarator_first_lit_second_side_effect_is_executable() {
+    // `const a = 1, b = compute();` — second declarator triggers exec mode.
+    // Pre-fix: first-only check classified as Lit → library mode (wrong).
+    // Post-fix: ANY-rule classifies as SideEffect → exec mode (correct).
     let m = parse(
-        "function helper() { return 1; }\n\
-         interface Box<T> { value: T; }\n\
-         type Id = number;\n",
+        "function compute(): number { return 7; }\n\
+         const a: number = 1, b: number = compute();\n",
     );
-    assert!(!is_executable_mode(&m));
-}
-
-#[test]
-fn is_executable_mode_a1_stmt_expr_is_executable() {
-    let m = parse("console.log('hi');");
-    assert!(is_executable_mode(&m));
-}
-
-#[test]
-fn is_executable_mode_a2_lit_init_only_is_library() {
-    let m = parse("const x: number = 42;");
-    assert!(!is_executable_mode(&m));
-}
-
-#[test]
-fn is_executable_mode_a3_side_effect_init_is_executable() {
-    let m = parse("declare function f(): number;\nconst x = f();");
-    assert!(is_executable_mode(&m));
-}
-
-#[test]
-fn is_executable_mode_a3_await_init_is_executable() {
-    let m = parse("declare const p: Promise<number>;\nconst x = await p;");
-    assert!(is_executable_mode(&m));
-}
-
-#[test]
-fn is_executable_mode_regex_init_is_executable() {
-    // T2 deep-review fix (cross-predicate consequence of L2-3 Lit::Regex narrow):
-    // regex literal init is now classified as SideEffect (= `Regex::new()` runtime
-    // call, not Rust-const-compatible), so has_side_effect_init returns true and
-    // is_executable_mode triggers. This locks in the post-narrow exec-mode
-    // behavior so any future widening of classify_init_kind that re-includes
-    // Regex into Lit (= ToplevelConst routing → broken Rust emission) fails the
-    // test.
-    let m = parse("const r = /ab/g;");
     assert!(is_executable_mode(&m));
 }
 

@@ -74,6 +74,20 @@ use swc_ecma_ast::{
 use crate::ir::Expr as IrExpr;
 use crate::transformer::Transformer;
 
+// Recursive Await walker sub-module (= I-228 main fix per Spec stage 逆戻り
+// 2026-05-07). Hand-rolled walker covering all 38 SWC Expr variants explicitly,
+// extracted to await_walker.rs to keep mod.rs under the 1000-line file-line check
+// threshold while preserving Rule 11 (d-1) self-applied compliance.
+mod await_walker;
+use await_walker::{class_contains_await_recursive, expr_contains_await_recursive};
+
+// User `main` detection sub-module (B-axis classification + ambient filter +
+// `__ts_main` collision precedence). Extracted from mod.rs for the same
+// file-line reason as await_walker.
+mod user_main;
+#[doc(hidden)] // I-224 internal predicate, exposed for external integration tests.
+pub use user_main::detect_user_main;
+
 /// Top-level execution statement, captured into the synthesized `fn main` body.
 ///
 /// Each variant corresponds to one row of the per-item dispatch table in PRD Design
@@ -275,33 +289,119 @@ pub enum DispatchArm {
 /// the precondition explicitly so any future bypass-path caller surfaces as a
 /// loud panic instead of a silent misclassification.
 pub(crate) fn classify_init_kind(var: &VarDecl) -> InitKind {
-    let Some(first_decl) = var.decls.first() else {
+    if var.decls.is_empty() {
         unreachable!(
             "VarDecl must have at least 1 declarator (TS parser invariant); callers \
              must guard against empty-decls Var via has_side_effect_init / \
              classify_decl_var_path before calling this predicate"
         );
     };
-    match first_decl.init.as_deref() {
-        // Rust-const-compatible Lit variants only (per PRD design intent).
-        Some(Expr::Lit(
-            Lit::Num(_) | Lit::Bool(_) | Lit::Str(_) | Lit::Null(_) | Lit::BigInt(_),
-        )) => InitKind::Lit,
-        Some(Expr::Unary(unary))
-            if matches!(unary.op, UnaryOp::Minus)
-                && matches!(*unary.arg, Expr::Lit(Lit::Num(_) | Lit::BigInt(_))) =>
-        {
-            InitKind::Lit
+    let mut has_init_in_any_declarator = false;
+    let mut has_await = false;
+    let mut has_side_effect = false;
+    for decl in &var.decls {
+        let Some(init) = decl.init.as_deref() else {
+            // Mid-list no-init declarator (e.g., `let a = 1, b;`): TS allows for
+            // `let` only. No contribution to side-effect detection — the lacking
+            // init is a separate concern handled by the existing convert_var_decl_*
+            // path. We continue scanning the remaining declarators rather than
+            // panicking, so a partial-no-init multi-declarator can still be
+            // classified by its initialized declarators.
+            continue;
+        };
+        has_init_in_any_declarator = true;
+        // Recursive Await detection (= I-228 main fix): nested `Expr::Await` inside
+        // an init expression is a top-level await trigger, even if the init's outer
+        // shape isn't Expr::Await directly. Examples:
+        //   const c = process(await fetch());  // outer Call, inner Await arg
+        //   const c = await fetch();           // outer Await directly
+        //   const c = -await x;                // outer Unary, inner Await operand
+        if expr_contains_await_recursive(init) {
+            has_await = true;
+            continue;
         }
-        Some(Expr::Await(_)) => InitKind::AwaitInit,
-        // Lit::Regex / Lit::JSXText fall here: not Rust-const-compatible, route to
-        // FnMainBodyCapture for runtime-evaluated emission (`let r = Regex::new(...)`).
-        Some(_) => InitKind::SideEffect,
-        None => unreachable!(
-            "TS Decl::Var requires init (let/const without init = parse error in strict mode); \
-             callers must guard against no-init Var via has_side_effect_init / \
-             classify_decl_var_path defensive guards"
-        ),
+        match init {
+            // === Rust-const-compatible Lit variants (PRD design intent "Rust `const`
+            // 適合"、I-228-b fix narrows the over-broad bullet enumeration) ===
+            Expr::Lit(Lit::Num(_) | Lit::Bool(_) | Lit::Str(_) | Lit::Null(_) | Lit::BigInt(_)) => {
+            }
+            Expr::Unary(unary)
+                if matches!(unary.op, UnaryOp::Minus)
+                    && matches!(*unary.arg, Expr::Lit(Lit::Num(_) | Lit::BigInt(_))) => {}
+
+            // === Side-effect-bearing variants (= ALL other Expr shapes) ===
+            // Rule 11 (d-1) self-applied compliance: every remaining `Expr` variant
+            // enumerated explicitly, no `_ =>` arm. New SWC variants will produce a
+            // compile error and force this match to be updated. The grouped `|`
+            // pattern keeps the body single-statement while preserving exhaustive
+            // enumeration.
+            Expr::Lit(Lit::Regex(_) | Lit::JSXText(_))
+            | Expr::This(_)
+            | Expr::Ident(_)
+            | Expr::MetaProp(_)
+            | Expr::PrivateName(_)
+            | Expr::Invalid(_)
+            | Expr::JSXEmpty(_)
+            | Expr::JSXNamespacedName(_)
+            | Expr::JSXMember(_)
+            | Expr::Array(_)
+            | Expr::Object(_)
+            | Expr::Fn(_)
+            | Expr::Unary(_) // non-Minus-Lit fallback (after the guarded arm above)
+            | Expr::Update(_)
+            | Expr::Bin(_)
+            | Expr::Assign(_)
+            | Expr::Member(_)
+            | Expr::SuperProp(_)
+            | Expr::Cond(_)
+            | Expr::Call(_)
+            | Expr::New(_)
+            | Expr::Seq(_)
+            | Expr::Tpl(_)
+            | Expr::TaggedTpl(_)
+            | Expr::Arrow(_)
+            | Expr::Class(_)
+            | Expr::Yield(_)
+            | Expr::Await(_) // unreachable in practice (filtered by recursive walker
+                             //   above); enumerated defensively for compile-time
+                             //   exhaustiveness.
+            | Expr::Paren(_)
+            | Expr::JSXElement(_)
+            | Expr::JSXFragment(_)
+            | Expr::TsTypeAssertion(_)
+            | Expr::TsConstAssertion(_)
+            | Expr::TsNonNull(_)
+            | Expr::TsAs(_)
+            | Expr::TsInstantiation(_)
+            | Expr::TsSatisfies(_)
+            | Expr::OptChain(_) => has_side_effect = true,
+        }
+    }
+    // Precondition violation guard: VarDecl with ALL declarators having no init
+    // (= declare-marked Var or empty-init multi-declarator) must be filtered by
+    // upstream defensive guards (`has_side_effect_init` / `classify_decl_var_path`)
+    // before reaching this predicate. Reaching here with no initialized declarator
+    // indicates a caller-side bug; loud panic surfaces it immediately rather than
+    // silently misclassifying.
+    if !has_init_in_any_declarator {
+        unreachable!(
+            "TS Decl::Var requires init in at least one declarator (callers must guard \
+             against all-no-init Var via has_side_effect_init / classify_decl_var_path \
+             defensive guards before calling classify_init_kind)"
+        );
+    }
+    // Precedence: AwaitInit > SideEffect > Lit (= I-228-d ANY-rule per PRD spec
+    // revision 2026-05-07). Multi-declarator with mixed init shapes (e.g.,
+    // `const a = 1, b = compute();`) classifies based on the union of all
+    // declarators' shapes: ANY AwaitInit → AwaitInit, ANY SideEffect → SideEffect,
+    // all Lit → Lit. ToplevelConst routing requires unanimous Lit; FnMainBodyCapture
+    // captures the entire VarDecl into fn main body when ANY declarator triggers.
+    if has_await {
+        InitKind::AwaitInit
+    } else if has_side_effect {
+        InitKind::SideEffect
+    } else {
+        InitKind::Lit
     }
 }
 
@@ -380,10 +480,18 @@ pub fn is_executable_mode(module: &Module) -> bool {
             // === A3 partition (Decl::Var with side-effect / await init) — runtime check ===
             Stmt::Decl(Decl::Var(var)) => has_side_effect_init(var),
 
+            // === Class declaration with outer-context await (I-228 main scope
+            // extension): `class C extends f(await x) {}` evaluates the super_class
+            // / decorators / member computed keys at class-definition time (=
+            // module-load) in the outer async context. await reachability there
+            // requires async fn main, so this is an executable-mode trigger. ===
+            Stmt::Decl(Decl::Class(class_decl)) => {
+                class_contains_await_recursive(&class_decl.class)
+            }
+
             // === Declarations partition — type-system / namespace only, no execution ===
             Stmt::Decl(
                 Decl::Fn(_)
-                | Decl::Class(_)
                 | Decl::TsInterface(_)
                 | Decl::TsTypeAlias(_)
                 | Decl::TsEnum(_)
@@ -419,54 +527,103 @@ pub fn is_executable_mode(module: &Module) -> bool {
             | Stmt::With(_) => false,
         },
 
-        // === Module-level declarations (Axis E E1 partition) — orthogonal ===
-        // Imports / exports / TS-namespace-export / etc. preserve their semantics
-        // regardless of executable_mode (per the PRD Axis E orthogonality probe);
-        // the inner ModuleDecl variant is I-203 scope per Rule 11 (d-6) Architectural
-        // concern relevance.
-        ModuleItem::ModuleDecl(_) => false,
+        // === ExportDecl-wrapped Decl::Var with side-effect / await init (I-228-c
+        // fix、Spec stage 逆戻り 2026-05-07): semantically belongs to Axis A3
+        // partition (= module-load runtime evaluation), so it triggers exec mode
+        // even though the outer ModuleItem is ModuleDecl. The PRD Axis E
+        // orthogonality claim ("export presence is orthogonal to A-axis") holds
+        // for Lit-init export const but NOT for side-effect-init export const,
+        // which requires fn main body capture for Rust-compilable emission. ===
+        ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => match &export.decl {
+            Decl::Var(var) => has_side_effect_init(var),
+            // ExportDecl-wrapped Class: same outer-context await detection as bare
+            // Decl::Class (see I-228 main scope extension above).
+            Decl::Class(class_decl) => class_contains_await_recursive(&class_decl.class),
+            // Other ExportDecl-wrapped Decl variants (Fn / Interface / TypeAlias /
+            // Enum / Module / Using): no executable trigger.
+            Decl::Fn(_)
+            | Decl::TsInterface(_)
+            | Decl::TsTypeAlias(_)
+            | Decl::TsEnum(_)
+            | Decl::TsModule(_)
+            | Decl::Using(_) => false,
+        },
+
+        // === Module-level declarations (Axis E E1 partition、non-ExportDecl) ===
+        // Imports / re-exports / namespace exports / default exports etc. preserve
+        // their semantics regardless of executable_mode (per the PRD Axis E
+        // orthogonality probe); the inner ModuleDecl variant is I-203 scope per
+        // Rule 11 (d-6) Architectural concern relevance.
+        ModuleItem::ModuleDecl(
+            ModuleDecl::Import(_)
+            | ModuleDecl::ExportNamed(_)
+            | ModuleDecl::ExportAll(_)
+            | ModuleDecl::ExportDefaultDecl(_)
+            | ModuleDecl::ExportDefaultExpr(_)
+            | ModuleDecl::TsImportEquals(_)
+            | ModuleDecl::TsExportAssignment(_)
+            | ModuleDecl::TsNamespaceExport(_),
+        ) => false,
     })
 }
 
 /// AST-level scan that returns `true` iff the module body contains a top-level
-/// `await` expression — either as a bare `Stmt::Expr(Expr::Await)` or as the
-/// initializer of a (non-ambient, non-empty-init) `Decl::Var`.
+/// `await` expression reachable WITHOUT crossing a function / arrow / class body
+/// boundary (= same async context as the synthesized fn main body).
+///
+/// **Spec stage 逆戻り (2026-05-07、I-228 fix)**: revised from "AST shape direct
+/// only" (= `Stmt::Expr(Expr::Await)` / `Decl::Var.init = Expr::Await(_)`) to
+/// "**recursive walk** of top-level Stmt::Expr / Decl::Var.init / ExportDecl-
+/// wrapped Decl::Var.init expressions, looking for any [`Expr::Await`] sub-node
+/// not enclosed in a nested function / arrow / class context". The previous
+/// shape-direct interpretation missed `console.log(await fetch())` and similar
+/// nested-await sources, causing T3 to emit sync `fn main` containing `.await`
+/// = Rust E0728 compile error.
 ///
 /// Equivalent to the `has_top_level_await` field of the tuple returned by
 /// [`Transformer::collect_top_level_executions`], but computed without IR
-/// conversion or a [`Transformer`] instance — used by external integration tests
-/// (`tests/i224_helper_test.rs`) that classify the dispatch arm before any T3/T4
-/// emission code lands.
-///
-/// Restricted to the same AST shapes the IR-converting helper recognizes, so the
-/// two computations agree on every module supported by the I-224 problem space.
-///
-/// **Known scope limitation (Spec gap candidate, see TODO `[I-224-NESTED-AWAIT]`)**:
-/// this predicate detects `await` only in the **direct** position
-/// (`Stmt::Expr(Expr::Await)` or `Decl::Var.init = Expr::Await`). Nested
-/// `await` inside a sub-expression (e.g., `console.log(await fetch())` whose
-/// outer is `Stmt::Expr(Call)` not `Stmt::Expr(Await)`) is **not** detected.
-/// The PRD's Axis C definition (Design section #2 line 762) is AST-shape-based
-/// and matches this implementation literally; semantic correctness for nested
-/// awaits requires a recursive walker (out of T2 scope, escalated as a Spec
-/// gap candidate to Spec stage iteration).
+/// conversion or a [`Transformer`] instance.
 #[doc(hidden)] // I-224 internal predicate, exposed for external integration tests.
 pub fn has_top_level_await(module: &Module) -> bool {
     module.body.iter().any(|item| match item {
-        ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => matches!(*expr_stmt.expr, Expr::Await(_)),
+        ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => expr_contains_await_recursive(&expr_stmt.expr),
         ModuleItem::Stmt(Stmt::Decl(Decl::Var(var))) => {
             if var.declare {
                 return false;
             }
-            var.decls.iter().any(|d| {
-                d.init
-                    .as_deref()
-                    .is_some_and(|e| matches!(e, Expr::Await(_)))
-            })
+            var.decls
+                .iter()
+                .any(|d| d.init.as_deref().is_some_and(expr_contains_await_recursive))
         }
-        // All other ModuleItem shapes (declarations / control-flow / Empty / Debugger /
-        // Module-level imports/exports) cannot host a top-level await per the AST
-        // mutual exclusion locked in by `tests/swc_parser_top_level_await_test.rs`.
+        // ExportDecl-wrapped Decl::Var (I-228-c fix): `export const c = await fetch();`
+        // is `ModuleDecl::ExportDecl(ExportDecl { decl: Decl::Var(...) })`. Treated
+        // semantically the same as bare `Stmt::Decl(Decl::Var)` for top-level await
+        // detection purposes (= same recursive walk).
+        ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => match &export.decl {
+            Decl::Var(var) if !var.declare => var
+                .decls
+                .iter()
+                .any(|d| d.init.as_deref().is_some_and(expr_contains_await_recursive)),
+            // ExportDecl-wrapped Class: outer-context await detection (super_class /
+            // decorators / member computed keys) — same as bare Decl::Class case.
+            Decl::Class(class_decl) => class_contains_await_recursive(&class_decl.class),
+            // Other ExportDecl-wrapped declarations (Fn / Interface / TypeAlias /
+            // Enum / Module / Using or declare-marked Var): no init expr / outer-
+            // context expression reachable from top-level execution.
+            Decl::Fn(_)
+            | Decl::TsInterface(_)
+            | Decl::TsTypeAlias(_)
+            | Decl::TsEnum(_)
+            | Decl::TsModule(_)
+            | Decl::Using(_)
+            | Decl::Var(_) => false,
+        },
+        // All other ModuleItem shapes cannot host a top-level await: control-flow /
+        // Empty / Debugger never reach this predicate (= rejected upstream by
+        // transform_module_item Tier 2 honest reject), and remaining ModuleDecl
+        // variants (Import / ExportNamed / ExportAll / ExportDefaultDecl /
+        // ExportDefaultExpr / TsImportEquals / TsExportAssignment /
+        // TsNamespaceExport) do not introduce top-level execution expressions.
         ModuleItem::Stmt(
             Stmt::Block(_)
             | Stmt::Empty(_)
@@ -487,7 +644,6 @@ pub fn has_top_level_await(module: &Module) -> bool {
             | Stmt::ForOf(_)
             | Stmt::Decl(
                 Decl::Fn(_)
-                | Decl::Class(_)
                 | Decl::TsInterface(_)
                 | Decl::TsTypeAlias(_)
                 | Decl::TsEnum(_)
@@ -495,253 +651,24 @@ pub fn has_top_level_await(module: &Module) -> bool {
                 | Decl::Using(_),
             ),
         ) => false,
-        ModuleItem::ModuleDecl(_) => false,
+        // === Bare Decl::Class with outer-context await (I-228 main scope
+        // extension): super_class / decorators / member computed keys are
+        // evaluated at class-definition time. Reuses the same walker as
+        // is_executable_mode + Expr::Class to keep the two paths in lock-step. ===
+        ModuleItem::Stmt(Stmt::Decl(Decl::Class(class_decl))) => {
+            class_contains_await_recursive(&class_decl.class)
+        }
+        ModuleItem::ModuleDecl(
+            ModuleDecl::Import(_)
+            | ModuleDecl::ExportNamed(_)
+            | ModuleDecl::ExportAll(_)
+            | ModuleDecl::ExportDefaultDecl(_)
+            | ModuleDecl::ExportDefaultExpr(_)
+            | ModuleDecl::TsImportEquals(_)
+            | ModuleDecl::TsExportAssignment(_)
+            | ModuleDecl::TsNamespaceExport(_),
+        ) => false,
     })
-}
-
-/// Classifies a single module-level identifier `name` introduced by a declaration of
-/// shape `shape` into a [`UserMainKind`], or `None` if `name` is unrelated.
-///
-/// **Shape parameter**: encodes the structural kind of the declaration's value
-/// (`Fn { is_async }` for callable shapes, `NonFn` for non-callable). This lets the
-/// classifier produce `FnSync` vs `FnAsync` vs `NonFn` without inspecting the AST itself.
-fn classify_main_identifier(name: &str, shape: DeclShape) -> Option<UserMainKind> {
-    if name == "__ts_main" {
-        // B4: collides with the synthesized rename target.
-        Some(UserMainKind::Collision)
-    } else if name == "main" {
-        match shape {
-            DeclShape::Fn { is_async: false } => Some(UserMainKind::FnSync),
-            DeclShape::Fn { is_async: true } => Some(UserMainKind::FnAsync),
-            DeclShape::NonFn => Some(UserMainKind::NonFn),
-        }
-    } else {
-        // Other identifiers (including non-`__ts_main` `__ts_*` namespace violations,
-        // which are rejected separately by `scan_for_ts_namespace_collisions`) are
-        // not B-axis triggers.
-        None
-    }
-}
-
-/// Structural shape of a declaration's value, passed to [`classify_main_identifier`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DeclShape {
-    /// Callable shape: `function`, arrow init, fn-expr init.
-    Fn { is_async: bool },
-    /// Non-callable shape: class / interface / type alias / enum / namespace /
-    /// non-callable Var init.
-    NonFn,
-}
-
-/// Returns `true` if `decl` is an ambient (`declare`-marked) declaration that
-/// emits no Rust runtime construct.
-///
-/// The PRD's B-axis (Axis B) classifies user-defined `main` symbols by their
-/// **runtime shape** — `function main()` with a body becomes B1 / B2 (callable),
-/// `class main { ... }` with a runtime constructor becomes B3 (non-callable
-/// preserved into Rust). Ambient counterparts (`declare function main(): void;`,
-/// `declare class main {}`, `declare const main: T;`, `declare enum main`,
-/// `declare namespace main`) are TS-namespace-only — they assert the existence
-/// of `main` at runtime without providing a body. From the Rust transpiler's POV
-/// they introduce no rename target (no body to rename) and no preserved Rust
-/// item (nothing to emit), so they are **not B-axis triggers** and are
-/// classified as B0 (No user main).
-///
-/// **Interface / type alias** are inherently type-only regardless of the
-/// `declare` keyword (TS spec); they remain B3 NonFn (= name preserved in TS
-/// namespace, no Rust-side collision because Rust type / value namespaces are
-/// disjoint). **Using declarations** are runtime resource bindings, never
-/// `declare`-marked in practice.
-///
-/// **Collision precedence note**: ambient `__ts_main` (`declare function
-/// __ts_main(): void;`) is independently rejected by the namespace lint
-/// (`scan_for_ts_namespace_collisions` in `transformer/mod.rs`) regardless of
-/// this filter — the namespace reservation invariant operates at the
-/// identifier level, not the AST-shape level. Treating ambient `__ts_main` as
-/// B0 here is therefore consistent with namespace-lint semantics: the lint
-/// fires upstream, and the dispatch tree never sees the source.
-fn is_ambient_decl(decl: &Decl) -> bool {
-    match decl {
-        Decl::Fn(fn_decl) => fn_decl.declare,
-        Decl::Var(var_decl) => var_decl.declare,
-        Decl::Class(class_decl) => class_decl.declare,
-        Decl::TsEnum(enum_decl) => enum_decl.declare,
-        Decl::TsModule(module_decl) => module_decl.declare,
-        // Always type-only — declare keyword is redundant.
-        Decl::TsInterface(_) | Decl::TsTypeAlias(_) => false,
-        // Runtime resource bindings.
-        Decl::Using(_) => false,
-    }
-}
-
-/// Classifies a [`Decl`] for B-axis main detection.
-///
-/// **Rule 11 (d-1) compliance**: every `Decl` variant is enumerated.
-fn detect_user_main_from_decl(decl: &Decl) -> Option<UserMainKind> {
-    if is_ambient_decl(decl) {
-        // Ambient declarations introduce no Rust runtime construct (see
-        // [`is_ambient_decl`]'s docstring); they are not B-axis triggers.
-        return None;
-    }
-    match decl {
-        Decl::Fn(fn_decl) => {
-            let shape = DeclShape::Fn {
-                is_async: fn_decl.function.is_async,
-            };
-            classify_main_identifier(fn_decl.ident.sym.as_str(), shape)
-        }
-        Decl::Var(var_decl) => {
-            for declarator in &var_decl.decls {
-                let ast::Pat::Ident(binding) = &declarator.name else {
-                    // Destructuring (`const { main } = ...` / `const [main] = ...`) is not a
-                    // documented B-axis vector; the matrix's B variants only cover plain
-                    // BindingIdent. Skip.
-                    continue;
-                };
-                let name = binding.id.sym.as_str();
-                let shape = match declarator.init.as_deref() {
-                    Some(Expr::Arrow(arrow)) => DeclShape::Fn {
-                        is_async: arrow.is_async,
-                    },
-                    Some(Expr::Fn(fn_expr)) => DeclShape::Fn {
-                        is_async: fn_expr.function.is_async,
-                    },
-                    // Any other init (Lit / Call / Ident / etc.) is non-callable from
-                    // the B-axis perspective: `const main = 42;` is B3 (NonFn).
-                    Some(_) | None => DeclShape::NonFn,
-                };
-                if let Some(kind) = classify_main_identifier(name, shape) {
-                    return Some(kind);
-                }
-            }
-            None
-        }
-        Decl::Class(class_decl) => {
-            classify_main_identifier(class_decl.ident.sym.as_str(), DeclShape::NonFn)
-        }
-        Decl::TsInterface(interface) => {
-            classify_main_identifier(interface.id.sym.as_str(), DeclShape::NonFn)
-        }
-        Decl::TsTypeAlias(alias) => {
-            classify_main_identifier(alias.id.sym.as_str(), DeclShape::NonFn)
-        }
-        Decl::TsEnum(enum_decl) => {
-            classify_main_identifier(enum_decl.id.sym.as_str(), DeclShape::NonFn)
-        }
-        Decl::TsModule(module_decl) => match &module_decl.id {
-            ast::TsModuleName::Ident(ident) => {
-                classify_main_identifier(ident.sym.as_str(), DeclShape::NonFn)
-            }
-            // Ambient string-named modules (`declare module "fs" { ... }`) do not
-            // introduce a B-axis identifier in the user's namespace.
-            ast::TsModuleName::Str(_) => None,
-        },
-        Decl::Using(using_decl) => {
-            for declarator in &using_decl.decls {
-                let ast::Pat::Ident(binding) = &declarator.name else {
-                    continue;
-                };
-                if let Some(kind) =
-                    classify_main_identifier(binding.id.sym.as_str(), DeclShape::NonFn)
-                {
-                    return Some(kind);
-                }
-            }
-            None
-        }
-    }
-}
-
-/// Classifies an [`ast::DefaultDecl`] (the inner of `export default function main() {}`
-/// etc.) for B-axis main detection.
-fn detect_user_main_from_default_decl(decl: &ast::DefaultDecl) -> Option<UserMainKind> {
-    match decl {
-        ast::DefaultDecl::Fn(fn_expr) => fn_expr.ident.as_ref().and_then(|ident| {
-            let shape = DeclShape::Fn {
-                is_async: fn_expr.function.is_async,
-            };
-            classify_main_identifier(ident.sym.as_str(), shape)
-        }),
-        ast::DefaultDecl::Class(class_expr) => class_expr
-            .ident
-            .as_ref()
-            .and_then(|ident| classify_main_identifier(ident.sym.as_str(), DeclShape::NonFn)),
-        ast::DefaultDecl::TsInterfaceDecl(interface) => {
-            classify_main_identifier(interface.id.sym.as_str(), DeclShape::NonFn)
-        }
-    }
-}
-
-/// Walks `module.body` and returns the [`UserMainKind`] for the user's `main` /
-/// `__ts_main` symbol (or `None` if neither is present).
-///
-/// **Collision precedence (B4 priority)**: when the body contains both a
-/// `__ts_main` collision marker AND a non-collision `main` declaration,
-/// [`UserMainKind::Collision`] wins — matching the PRD dispatch tree's
-/// `(_, Collision, _)` arm having priority over A/C-axis dispatch.
-///
-/// **Rule 11 (d-1) compliance**: every `ModuleItem` / `ModuleDecl` variant that can
-/// introduce a module-level identifier is enumerated.
-#[doc(hidden)] // I-224 internal predicate, exposed for external integration tests.
-pub fn detect_user_main(module: &Module) -> UserMainKind {
-    let mut detected = UserMainKind::None;
-    for item in &module.body {
-        let candidate: Option<UserMainKind> = match item {
-            ModuleItem::Stmt(Stmt::Decl(decl)) => detect_user_main_from_decl(decl),
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => {
-                detect_user_main_from_decl(&export.decl)
-            }
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(default)) => {
-                detect_user_main_from_default_decl(&default.decl)
-            }
-            // The remaining ModuleDecl variants (Import / ExportNamed / ExportAll /
-            // ExportDefaultExpr / TsImportEquals / TsExportAssignment /
-            // TsNamespaceExport) carry references to already-declared names rather
-            // than introducing fresh ones — no B-axis detection here.
-            ModuleItem::ModuleDecl(
-                ModuleDecl::Import(_)
-                | ModuleDecl::ExportNamed(_)
-                | ModuleDecl::ExportAll(_)
-                | ModuleDecl::ExportDefaultExpr(_)
-                | ModuleDecl::TsImportEquals(_)
-                | ModuleDecl::TsExportAssignment(_)
-                | ModuleDecl::TsNamespaceExport(_),
-            ) => None,
-            // Non-Decl Stmt variants do not introduce module-level identifiers.
-            ModuleItem::Stmt(
-                Stmt::Block(_)
-                | Stmt::Empty(_)
-                | Stmt::Debugger(_)
-                | Stmt::With(_)
-                | Stmt::Return(_)
-                | Stmt::Labeled(_)
-                | Stmt::Break(_)
-                | Stmt::Continue(_)
-                | Stmt::If(_)
-                | Stmt::Switch(_)
-                | Stmt::Throw(_)
-                | Stmt::Try(_)
-                | Stmt::While(_)
-                | Stmt::DoWhile(_)
-                | Stmt::For(_)
-                | Stmt::ForIn(_)
-                | Stmt::ForOf(_)
-                | Stmt::Expr(_),
-            ) => None,
-        };
-        if let Some(kind) = candidate {
-            // Collision wins immediately (= INV-5 priority); other kinds fill the
-            // first non-None slot and are not overwritten by later non-collision
-            // detections (first-decl precedence within the non-collision class).
-            if kind == UserMainKind::Collision {
-                return UserMainKind::Collision;
-            }
-            if detected == UserMainKind::None {
-                detected = kind;
-            }
-        }
-    }
-    detected
 }
 
 /// Returns the [`DispatchArm`] selected by the `(is_executable_mode, user_main_kind,
@@ -839,14 +766,9 @@ impl<'a> Transformer<'a> {
         let mut main_stmts = Vec::new();
 
         for item in &module.body {
-            // Per-Stmt processing only; ModuleDecl items (imports / exports /
-            // namespace exports) are orthogonal to fn main capture (Axis E).
-            let ModuleItem::Stmt(stmt) = item else {
-                continue;
-            };
-
-            match stmt {
-                Stmt::Expr(expr_stmt) => {
+            match item {
+                // ============== Stmt::Expr (top-level execution) ==============
+                ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => {
                     if !exec_mode {
                         // Library mode never hosts Stmt::Expr per `is_executable_mode`
                         // definition; reaching this arm in library mode would be a
@@ -858,6 +780,10 @@ impl<'a> Transformer<'a> {
                              fix is_executable_mode or this scan loop"
                         );
                     }
+                    // Bare `await x;` → MainStmt::ExprAwait (T3 emits `<inner>.await;`).
+                    // Nested await `f(await x);` → MainStmt::Expr (= whole IR; the inner
+                    // Expr::Await sub-node is preserved by convert_expr and rendered as
+                    // `.await` by T3 emission within the async fn main context).
                     if let Expr::Await(await_expr) = &*expr_stmt.expr {
                         let inner = self.convert_expr(&await_expr.arg)?;
                         main_stmts.push(MainStmt::ExprAwait(inner));
@@ -867,72 +793,50 @@ impl<'a> Transformer<'a> {
                     }
                 }
 
-                Stmt::Decl(Decl::Var(var)) => {
-                    let path = classify_decl_var_path(var, exec_mode);
-                    match path {
-                        DeclVarPath::FnMainBodyCapture => {
-                            // `classify_decl_var_path` returning FnMainBodyCapture
-                            // guarantees a non-ambient Var with a non-empty first
-                            // declarator that has an init expression — those are the
-                            // exact preconditions of `classify_init_kind`. The
-                            // `let-else` + `unreachable!` pair re-declares the
-                            // invariant explicitly so any future driver that bypasses
-                            // `classify_decl_var_path` fails loudly here instead of
-                            // misclassifying a missing init.
-                            let Some(first) = var.decls.first() else {
-                                unreachable!(
-                                    "FnMainBodyCapture path implies var.decls.first().is_some() \
-                                     — classify_decl_var_path filtered empty-decls Var"
-                                );
-                            };
-                            let init_kind = classify_init_kind(var);
-                            let ast::Pat::Ident(binding) = &first.name else {
-                                // Destructuring captures (`const { a } = compute()`) are not
-                                // a documented Axis A3 sub-shape; the matrix only enumerates
-                                // BindingIdent. Skip the capture and let the existing
-                                // library-mode path handle it (T4 will decide whether to
-                                // upgrade this).
-                                continue;
-                            };
-                            let name = binding.id.sym.to_string();
-                            let Some(init_expr) = first.init.as_deref() else {
-                                unreachable!(
-                                    "FnMainBodyCapture path implies first.init.is_some() — \
-                                     classify_decl_var_path filtered no-init Var"
-                                );
-                            };
-                            match init_kind {
-                                InitKind::AwaitInit => {
-                                    let Expr::Await(await_expr) = init_expr else {
-                                        unreachable!(
-                                            "classify_init_kind returned AwaitInit but init is \
-                                             not Expr::Await — `classify_init_kind` and this \
-                                             extraction must stay in sync"
-                                        );
-                                    };
-                                    let inner = self.convert_expr(&await_expr.arg)?;
-                                    main_stmts.push(MainStmt::LetAwait { name, init: inner });
-                                }
-                                InitKind::SideEffect => {
-                                    let init = self.convert_expr(init_expr)?;
-                                    main_stmts.push(MainStmt::Let { name, init });
-                                }
-                                InitKind::Lit => unreachable!(
-                                    "FnMainBodyCapture path implies non-Lit init (see \
-                                     classify_decl_var_path's table); a Lit init would route \
-                                     to ToplevelConst"
-                                ),
-                            }
-                        }
-                        // ToplevelConst / LibraryMode: emitted by transform_module_item via
-                        // the existing convert_var_decl_module_level path; no main_stmts push.
-                        DeclVarPath::ToplevelConst | DeclVarPath::LibraryMode => {}
-                    }
+                // ============== Decl::Var (capture or top-level const path) ==============
+                ModuleItem::Stmt(Stmt::Decl(Decl::Var(var))) => {
+                    self.capture_var_decl_into_main_stmts(var, exec_mode, &mut main_stmts)?;
                 }
 
+                // ============== ExportDecl-wrapped Decl::Var (I-228-c fix) ==============
+                // `export const c = compute();` semantically belongs to Axis A3
+                // (= side-effect Decl::Var) when init is non-Lit. is_executable_mode
+                // now triggers on this shape, so we capture it identically to bare
+                // Stmt::Decl(Decl::Var) — the `pub` modifier of the export is dropped
+                // (= cosmetic loss for executable mode、PRD Spec stage 逆戻り Axis E
+                // orthogonality merge revision 2026-05-07)。Other ExportDecl-wrapped
+                // Decl variants (Fn / Class / Interface / TypeAlias / Enum / Module /
+                // Using) are emitted by transform_module_item via existing path with
+                // `pub` modifier preserved — no main_stmts capture.
+                ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => match &export.decl {
+                    Decl::Var(var) => {
+                        self.capture_var_decl_into_main_stmts(var, exec_mode, &mut main_stmts)?;
+                    }
+                    Decl::Fn(_)
+                    | Decl::Class(_)
+                    | Decl::TsInterface(_)
+                    | Decl::TsTypeAlias(_)
+                    | Decl::TsEnum(_)
+                    | Decl::TsModule(_)
+                    | Decl::Using(_) => {}
+                },
+
+                // ============== Other ModuleDecl: no capture ==============
+                ModuleItem::ModuleDecl(
+                    ModuleDecl::Import(_)
+                    | ModuleDecl::ExportNamed(_)
+                    | ModuleDecl::ExportAll(_)
+                    | ModuleDecl::ExportDefaultDecl(_)
+                    | ModuleDecl::ExportDefaultExpr(_)
+                    | ModuleDecl::TsImportEquals(_)
+                    | ModuleDecl::TsExportAssignment(_)
+                    | ModuleDecl::TsNamespaceExport(_),
+                ) => {}
+
+                // ============== Stmt: declarations / control-flow / Empty / Debugger ==============
                 // Declarations (Fn / Class / Interface / TypeAlias / Enum / Module / Using):
                 // emitted as Rust items by transform_module_item; not main_stmts capture.
-                Stmt::Decl(
+                ModuleItem::Stmt(Stmt::Decl(
                     Decl::Fn(_)
                     | Decl::Class(_)
                     | Decl::TsInterface(_)
@@ -940,36 +844,108 @@ impl<'a> Transformer<'a> {
                     | Decl::TsEnum(_)
                     | Decl::TsModule(_)
                     | Decl::Using(_),
-                ) => {}
+                )) => {}
 
                 // A5a Empty: silent skip per the per-item dispatch table; no capture.
-                Stmt::Empty(_) => {}
+                ModuleItem::Stmt(Stmt::Empty(_)) => {}
 
                 // A5b Debugger + A4 control-flow: rejected by transform_module_item
                 // (Tier 2 honest reject); reaching this scan in executable mode is
                 // possible only in collecting mode where transform_module_collecting
                 // accumulates errors and continues. Skip the capture; the rejection
                 // is recorded by the caller's accumulator.
-                Stmt::Debugger(_) => {}
-                Stmt::Block(_)
-                | Stmt::If(_)
-                | Stmt::Switch(_)
-                | Stmt::Throw(_)
-                | Stmt::Try(_)
-                | Stmt::While(_)
-                | Stmt::DoWhile(_)
-                | Stmt::For(_)
-                | Stmt::ForIn(_)
-                | Stmt::ForOf(_)
-                | Stmt::Labeled(_)
-                | Stmt::Continue(_)
-                | Stmt::Break(_)
-                | Stmt::Return(_)
-                | Stmt::With(_) => {}
+                ModuleItem::Stmt(Stmt::Debugger(_)) => {}
+                ModuleItem::Stmt(
+                    Stmt::Block(_)
+                    | Stmt::If(_)
+                    | Stmt::Switch(_)
+                    | Stmt::Throw(_)
+                    | Stmt::Try(_)
+                    | Stmt::While(_)
+                    | Stmt::DoWhile(_)
+                    | Stmt::For(_)
+                    | Stmt::ForIn(_)
+                    | Stmt::ForOf(_)
+                    | Stmt::Labeled(_)
+                    | Stmt::Continue(_)
+                    | Stmt::Break(_)
+                    | Stmt::Return(_)
+                    | Stmt::With(_),
+                ) => {}
             }
         }
 
         Ok((main_stmts, user_main_kind, has_top_level_await_flag))
+    }
+
+    /// Helper for [`Self::collect_top_level_executions`]: walks every declarator
+    /// of a (non-ambient) `VarDecl` whose `classify_decl_var_path` resolves to
+    /// `FnMainBodyCapture`, and pushes one [`MainStmt::Let`] / [`MainStmt::LetAwait`]
+    /// per declarator into `main_stmts`.
+    ///
+    /// **I-228-d multi-declarator iteration (Spec stage 逆戻り 2026-05-07)**:
+    /// `const a = 1, b = compute();` previously routed only the first declarator
+    /// to capture; now all declarators are captured (= each becomes its own
+    /// `let` binding inside fn main body, source-order preserved). When the
+    /// VarDecl's [`classify_init_kind`] returns [`InitKind::AwaitInit`] (= ANY
+    /// declarator contains await per the recursive walker) or
+    /// [`InitKind::SideEffect`], routing to FnMainBodyCapture forces all
+    /// declarators (including pure-Lit ones in mixed-init VarDecls) into local
+    /// `let` bindings inside fn main; the `pub const` form is dropped to
+    /// preserve TS module-load source-order semantics in Rust execution.
+    ///
+    /// **Per-declarator MainStmt variant selection**: `MainStmt::LetAwait` is
+    /// emitted only for the **bare-Await** init shape (`const c = await fetch();`)
+    /// where the awaitee can be cleanly extracted; nested-await init shapes
+    /// (e.g., `const c = process(await fetch());`) emit `MainStmt::Let` with the
+    /// whole IR expression — convert_expr preserves `Expr::Await` sub-nodes,
+    /// and T3 emission renders them as `.await` within the async fn main
+    /// context.
+    ///
+    /// **DeclVarPath::ToplevelConst / LibraryMode**: no main_stmts capture; the
+    /// existing `convert_var_decl_module_level` path emits the top-level
+    /// `Item::Const` (Lit init) or library-mode binding (declare-marked / no-init).
+    fn capture_var_decl_into_main_stmts(
+        &mut self,
+        var: &VarDecl,
+        is_executable_mode_flag: bool,
+        main_stmts: &mut Vec<MainStmt>,
+    ) -> Result<()> {
+        match classify_decl_var_path(var, is_executable_mode_flag) {
+            DeclVarPath::FnMainBodyCapture => {
+                for decl in &var.decls {
+                    let ast::Pat::Ident(binding) = &decl.name else {
+                        // Destructuring captures (`const { a } = compute()` /
+                        // `const [a] = arr`) are not enumerated by the I-224 matrix.
+                        // Skip the per-declarator capture; the existing path will
+                        // surface this as an unsupported pattern (T4 may revisit).
+                        continue;
+                    };
+                    let name = binding.id.sym.to_string();
+                    let Some(init_expr) = decl.init.as_deref() else {
+                        // No init in this declarator (= mid-list `let a = 1, b;`
+                        // type or other rare TS shape). Skip capture.
+                        continue;
+                    };
+                    if let Expr::Await(await_expr) = init_expr {
+                        // Bare-Await init: extract awaitee, emit LetAwait (T3 applies
+                        // `.await` based on the variant tag).
+                        let inner = self.convert_expr(&await_expr.arg)?;
+                        main_stmts.push(MainStmt::LetAwait { name, init: inner });
+                    } else {
+                        // All other init shapes (Lit / SideEffect / nested-Await):
+                        // emit Let with the whole IR. For nested-await, convert_expr
+                        // preserves the inner `Expr::Await` sub-node which T3 emission
+                        // renders as `.await` within the async fn main context.
+                        let init = self.convert_expr(init_expr)?;
+                        main_stmts.push(MainStmt::Let { name, init });
+                    }
+                }
+            }
+            // ToplevelConst / LibraryMode: no main_stmts capture.
+            DeclVarPath::ToplevelConst | DeclVarPath::LibraryMode => {}
+        }
+        Ok(())
     }
 }
 
