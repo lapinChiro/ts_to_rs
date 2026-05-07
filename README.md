@@ -307,7 +307,8 @@ src/
 │   ├── classes/         # クラス変換
 │   ├── functions/       # 関数変換
 │   ├── statements/      # 文の変換（mutability 推論含む）
-│   └── expressions/     # 式の変換
+│   ├── expressions/     # 式の変換
+│   └── main_synthesis/  # I-224 fn main 合成: top-level 実行 capture + axis 分類 + dispatch arm
 ├── generator/           # IR → Rust ソースコード生成
 │   ├── mod.rs           # 公開 API + Item 生成
 │   ├── types.rs         # 型の生成

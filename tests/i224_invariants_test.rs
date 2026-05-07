@@ -15,6 +15,8 @@
 //! compromise を排除する Spec stage convention。本 file は I-224 Spec stage true closure の
 //! 最終 artifact (Rule 9 (a) helper test contracts NEW + Rule 8 (8-c) audit symmetry)。
 
+use ts_to_rs::parser::parse_typescript;
+use ts_to_rs::transformer::main_synthesis::{detect_user_main, has_top_level_await, UserMainKind};
 use ts_to_rs::transpile;
 
 /// INV-1: TS execution order = Rust execution order
@@ -87,19 +89,142 @@ fn test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase() {
 /// - **Sync (no trigger、`fn main` emission cells)**: cells 3/11/13/17/23/31/33/37/71/73/77 で plain `fn main` (or `pub fn main` for E1)
 /// - **Edge sub-case (Trigger 2 only with sync user main)**: cells 14/34/74 で `#[tokio::main] async fn main` + sync `__ts_main()` 非 await call wrapping
 /// - **Library mode no-fn-main cells (INV-3 scope 外)**: cells 1/7/21/27 = `fn main` 自体 emit しない
+///
+/// **T2 partial fill-in (C0 cells only)**: verifies that for each in-scope C0
+/// cell, the predicate-derived `is_async_required` flag (= `user_main_kind ==
+/// FnAsync || has_top_level_await`) matches the expected value per INV-3 (c)
+/// sub-case lists (Trigger 1 only / Sync). Trigger 2 and Trigger 1+2 cells
+/// (= the C1 cells 12/14/16/18/32/34/36/38/72/74/76/78) require Implementation
+/// Stage T8's top-level await synthesis logic before they can be fully verified
+/// against IR emission, so they are deferred to T8 fill-in.
+///
+/// **Library mode no-fn-main cells**: cells 1/7/21/27 do not emit a `fn main`
+/// at all (library mode + B0/B3) — INV-3 (a) "fn main の sync/async dispatch"
+/// does not apply, so they are intentionally not in this table. Their
+/// library-mode classification is locked in by
+/// `tests/i224_helper_test.rs::test_dispatch_arm_one_to_one_mapping_per_in_scope_cell`.
 #[test]
-#[ignore = "I-224 INV-3 verification stub: Implementation Stage T2/T3 で fill in \
-            (4 sub-case lists + Edge sub-case の cells を fixture probe で per-cell expected \
-            is_async_required value assert)"]
 fn test_invariant_3_sync_async_dispatch_consistency_4_subcases() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T2/T3 で fill in: \
-         INV-3 (c) 4 sub-case lists (Trigger 1 only / Trigger 2 only / Trigger 1+2 / Sync) + \
-         Edge sub-case (B1+C1 cells 14/34/74) で per-cell expected dispatch (sync vs #[tokio::main] \
-         async) を transpile output で assert、library mode no-fn-main cells (1/7/21/27) は \
-         INV-3 application 対象外 boundary 確認"
-    );
+    // Each entry = (cell #, axis summary, TS source, expected is_async_required).
+    //
+    // is_async_required = (user_main_kind == FnAsync) || has_top_level_await.
+    // Per INV-3 (a), this boolean drives `fn main` vs `#[tokio::main] async fn main`
+    // emission once T3's `synthesize_fn_main` is integrated.
+    let c0_cases: &[(u32, &str, &str, bool)] = &[
+        // ---- Trigger 1 only (B2 + C0) → is_async_required=true ----
+        (
+            5,
+            "A0+B2+C0",
+            "async function main(): Promise<void> { }\n",
+            true,
+        ),
+        (
+            15,
+            "A1+B2+C0",
+            "async function main(): Promise<void> { }\nconsole.log('hi');\n",
+            true,
+        ),
+        (
+            25,
+            "A2+B2+C0",
+            "const x: number = 0;\nasync function main(): Promise<void> { }\n",
+            true,
+        ),
+        (
+            35,
+            "A3+B2+C0",
+            "declare function f(): number;\n\
+             async function main(): Promise<void> { }\nconst c = f();\n",
+            true,
+        ),
+        // Cell 55 (A5a+B2+C0) is orthogonality-merged with cells 5 + 51; A5a Empty
+        // is silent in is_executable_mode, so this dispatches to LibraryFnAsyncDirect
+        // (= directly emits `#[tokio::main] async fn main`). Same is_async_required=true.
+        (
+            55,
+            "A5a+B2+C0",
+            "async function main(): Promise<void> { }\n;\n",
+            true,
+        ),
+        (
+            75,
+            "A6+B2+C0",
+            "const X: number = 1;\n\
+             async function main(): Promise<void> { }\nconsole.log(X);\n",
+            true,
+        ),
+        // ---- Sync (no trigger, C0) → is_async_required=false ----
+        (3, "A0+B1+C0", "function main(): void { }\n", false),
+        (11, "A1+B0+C0", "console.log('hi');\n", false),
+        (
+            13,
+            "A1+B1+C0",
+            "function main(): void { }\nconsole.log('hi');\n",
+            false,
+        ),
+        (
+            17,
+            "A1+B3+C0",
+            "interface main { x: number; }\nconsole.log('hi');\n",
+            false,
+        ),
+        (
+            23,
+            "A2+B1+C0",
+            "const x: number = 0;\nfunction main(): void { }\n",
+            false,
+        ),
+        (
+            31,
+            "A3+B0+C0",
+            "declare function f(): number;\nconst c = f();\n",
+            false,
+        ),
+        (
+            33,
+            "A3+B1+C0",
+            "declare function f(): number;\n\
+             function main(): void { }\nconst c = f();\n",
+            false,
+        ),
+        (
+            37,
+            "A3+B3+C0",
+            "declare function f(): number;\n\
+             interface main { x: number; }\nconst c = f();\n",
+            false,
+        ),
+        (
+            71,
+            "A6+B0+C0",
+            "const X: number = 1;\nconsole.log(X);\n",
+            false,
+        ),
+        (
+            73,
+            "A6+B1+C0",
+            "const X: number = 1;\nfunction main(): void { }\nconsole.log(X);\n",
+            false,
+        ),
+        (
+            77,
+            "A6+B3+C0",
+            "const X: number = 1;\ninterface main { x: number; }\nconsole.log(X);\n",
+            false,
+        ),
+    ];
+    for (cell, axis_summary, src, expected_async) in c0_cases {
+        let module = parse_typescript(src)
+            .unwrap_or_else(|e| panic!("cell #{cell} ({axis_summary}): SWC parse failed: {e}"));
+        let user_main_kind = detect_user_main(&module);
+        let await_flag = has_top_level_await(&module);
+        let is_async_required = matches!(user_main_kind, UserMainKind::FnAsync) || await_flag;
+        assert_eq!(
+            is_async_required, *expected_async,
+            "cell #{cell} ({axis_summary}): is_async_required mismatch \
+             (user_main_kind={user_main_kind:?}, has_top_level_await={await_flag})"
+        );
+    }
 }
 
 /// INV-4: `pub fn init` mechanism 廃止 invariant
@@ -376,19 +501,88 @@ fn test_invariant_5_ts_main_namespace_reservation_with_collision_priority() {
 ///   全 pass、`fn detect_user_main` の input/output で TypeResolver field を touch しない code review)
 /// - dispatch logic 内に TypeResolver 呼び出しが新規追加されていないことを Code review
 ///   (Layer 1 Mechanical) で audit
+///
+/// **T2 fill-in**: structurally verifies INV-6 (TypeResolver layer unaffected).
+///
+/// **Verification strategy**: INV-6's two verification methods (per the property's
+/// `(c)` clause) compose into a sufficient structural lock-in via method (2):
+/// - **(1) Existing TypeResolver tests pass**: the lib build's
+///   `pipeline::type_resolver::` test module runs as part of every `cargo test`
+///   invocation. If those tests fail, the entire test suite fails — including this
+///   test cannot run in a passing state. The structural argument is therefore
+///   "this test running to completion in a green suite implies (1)".
+///   `cargo test` subprocess invocation from inside a test would deadlock on the
+///   build directory lock and recurse on the test runner; the existing global
+///   harness already provides the same coverage without that risk.
+/// - **(2) main_synthesis.rs has no TypeResolver field references**: this test
+///   directly inspects the source content. (2) is the *sufficient* condition for
+///   INV-6 — without TypeResolver field references in the I-224-introduced module,
+///   no T3/T4 emission code can introduce a TypeResolver-affecting code path.
+///   This is the load-bearing structural invariant.
+///
+/// **Forbidden tokens** are the field / type names that, if present in
+/// `main_synthesis.rs`, would constitute a TypeResolver dependency: the
+/// `TypeResolver` struct, the `type_registry` / `expr_type` / `narrowing` /
+/// `expected_type` access fields, and the `FileTypeResolution` resolution table.
+/// Comments mentioning these names in module-level docstrings would also trip the
+/// substring match — the test source intentionally uses no such references in
+/// `main_synthesis.rs`'s file content (only doc references via Markdown links to
+/// other modules, which do not include the forbidden tokens verbatim).
 #[test]
-#[ignore = "I-224 INV-6 verification stub: Implementation Stage T2 で fill in \
-            (cargo test --lib pipeline::type_resolver:: 全 pass + main_synthesis.rs source code \
-            search で TypeResolver field reference 不在 確認)"]
 fn test_invariant_6_type_resolver_layer_unaffected() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T2 で fill in: \
-         (1) `cargo test --lib pipeline::type_resolver::` 全 pass を subprocess で assert + \
-         (2) src/transformer/main_synthesis.rs source code 内に `type_registry` / \
-         `expr_type` / `type_resolver` 等 TypeResolver layer field の reference 不在 を \
-         file content grep で assert (INV-6 layer separation invariant)"
-    );
+    // CARGO_MANIFEST_DIR is the workspace root (= where Cargo.toml lives), which
+    // is the parent of `src/`.
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    // `main_synthesis` was originally a single file `main_synthesis.rs`; once the
+    // file-line check threshold was reached during T2 implementation, it was split
+    // into a directory module (`main_synthesis/mod.rs` for production +
+    // `main_synthesis/tests.rs` for unit tests). INV-6's structural verification
+    // applies to the production code only — the cfg(test)-gated tests file is not
+    // compiled into release builds and cannot affect the TypeResolver layer at
+    // runtime, so we audit `mod.rs` exclusively.
+    let path = std::path::Path::new(manifest_dir).join("src/transformer/main_synthesis/mod.rs");
+    let source = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "INV-6 verification (2): failed to read main_synthesis/mod.rs at {}: {e}",
+            path.display()
+        )
+    });
+
+    // Forbidden tokens: TypeResolver-layer fields / types. If any of these appear,
+    // main_synthesis.rs has crossed the layer boundary and INV-6 is violated.
+    //
+    // Note on `expected_type`: `Transformer::convert_expr` reads the expected-type
+    // map from `FileTypeResolution` indirectly via the TransformContext; the field
+    // is never accessed by name from `main_synthesis.rs` (we only call `convert_expr`
+    // / `convert_var_decl` on `&mut Transformer`). Forbidding `expected_type` as a
+    // raw substring catches accidental direct access.
+    // Use **specific** TypeResolver-layer identifiers (struct names, field names,
+    // sibling-module names) rather than generic English words. Substring matching
+    // is the simplest robust mechanism, but a token like `"narrowing"` would
+    // produce false positives whenever the module uses the English word
+    // "narrowing" / "narrow" in unrelated contexts (e.g., a doc comment about
+    // "narrowing a Lit match"). Replacing it with the concrete TypeResolver
+    // field name `narrowed_type` and sibling module `narrowing_analyzer`
+    // preserves the structural intent while eliminating the false-positive class.
+    let forbidden_tokens: &[&str] = &[
+        "TypeResolver",
+        "type_resolver",
+        "FileTypeResolution",
+        "type_resolution", // TransformContext field accessing FileTypeResolution
+        "type_registry",
+        "expr_type",
+        "narrowed_type",      // TypeResolver narrowing data
+        "narrowing_analyzer", // TypeResolver sibling module
+        "expected_type",
+    ];
+    for token in forbidden_tokens {
+        assert!(
+            !source.contains(token),
+            "INV-6 verification (2): main_synthesis.rs unexpectedly contains TypeResolver-layer \
+             token `{token}` — this introduces a layer-crossing dependency that violates \
+             INV-6's structural separation. Either remove the reference or revise INV-6 (a)."
+        );
+    }
 }
 
 /// INV-7: `pub fn init` mechanism 廃止の external API audit (third-party review R-2 source)

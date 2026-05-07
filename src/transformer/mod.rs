@@ -9,6 +9,7 @@ pub mod expressions;
 pub mod functions;
 pub(crate) mod helpers;
 mod injections;
+pub mod main_synthesis;
 pub(crate) mod return_wrap;
 pub mod statements;
 mod ts_enum;
