@@ -213,26 +213,37 @@ fn test_axis_b_b1a_b_c_rename_dispatch_symmetric() {
     let r_b = transpile(&b1b).expect("B1b transpile must succeed");
     let r_c = transpile(&b1c).expect("B1c transpile must succeed");
 
-    // Structural rename + substitute lock-in: every form must contain the
-    // renamed declaration AND the renamed call (= the rename gate fired AND
-    // the substitution gate fired, both for the user-supplied `main` and
-    // the synthesized `__ts_main` symbol within the user body).
+    // Structural rename + substitute + synthesis lock-in (= the union of three
+    // I-224 mechanisms expected to fire on every B1 form):
+    //   (a) Rename gate: user's `function main` (or arrow / fn-expr equivalent)
+    //       emits `fn __ts_main` instead of `fn main`.
+    //   (b) Call-substitute gate: every `main()` call site (the body's
+    //       recursive call AND the top-level trailing call) emits as
+    //       `__ts_main()`.
+    //   (c) Synthesis (T4-1 wiring): an `ExecFnSyncRename` dispatch arm emits
+    //       a `fn main()` body wrapping the captured top-level call, so the
+    //       binary entry exists and invokes the renamed user main.
     for (label, source) in [("B1a", &r_a), ("B1b", &r_b), ("B1c", &r_c)] {
         assert!(
             source.contains("fn __ts_main"),
-            "{label}: expected `fn __ts_main` in output, got:\n{source}"
+            "{label} (a): expected renamed `fn __ts_main` in output, got:\n{source}"
         );
         assert!(
-            !source.contains("fn main()"),
-            "{label}: rename target leaked — `fn main()` must not appear, got:\n{source}"
+            source.contains("fn main()"),
+            "{label} (c): expected synthesized binary entry `fn main()` (T4-1 \
+             ExecFnSyncRename arm) in output, got:\n{source}"
         );
-        // Substituted call sites: at least 2 occurrences of `__ts_main()`
-        // (one inside the body's recursive call, one at top-level captured
-        // into the existing `pub fn init` body until T4-1 lands).
+        // (b) Substituted call sites: at least 3 occurrences of `__ts_main()`:
+        //   1. inside the user main body's recursive call (body line 1 of fixture)
+        //   2. the top-level trailing call captured into synthesized fn main
+        //   3. the user main body's own definition `fn __ts_main()` count includes
+        //      a parens-less `__ts_main` token; the count below uses `__ts_main()`
+        //      with parens to filter out the definition site.
         let occurrences = source.matches("__ts_main()").count();
         assert!(
             occurrences >= 2,
-            "{label}: expected ≥ 2 `__ts_main()` substituted call sites, got {occurrences} in:\n{source}"
+            "{label} (b): expected ≥ 2 `__ts_main()` substituted call sites \
+             (recursive + synthesized-main body), got {occurrences} in:\n{source}"
         );
     }
 

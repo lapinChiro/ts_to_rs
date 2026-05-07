@@ -17,8 +17,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BINARY="$PROJECT_DIR/target/release/ts_to_rs"
-HONO_SRC="/tmp/hono-src"
-HONO_CLEAN="/tmp/hono-clean"
+
+# `HONO_SRC` / `HONO_CLEAN` can be overridden via env var so the same script
+# can be run against an alternative Hono checkout (e.g., a SHA-pinned clone for
+# Tier-transition compliance comparison). Default values match the historic
+# in-script paths so existing CI / local invocations are unaffected.
+HONO_SRC="${HONO_SRC:-/tmp/hono-src}"
+HONO_CLEAN="${HONO_CLEAN:-/tmp/hono-clean}"
 
 # --- Setup ---
 

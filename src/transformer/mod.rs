@@ -10,6 +10,7 @@ pub mod functions;
 pub(crate) mod helpers;
 mod injections;
 pub mod main_synthesis;
+mod namespace_lint;
 pub(crate) mod return_wrap;
 pub mod statements;
 mod ts_enum;
@@ -19,6 +20,8 @@ pub(crate) use helpers::option_builders::{
     build_option_get_or_insert_with, build_option_or_option, build_option_unwrap_with_default,
 };
 pub(crate) use type_position::{wrap_trait_for_position, TypePosition};
+
+use namespace_lint::scan_for_ts_namespace_collisions;
 
 use anyhow::Result;
 use swc_common::Spanned;
@@ -349,50 +352,59 @@ impl<'a> Transformer<'a> {
             return Err(collision.into());
         }
 
-        // I-224 T3-2 partial integration: activate user `main` rename + call
-        // substitution for **executable mode** + B1/B2 cells (= cells 13 /
-        // 14 / 15 / 16 / 33 / 34 / 35 / 36 / 73 / 74 / 75 / 76). Library mode
-        // + B1/B2 (cells 3 / 5 / 23 / 25) keeps the user's `main` as the
-        // binary entry directly, so the gate stays `false`. The synthesized
-        // fn main wiring (`Self::synthesize_fn_main` invocation) lands in
-        // T4-1; this T3 commit only enables the rename + substitution
-        // observable to the helper / invariants tests.
-        {
-            let exec_mode = main_synthesis::is_executable_mode(module);
-            let user_main_kind = main_synthesis::detect_user_main(module);
-            self.user_main_substitution = exec_mode
-                && matches!(
-                    user_main_kind,
-                    main_synthesis::UserMainKind::FnSync | main_synthesis::UserMainKind::FnAsync
-                );
-        }
+        // I-224 T3-2 + T4-1: pre-compute (`is_executable_mode`, `user_main_kind`,
+        // `has_top_level_await`) and activate the user `main` rename + call
+        // substitution gate **before** any `convert_expr` call (the gate is
+        // consumed by `convert_call_expr` / `convert_fn_decl` /
+        // `convert_var_decl_module_level` during emission). Library mode + B1/B2
+        // (cells 3 / 5 / 23 / 25) keeps the gate `false` so the user's `main`
+        // remains the binary entry directly per the `LibraryFnSyncDirect` /
+        // `LibraryFnAsyncDirect` dispatch arms.
+        let exec_mode = main_synthesis::is_executable_mode(module);
+        let user_main_kind = main_synthesis::detect_user_main(module);
+        let has_top_level_await_flag = main_synthesis::has_top_level_await(module);
+        self.user_main_substitution = exec_mode
+            && matches!(
+                user_main_kind,
+                main_synthesis::UserMainKind::FnSync | main_synthesis::UserMainKind::FnAsync
+            );
 
-        // Pre-scan: collect class info for inheritance resolution
+        // Pre-scan: collect class info for inheritance resolution. Must precede
+        // both the capture pass (`try_capture_module_item_into_main_stmts` →
+        // `convert_expr`) and the emit pass (`transform_module_item` →
+        // `transform_decl`); `build_mut_method_names` mutates Transformer state
+        // consumed by both.
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
         self.build_mut_method_names(&class_map);
 
+        // Single-pass dispatch (I-224 T4-1 unification): each ModuleItem is
+        // routed to exactly one of three sinks per `try_capture_module_item_into_main_stmts`:
+        //   • silent skip (`Stmt::Empty` — pre-arm continue)
+        //   • capture into `main_stmts` (Stmt::Expr / Decl::Var FnMainBodyCapture /
+        //     ExportDecl-wrapped Decl::Var FnMainBodyCapture)
+        //   • emit as Item via `transform_module_item`
+        // The capture and emit sinks are mutually exclusive (= the same item
+        // never produces both a `MainStmt` and an `Item`), guaranteed by the
+        // `try_capture` return value (`Ok(true)` short-circuits the emit pass).
         let mut items = Vec::new();
-        let mut init_stmts = Vec::new();
+        let mut main_stmts = Vec::new();
         for module_item in &module.body {
-            // I-224 T3-4: A5a (`Stmt::Empty`) silent skip per PRD Design
-            // section #3 ("Stmt::Empty: silent skip per the per-item
-            // dispatch table; no capture"). The legacy
-            // `transform_module_item` `_ => Err` arm rejected `Stmt::Empty`
-            // as Tier 2 unsupported; T4-2's full _ arm refactor will
-            // explicitly enumerate every variant. Adding the skip here
-            // (= ahead of `transform_module_item` dispatch) is a minimal
-            // structural fix that lands the silent-skip semantics required
-            // for the cells 51/53/55/57/59 orthogonality probe in
-            // `tests/i224_helper_test.rs::test_axis_a5a_compositional_orthogonality_with_b_axis`
-            // without otherwise touching T4-2's scope.
+            // I-224 T3-4: A5a (`Stmt::Empty`) silent skip per PRD Design section #3
+            // ("Stmt::Empty: silent skip per the per-item dispatch table; no
+            // capture"). Pre-arm continue keeps the body terse and avoids
+            // routing Empty through the capture/emit dispatch — both downstream
+            // sinks treat Empty as no-op anyway, but the pre-arm makes the
+            // silent-skip semantic explicit at the loop level.
             if matches!(module_item, ModuleItem::Stmt(Stmt::Empty(_))) {
                 continue;
             }
-            // Collect top-level expression statements for init() function
-            if let ModuleItem::Stmt(Stmt::Expr(expr_stmt)) = module_item {
-                let expr = self.convert_expr(&expr_stmt.expr)?;
-                init_stmts.push(crate::ir::Stmt::Expr(expr));
+            let captured = self.try_capture_module_item_into_main_stmts(
+                module_item,
+                exec_mode,
+                &mut main_stmts,
+            )?;
+            if captured {
                 continue;
             }
             let (converted, _warnings) =
@@ -400,9 +412,13 @@ impl<'a> Transformer<'a> {
             items.extend(converted);
         }
 
-        if !init_stmts.is_empty() {
-            items.push(build_init_fn(init_stmts));
-        }
+        // T3 synthesis (I-224 T4-1 wiring): produce `fn main` Items per
+        // dispatch arm. Library arms emit nothing (returns empty Vec); executable
+        // arms emit the synthesized `fn main()` (sync) or `#[tokio::main] async
+        // fn main()` (async) wrapping `main_stmts` in source order (= INV-1).
+        let synthesized =
+            self.synthesize_fn_main(main_stmts, user_main_kind, has_top_level_await_flag);
+        items.extend(synthesized);
 
         injections::inject_regex_import_if_needed(&mut items);
         injections::inject_js_typeof_if_needed(&mut items);
@@ -417,61 +433,66 @@ impl<'a> Transformer<'a> {
         // I-224 collision-detection (INV-5 highest precedence): all
         // user-defined `__ts_`-prefixed module-level identifiers are
         // accumulated as Tier 2 honest errors before any A-axis structural
-        // dispatch. In collection mode the scan runs first and seeds the
-        // `unsupported` accumulator with every offending identifier; the rest
-        // of the module continues to be transformed for partial output.
+        // dispatch. In collecting mode the scan seeds the `unsupported`
+        // accumulator with every offending identifier; the rest of the module
+        // continues to be transformed for partial output.
         let mut unsupported: Vec<UnsupportedSyntaxError> = scan_for_ts_namespace_collisions(module);
 
-        // I-224 T3-2 partial integration (= symmetric with `transform_module`).
-        // Flag activation runs after the namespace-lint scan so collision-mode
-        // modules with user `main` still get the rename gate set; the rename
-        // applies to non-collision identifiers and the namespace lint
-        // accumulates the `__ts_main` collision separately.
-        {
-            let exec_mode = main_synthesis::is_executable_mode(module);
-            let user_main_kind = main_synthesis::detect_user_main(module);
-            self.user_main_substitution = exec_mode
-                && matches!(
-                    user_main_kind,
-                    main_synthesis::UserMainKind::FnSync | main_synthesis::UserMainKind::FnAsync
-                );
-        }
+        // I-224 T3-2 + T4-1 (= symmetric with `transform_module`): pre-compute
+        // dispatch-tree inputs and activate the rename / call-substitution gate
+        // before any `convert_expr` call. Flag activation runs after the
+        // namespace-lint scan so collision-mode modules with user `main` still
+        // get the rename gate set; the rename applies to non-collision
+        // identifiers and the namespace lint accumulates the `__ts_main`
+        // collision separately.
+        let exec_mode = main_synthesis::is_executable_mode(module);
+        let user_main_kind = main_synthesis::detect_user_main(module);
+        let has_top_level_await_flag = main_synthesis::has_top_level_await(module);
+        self.user_main_substitution = exec_mode
+            && matches!(
+                user_main_kind,
+                main_synthesis::UserMainKind::FnSync | main_synthesis::UserMainKind::FnAsync
+            );
 
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
         self.build_mut_method_names(&class_map);
 
+        // Single-pass dispatch (I-224 T4-1 unification、symmetric with
+        // `transform_module`). Errors from the capture pass and the emit pass
+        // are accumulated into `unsupported` and the loop continues; this
+        // mirrors the existing collecting-mode contract that partial output is
+        // preferable to abort.
         let mut items = Vec::new();
-        let mut init_stmts = Vec::new();
-
+        let mut main_stmts = Vec::new();
         for module_item in &module.body {
-            // I-224 T3-4: A5a (`Stmt::Empty`) silent skip (= symmetric with
-            // `transform_module`'s loop). See that helper's comment for the
-            // PRD Design section #3 rationale and the T4-2 work-scope
-            // boundary.
+            // A5a (`Stmt::Empty`) silent skip per PRD Design section #3 (=
+            // symmetric with `transform_module`'s loop).
             if matches!(module_item, ModuleItem::Stmt(Stmt::Empty(_))) {
                 continue;
             }
-            // Collect top-level expression statements for init() function
-            if let ModuleItem::Stmt(Stmt::Expr(expr_stmt)) = module_item {
-                match self.convert_expr(&expr_stmt.expr) {
-                    Ok(expr) => {
-                        init_stmts.push(crate::ir::Stmt::Expr(expr));
-                        continue;
-                    }
-                    Err(e) => {
-                        // Record as unsupported and continue
-                        match e.downcast::<UnsupportedSyntaxError>() {
-                            Ok(unsup) => unsupported.push(unsup),
-                            Err(other) => {
-                                unsupported.push(UnsupportedSyntaxError::new(
-                                    other.to_string(),
-                                    module_item.span(),
-                                ));
-                            }
+            match self.try_capture_module_item_into_main_stmts(
+                module_item,
+                exec_mode,
+                &mut main_stmts,
+            ) {
+                // Captured into main_stmts → skip the emit pass for this item.
+                Ok(true) => continue,
+                // Not in capture scope → fall through to the emit pass.
+                Ok(false) => {}
+                // Capture attempt failed (convert_expr error) → record and skip
+                // emission for this item to preserve the "single sink" invariant.
+                Err(e) => {
+                    match e.downcast::<UnsupportedSyntaxError>() {
+                        Ok(unsup) => unsupported.push(unsup),
+                        Err(other) => {
+                            unsupported.push(UnsupportedSyntaxError::new(
+                                other.to_string(),
+                                module_item.span(),
+                            ));
                         }
-                        continue;
                     }
+                    continue;
                 }
             }
             match self.transform_module_item(module_item, &class_map, &iface_methods, true) {
@@ -495,9 +516,10 @@ impl<'a> Transformer<'a> {
             }
         }
 
-        if !init_stmts.is_empty() {
-            items.push(build_init_fn(init_stmts));
-        }
+        // T3 synthesis (= symmetric with `transform_module`).
+        let synthesized =
+            self.synthesize_fn_main(main_stmts, user_main_kind, has_top_level_await_flag);
+        items.extend(synthesized);
 
         injections::inject_regex_import_if_needed(&mut items);
         injections::inject_js_typeof_if_needed(&mut items);
@@ -508,6 +530,14 @@ impl<'a> Transformer<'a> {
     ///
     /// When `resilient` is true, type conversion failures in function parameters and
     /// return types fall back to `RustType::Any` instead of aborting.
+    ///
+    /// **Rule 11 (d-1) self-applied compliance** (T4-2): every [`ModuleItem`] /
+    /// [`ModuleDecl`] / [`Stmt`] variant is enumerated explicitly. New SWC AST
+    /// variants force a compile error here so every dispatch site is updated in
+    /// lock-step. Variants that are pre-skipped or pre-captured by the caller
+    /// (`Transformer::transform_module` / `transform_module_collecting`) are
+    /// matched with [`unreachable!`] documenting the structural invariant — they
+    /// never reach this method in production.
     fn transform_module_item(
         &mut self,
         module_item: &ModuleItem,
@@ -516,6 +546,7 @@ impl<'a> Transformer<'a> {
         resilient: bool,
     ) -> Result<(Vec<Item>, Vec<String>)> {
         match module_item {
+            // ============== Decl-bearing items (private / public visibility) ==============
             ModuleItem::Stmt(Stmt::Decl(decl)) => self.transform_decl(
                 decl,
                 Visibility::Private,
@@ -530,6 +561,8 @@ impl<'a> Transformer<'a> {
                 iface_methods,
                 resilient,
             ),
+
+            // ============== Import / re-export items ==============
             ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) => {
                 let items = self.transform_import(import_decl);
                 Ok((items, vec![]))
@@ -554,14 +587,102 @@ impl<'a> Transformer<'a> {
                     Ok((vec![], vec![]))
                 }
             }
-            // Top-level expression statements (e.g., `globalThis.crypto ??= crypto`)
-            // Rust has no top-level expressions; skip silently
-            ModuleItem::Stmt(Stmt::Expr(_)) => Ok((vec![], vec![])),
-            _ => Err(UnsupportedSyntaxError::new(
-                format_module_item_kind(module_item),
+
+            // ============== Default exports / TS legacy module forms (Tier 2 honest reject) ==============
+            // `export default <decl>` (named function / class / interface) and the
+            // anonymous `export default <expr>` form have no direct Rust equivalent at
+            // the module-item level (Rust's binary-entry convention is `fn main()`,
+            // not arbitrary default exports). The TS-only `import =` / `export =` /
+            // `export as namespace` forms are vestiges of the CommonJS / namespace
+            // module systems and have no Rust counterpart. All five are reported as
+            // Tier 2 honest errors with the SWC kind name; downstream tooling can
+            // disambiguate via the span.
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(_))
+            | ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(_))
+            | ModuleItem::ModuleDecl(ModuleDecl::TsImportEquals(_))
+            | ModuleItem::ModuleDecl(ModuleDecl::TsExportAssignment(_))
+            | ModuleItem::ModuleDecl(ModuleDecl::TsNamespaceExport(_)) => {
+                Err(UnsupportedSyntaxError::new(
+                    format_module_item_kind(module_item),
+                    module_item.span(),
+                )
+                .into())
+            }
+
+            // ============== A4 (control-flow) — Tier 2 honest reject with guidance ==============
+            // Top-level control-flow statements (`if`, loops, `try`, etc.) execute
+            // at module-load time in TS but have no Rust module-item analogue —
+            // Rust has no top-level execution context outside `fn main()`. The
+            // `fn main()` synthesis (T3 / T4-1) captures `Stmt::Expr` and side-effect
+            // `Decl::Var` but does **not** wrap A4 statements: doing so would
+            // require lifting all referenced bindings into the synthesized fn main
+            // body, changing scope semantics for any subsequent declaration that
+            // reads / writes them. The PRD I-224 design partition reserves A4 for
+            // a future expansion (= I-203 codebase-wide AST exhaustiveness +
+            // structural lift) where the user's intent of "module-load control
+            // flow" can be surfaced explicitly.
+            //
+            // Spec stage Axis A4 cells: `assert_ts_namespace_collision`-style
+            // tests cover the wording substring `ControlFlow at top-level`.
+            ModuleItem::Stmt(
+                Stmt::Block(_)
+                | Stmt::If(_)
+                | Stmt::Switch(_)
+                | Stmt::Throw(_)
+                | Stmt::Try(_)
+                | Stmt::While(_)
+                | Stmt::DoWhile(_)
+                | Stmt::For(_)
+                | Stmt::ForIn(_)
+                | Stmt::ForOf(_)
+                | Stmt::Labeled(_)
+                | Stmt::Continue(_)
+                | Stmt::Break(_)
+                | Stmt::Return(_)
+                | Stmt::With(_),
+            ) => Err(UnsupportedSyntaxError::new(
+                format!(
+                    "ControlFlow at top-level requires fn main wrapping; lift to a \
+                     named function or use I-203 future expansion ({})",
+                    format_module_item_kind(module_item),
+                ),
                 module_item.span(),
             )
             .into()),
+
+            // ============== A5b (Debugger) — Tier 2 honest reject with guidance ==============
+            // The TS `debugger;` statement signals a debugger breakpoint at module
+            // load. Rust has no built-in debugger-breakpoint statement; the user
+            // selects an explicit alternative themselves (compile-time `panic!()`
+            // for hard stop, or `std::dbg!(...)` for value tracing). Reporting as
+            // Tier 2 with explicit guidance is more useful than the generic
+            // SWC-kind wording.
+            ModuleItem::Stmt(Stmt::Debugger(_)) => Err(UnsupportedSyntaxError::new(
+                "`debugger` statement has no Rust equivalent (use `panic!()` for \
+                 a hard stop or `std::dbg!()` for value tracing per the user's \
+                 intent)"
+                    .to_string(),
+                module_item.span(),
+            )
+            .into()),
+
+            // ============== Pre-handled by the caller — defensive unreachable!() ==============
+            // `Stmt::Empty` is silently skipped by `transform_module(_collecting)`'s
+            // pre-arm `continue`. `Stmt::Expr` is captured into `main_stmts` by
+            // `try_capture_module_item_into_main_stmts` (in executable mode) or
+            // is structurally impossible (library mode contains no Stmt::Expr per
+            // the `is_executable_mode` definition). Reaching this method with
+            // either variant indicates a bug in the caller's dispatch.
+            ModuleItem::Stmt(Stmt::Empty(_)) => unreachable!(
+                "Stmt::Empty must be silently skipped before reaching transform_module_item; \
+                 the pre-arm `continue` in transform_module(_collecting) is the contract"
+            ),
+            ModuleItem::Stmt(Stmt::Expr(_)) => unreachable!(
+                "Stmt::Expr must be captured into main_stmts (= try_capture returns Ok(true)) \
+                 before reaching transform_module_item; library mode contains no Stmt::Expr \
+                 per the is_executable_mode invariant, and executable mode unconditionally \
+                 captures via try_capture_module_item_into_main_stmts"
+            ),
         }
     }
 
@@ -802,173 +923,6 @@ fn format_decl_kind(decl: &Decl) -> String {
         Decl::TsModule(_) => "TsModuleDecl".to_string(),
         Decl::Using(_) => "UsingDecl".to_string(),
         _ => format!("Decl({decl:?})"),
-    }
-}
-
-/// Scans the module's top-level for user-defined identifiers that collide
-/// with the I-154 reserved `__ts_` prefix namespace, returning a Tier 2 honest
-/// error per offending identifier.
-///
-/// Walks every [`ModuleItem`] and dispatches on AST shape (Decl variant +
-/// `ExportDecl` wrapper + `ExportDefaultDecl` with named decl) to extract the
-/// introduced identifier(s). Calls
-/// [`statements::check_ts_internal_fn_name_namespace`] on each name and
-/// accumulates rejection errors into a `Vec` for the caller to consume:
-/// [`Transformer::transform_module`] propagates the first error (early-abort
-/// mode), and [`Transformer::transform_module_collecting`] extends the
-/// caller's `unsupported` accumulator (Tier 2 honest collection mode).
-///
-/// **I-224 collision-detection invariant (INV-5)**: every reachable B4 cell
-/// (matrix # 9 / 19 / 20 / 29 / 39 / 40 / 49 / 59 / 69 / 79 / 80) contains a
-/// top-level `function __ts_main()` (or analogous Decl shape per axis A) and
-/// is rejected here with a Tier 2 honest error. The collision-detection scan
-/// runs before any A-axis dispatch (= identifier-level reservation invariant
-/// supersedes structural dispatch).
-fn scan_for_ts_namespace_collisions(module: &Module) -> Vec<UnsupportedSyntaxError> {
-    let mut errors = Vec::new();
-    for item in &module.body {
-        scan_module_item_for_collisions(item, &mut errors);
-    }
-    errors
-}
-
-/// Inner per-item dispatcher. Per Rule 11 (d-1) `_ =>` is forbidden, so every
-/// [`ModuleItem`] / [`ModuleDecl`] / [`Stmt`] variant is enumerated
-/// explicitly; variants that do not introduce module-level user-defined
-/// identifiers are matched with an empty body documenting the reason.
-fn scan_module_item_for_collisions(item: &ModuleItem, errors: &mut Vec<UnsupportedSyntaxError>) {
-    match item {
-        ModuleItem::ModuleDecl(decl) => match decl {
-            ModuleDecl::ExportDecl(export) => scan_decl_for_collisions(&export.decl, errors),
-            ModuleDecl::ExportDefaultDecl(default) => {
-                scan_default_decl_for_collisions(&default.decl, errors);
-            }
-            // Empty: imports introduce local bindings only (scoped per-file),
-            // re-exports carry already-declared names (covered at the decl
-            // site), and `ExportDefaultExpr` / `TsExportAssignment` /
-            // `TsNamespaceExport` do not introduce fresh identifiers.
-            ModuleDecl::Import(_)
-            | ModuleDecl::ExportNamed(_)
-            | ModuleDecl::ExportDefaultExpr(_)
-            | ModuleDecl::ExportAll(_)
-            | ModuleDecl::TsImportEquals(_)
-            | ModuleDecl::TsExportAssignment(_)
-            | ModuleDecl::TsNamespaceExport(_) => {}
-        },
-        ModuleItem::Stmt(stmt) => match stmt {
-            Stmt::Decl(decl) => scan_decl_for_collisions(decl, errors),
-            // Empty: non-Decl statements do not introduce module-level
-            // identifiers. Module-level `let __ts_main = ...` lives under
-            // `Stmt::Decl(Decl::Var)` and is handled in that branch.
-            Stmt::Block(_)
-            | Stmt::Empty(_)
-            | Stmt::Debugger(_)
-            | Stmt::With(_)
-            | Stmt::Return(_)
-            | Stmt::Labeled(_)
-            | Stmt::Break(_)
-            | Stmt::Continue(_)
-            | Stmt::If(_)
-            | Stmt::Switch(_)
-            | Stmt::Throw(_)
-            | Stmt::Try(_)
-            | Stmt::While(_)
-            | Stmt::DoWhile(_)
-            | Stmt::For(_)
-            | Stmt::ForIn(_)
-            | Stmt::ForOf(_)
-            | Stmt::Expr(_) => {}
-        },
-    }
-}
-
-/// Per-[`Decl`] variant dispatcher: extracts the introduced identifier(s) and
-/// calls the namespace validator on each. Per Rule 11 (d-1) every variant is
-/// enumerated explicitly.
-fn scan_decl_for_collisions(decl: &Decl, errors: &mut Vec<UnsupportedSyntaxError>) {
-    match decl {
-        Decl::Fn(fn_decl) => check_ident_for_collision(&fn_decl.ident, errors),
-        Decl::Class(class_decl) => check_ident_for_collision(&class_decl.ident, errors),
-        Decl::Var(var_decl) => {
-            for declarator in &var_decl.decls {
-                // BindingIdent form (`const X = ...`, `let X = ...`,
-                // `var X = ...`) is the matrix B4-axis shape. Destructuring
-                // patterns (`const { X } = ...`, `const [X] = ...`) are not
-                // currently a documented collision vector; extend here with a
-                // recursive `Pat` walker if one ever surfaces.
-                if let ast::Pat::Ident(binding) = &declarator.name {
-                    check_ident_for_collision(&binding.id, errors);
-                }
-            }
-        }
-        Decl::Using(using_decl) => {
-            for declarator in &using_decl.decls {
-                if let ast::Pat::Ident(binding) = &declarator.name {
-                    check_ident_for_collision(&binding.id, errors);
-                }
-            }
-        }
-        Decl::TsInterface(interface) => check_ident_for_collision(&interface.id, errors),
-        Decl::TsTypeAlias(alias) => check_ident_for_collision(&alias.id, errors),
-        Decl::TsEnum(enum_decl) => check_ident_for_collision(&enum_decl.id, errors),
-        Decl::TsModule(module_decl) => match &module_decl.id {
-            ast::TsModuleName::Ident(ident) => check_ident_for_collision(ident, errors),
-            // Ambient string-named modules (`declare module "fs" { ... }`) do
-            // not introduce a collidable Rust identifier — skip.
-            ast::TsModuleName::Str(_) => {}
-        },
-    }
-}
-
-/// Default-decl dispatcher: only [`ast::DefaultDecl::Class`] / `Fn` /
-/// `TsInterfaceDecl` carry an identifier — anonymous defaults
-/// (`export default function() {}`) cannot collide.
-fn scan_default_decl_for_collisions(
-    decl: &ast::DefaultDecl,
-    errors: &mut Vec<UnsupportedSyntaxError>,
-) {
-    match decl {
-        ast::DefaultDecl::Class(class_expr) => {
-            if let Some(ident) = &class_expr.ident {
-                check_ident_for_collision(ident, errors);
-            }
-        }
-        ast::DefaultDecl::Fn(fn_expr) => {
-            if let Some(ident) = &fn_expr.ident {
-                check_ident_for_collision(ident, errors);
-            }
-        }
-        ast::DefaultDecl::TsInterfaceDecl(interface) => {
-            check_ident_for_collision(&interface.id, errors);
-        }
-    }
-}
-
-/// Helper: validate one identifier against the `__ts_` namespace and append
-/// any rejection error to the accumulator. The validator returns the concrete
-/// `UnsupportedSyntaxError` directly (no anyhow wrapping), so the only thing
-/// to do here is forward the `Err` into the accumulator.
-fn check_ident_for_collision(ident: &ast::Ident, errors: &mut Vec<UnsupportedSyntaxError>) {
-    if let Err(unsup) = statements::check_ts_internal_fn_name_namespace(&ident.sym, ident.span) {
-        errors.push(unsup);
-    }
-}
-
-/// Builds an `init()` function from accumulated top-level expression statements.
-///
-/// TypeScript modules can have top-level expressions that run once when the module
-/// is first imported. Rust has no module-load-time execution, so these are collected
-/// into a `pub fn init()` that the consumer can call explicitly.
-fn build_init_fn(stmts: Vec<crate::ir::Stmt>) -> Item {
-    Item::Fn {
-        name: "init".to_string(),
-        vis: Visibility::Public,
-        attributes: vec![],
-        params: vec![],
-        return_type: None,
-        body: stmts,
-        is_async: false,
-        type_params: vec![],
     }
 }
 

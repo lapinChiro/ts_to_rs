@@ -504,3 +504,98 @@ fn i224_matrix_cell_19_stmt_expr_with_collision_rejected() {
         __ts_main();\n";
     assert_ts_namespace_collision(src, "__ts_main");
 }
+
+// ============ I-224 T4-2: A4 (control-flow) Tier 2 wording tests ============
+//
+// Top-level control-flow statements (`if`, loops, `try`, etc.) execute at
+// module-load time in TS but have no Rust module-item analogue — Rust has no
+// top-level execution context outside `fn main()`. The `fn main()` synthesis
+// (T3 / T4-1) captures `Stmt::Expr` and side-effect `Decl::Var` but does NOT
+// wrap A4 statements. T4-2 improves the Tier 2 reject wording to mention the
+// `fn main` wrapping requirement and the I-203 future expansion scope.
+
+/// Helper: assert at least one collected `unsupported` entry contains the
+/// `ControlFlow at top-level` substring (= the T4-2 A4 reject wording).
+fn assert_a4_control_flow_reject(src: &str) {
+    let result = crate::transpile_collecting(src);
+    match result {
+        Ok((_rust, unsupported)) => {
+            let hits: Vec<_> = unsupported
+                .iter()
+                .filter(|u| u.kind.contains("ControlFlow at top-level"))
+                .collect();
+            assert!(
+                !hits.is_empty(),
+                "expected at least one A4 Tier 2 reject mentioning `ControlFlow at top-level`, \
+                 got unsupported list: {unsupported:?}"
+            );
+        }
+        Err(e) => panic!("transpile_collecting failed unexpectedly for {src:?}: {e}"),
+    }
+}
+
+#[test]
+fn i224_a4_top_level_if_rejected_with_control_flow_wording() {
+    // Cell 41 representative (A4 + B0 + C0): top-level `if` statement.
+    assert_a4_control_flow_reject("const x = 7;\nif (x > 5) { console.log('hi'); }\n");
+}
+
+#[test]
+fn i224_a4_top_level_for_rejected_with_control_flow_wording() {
+    assert_a4_control_flow_reject("for (let i = 0; i < 3; i++) { console.log(i); }\n");
+}
+
+#[test]
+fn i224_a4_top_level_while_rejected_with_control_flow_wording() {
+    assert_a4_control_flow_reject("let i = 0;\nwhile (i < 3) { i++; }\n");
+}
+
+#[test]
+fn i224_a4_top_level_try_rejected_with_control_flow_wording() {
+    assert_a4_control_flow_reject("try { console.log('hi'); } catch (e) {}\n");
+}
+
+#[test]
+fn i224_a4_top_level_switch_rejected_with_control_flow_wording() {
+    assert_a4_control_flow_reject(
+        "const x = 1;\nswitch (x) { case 1: console.log('one'); break; }\n",
+    );
+}
+
+#[test]
+fn i224_a4_top_level_block_rejected_with_control_flow_wording() {
+    // Bare `{ ... }` at module level (rare, but valid TS syntax = block stmt).
+    assert_a4_control_flow_reject("{ console.log('block'); }\n");
+}
+
+// ============ I-224 T4-2: A5b (Debugger) Tier 2 wording test ============
+//
+// `debugger;` at module level signals a debugger breakpoint at module load.
+// Rust has no built-in debugger-breakpoint statement; T4-2 reports as Tier 2
+// with explicit guidance on `panic!()` / `std::dbg!()` alternatives.
+
+#[test]
+fn i224_a5b_debugger_rejected_with_debugger_wording() {
+    // Cell 27-b representative: top-level `debugger;` statement.
+    let src = "debugger;\nconsole.log('after debugger');\n";
+    let result = crate::transpile_collecting(src);
+    match result {
+        Ok((_rust, unsupported)) => {
+            let hits: Vec<_> = unsupported
+                .iter()
+                .filter(|u| {
+                    u.kind
+                        .contains("`debugger` statement has no Rust equivalent")
+                        && u.kind.contains("panic!()")
+                        && u.kind.contains("std::dbg!()")
+                })
+                .collect();
+            assert!(
+                !hits.is_empty(),
+                "expected A5b Tier 2 reject with `debugger` + `panic!()` + `std::dbg!()` \
+                 wording, got unsupported list: {unsupported:?}"
+            );
+        }
+        Err(e) => panic!("transpile_collecting failed unexpectedly for {src:?}: {e}"),
+    }
+}

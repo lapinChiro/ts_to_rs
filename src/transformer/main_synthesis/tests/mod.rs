@@ -470,7 +470,10 @@ fn is_executable_mode_regex_init_is_executable() {
 // - Exec sync arms (cells 11 / 13 / 17): 3 representative tests, sync fn main.
 // - Exec async arms (cells 12 / 14 / 15 / 16 / 18): 5 representative tests,
 //   `#[tokio::main] async fn main`.
-// - Defensive `unreachable!()`: 1 #[should_panic] test for Collision.
+// - Synthesis-suppressed arm: 1 test asserting Collision returns empty `Vec`
+//   (T4-1 contract: collecting-mode reachability of Collision means the arm
+//   cannot panic; the upstream namespace lint is the single contract surface
+//   for surfacing the violation).
 
 /// Builds a minimal Transformer instance for synthesize_fn_main invocation.
 /// The fixture source is empty because synthesize_fn_main does not consult
@@ -865,22 +868,48 @@ fn test_synthesize_class_await_only_emits_async_fn_main_with_empty_body() {
     assert_single_synthesized_fn_main(&items, /* async = */ true, /* body_len = */ 0);
 }
 
-// --- Defensive panic tests ------------------------------------------------------------
+// --- Defensive contract tests (synthesis-suppressed + structurally-impossible) -------
+//
+// T4-1 contract revision: the Collision arm of `synthesize_fn_main` no longer
+// panics — it suppresses synthesis (returns an empty `Vec`) so the function is
+// safe to call from collecting mode where the upstream namespace lint
+// accumulates the collision rather than aborting. The `(false, _, true)`
+// dispatch-arm panic remains (= AST-level mutual-exclusion locked in by the
+// SWC parser test suite).
 
 #[test]
-#[should_panic(expected = "synthesize_fn_main reached with UserMainKind::Collision")]
-fn test_synthesize_panics_on_collision_arm() {
-    // INV-5 highest precedence: `__ts_main` user identifier collision is
-    // rejected upstream by `Transformer::transform_module`'s call to
-    // `scan_for_ts_namespace_collisions` before any dispatch-tree call site.
-    // Reaching synthesize_fn_main with UserMainKind::Collision indicates a
-    // future caller that bypassed the upstream lint; the unreachable!()
-    // surfaces this as a loud panic rather than a silent dispatch.
+fn test_synthesize_emits_no_items_on_collision_arm() {
+    // INV-5 + collecting-mode contract: `__ts_main` user identifier collision
+    // is reported upstream by `Transformer::transform_module(_collecting)`'s
+    // call to `scan_for_ts_namespace_collisions`. In collecting mode the lint
+    // accumulates the error and the transform continues, so synthesize_fn_main
+    // is reachable with UserMainKind::Collision. The Collision arm returns
+    // `Vec::new()` (= synthesis suppressed; any captured `main_stmts` are
+    // silently dropped) so the binary doesn't emit a `fn main` that conflicts
+    // with the user's `__ts_*` identifier. The upstream lint remains the
+    // contract surface for surfacing the violation to the user.
     let f = synth_fixture();
     let tctx = f.tctx();
     let mut synthetic = SyntheticTypeRegistry::new();
     let mut t = Transformer::for_module(&tctx, &mut synthetic);
-    let _ = t.synthesize_fn_main(vec![], UserMainKind::Collision, false);
+    let items = t.synthesize_fn_main(vec![], UserMainKind::Collision, false);
+    assert!(
+        items.is_empty(),
+        "Collision arm must suppress synthesis, got items: {items:?}"
+    );
+
+    // Also lock in: even with non-empty captured main_stmts and top-await flag,
+    // the Collision arm still suppresses synthesis (= the captured payload is
+    // silently dropped, regardless of axis A / axis C state).
+    let items_payload = t.synthesize_fn_main(
+        vec![MainStmt::Expr(IrExpr::Ident("x".to_string()))],
+        UserMainKind::Collision,
+        true,
+    );
+    assert!(
+        items_payload.is_empty(),
+        "Collision arm with non-empty payload must still suppress synthesis, got items: {items_payload:?}"
+    );
 }
 
 #[test]

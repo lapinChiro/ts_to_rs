@@ -95,10 +95,6 @@ pub(crate) enum InitKind {
 }
 
 /// Decl::Var dispatch path: where the declaration's emission goes.
-#[allow(dead_code)]
-// Consumed by T4-1 (`transform_module` per-item routing) — until
-// then, only `Transformer::collect_top_level_executions`
-// (also dead at T2) constructs / inspects these variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeclVarPath {
     /// Library mode: existing `convert_var_decl_module_level` path emits a top-level
@@ -393,9 +389,6 @@ pub(crate) fn has_side_effect_init(var: &VarDecl) -> bool {
 /// into the synthesized fn main body — their declaration semantics are
 /// independent of executable mode, so they always route to `LibraryMode`
 /// regardless of `is_executable_mode`.
-#[allow(dead_code)] // Consumed by T4-1 (`transform_module` per-item routing); also
-                    // called by `Transformer::collect_top_level_executions` (also
-                    // dead at T2). Removable when T4-1 lands the integration.
 pub(crate) fn classify_decl_var_path(var: &VarDecl, is_executable_mode: bool) -> DeclVarPath {
     // Defensive: ambient / no-init Var has no init expression to classify and
     // emits via the existing library-mode path (no fn main capture). This

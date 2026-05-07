@@ -174,11 +174,15 @@ fn test_transform_module_mixed_items() {
     }
 }
 
-// --- Top-level expression statements (I-180) ---
+// --- Top-level expression statements (I-180 → I-224 fn main synthesis) ---
 
 #[test]
-fn test_transform_module_top_level_expr_stmt_generates_init_fn() {
-    // Top-level expression like `console.log("init")` → pub fn init() { ... }
+fn test_transform_module_top_level_expr_stmt_synthesizes_fn_main() {
+    // I-224 T4-1: Top-level expression like `console.log("init")` is captured
+    // into the synthesized `fn main()` body (replaces the legacy
+    // `pub fn init()` mechanism). The fn main is `Visibility::Private` (no
+    // `pub`) per I-224 INV-5 — the binary entry convention does not require /
+    // permit `pub fn main`.
     let source = r#"
         interface Foo { name: string; }
         console.log("init");
@@ -189,50 +193,191 @@ fn test_transform_module_top_level_expr_stmt_generates_init_fn() {
     assert!(items
         .iter()
         .any(|i| matches!(i, Item::Struct { name, .. } if name == "Foo")));
-    // console.log should be in init() function
-    let init_fn = items
+    // console.log should be in synthesized fn main() body
+    let main_fn = items
         .iter()
-        .find(|i| matches!(i, Item::Fn { name, .. } if name == "init"));
+        .find(|i| matches!(i, Item::Fn { name, .. } if name == "main"));
     assert!(
-        init_fn.is_some(),
-        "expected init() function from top-level expression, got items: {items:?}"
+        main_fn.is_some(),
+        "expected synthesized fn main from top-level expression, got items: {items:?}"
     );
+    if let Some(Item::Fn {
+        vis,
+        attributes,
+        is_async,
+        body,
+        ..
+    }) = main_fn
+    {
+        assert!(
+            matches!(vis, Visibility::Private),
+            "synthesized fn main must be Private, got: {vis:?}"
+        );
+        assert!(
+            attributes.is_empty(),
+            "sync fn main has no attributes (no `#[tokio::main]`), got: {attributes:?}"
+        );
+        assert!(!is_async, "sync fn main must not be async");
+        assert_eq!(
+            body.len(),
+            1,
+            "expected 1 captured stmt, got {}",
+            body.len()
+        );
+    }
     assert!(
         unsupported.is_empty(),
         "expected no unsupported errors, got: {unsupported:?}"
     );
+    // INV-4 lock-in (= I-224 T4-1 production wiring contract): no legacy
+    // `pub fn init()` Item is emitted any longer.
+    assert!(
+        !items
+            .iter()
+            .any(|i| matches!(i, Item::Fn { name, .. } if name == "init")),
+        "legacy `pub fn init` mechanism must be retired (T4-1), got items: {items:?}"
+    );
 }
 
 #[test]
-fn test_transform_module_multiple_top_level_exprs_merge_into_single_init() {
+fn test_transform_module_multiple_top_level_exprs_merge_into_single_fn_main() {
+    // I-224 T4-1: multiple top-level Stmt::Expr statements merge into a single
+    // synthesized fn main body, source order preserved (= INV-1).
     let source = r#"
         console.log("first");
         console.log("second");
     "#;
     let module = parse_typescript(source).expect("parse failed");
     let (items, _) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
-    let init_fns: Vec<_> = items
+    let main_fns: Vec<_> = items
         .iter()
-        .filter(|i| matches!(i, Item::Fn { name, .. } if name == "init"))
+        .filter(|i| matches!(i, Item::Fn { name, .. } if name == "main"))
         .collect();
     assert_eq!(
-        init_fns.len(),
+        main_fns.len(),
         1,
-        "expected exactly 1 init() function, got {}",
-        init_fns.len()
+        "expected exactly 1 synthesized fn main, got {}",
+        main_fns.len()
+    );
+    if let Some(Item::Fn { body, .. }) = main_fns.first() {
+        assert_eq!(
+            body.len(),
+            2,
+            "expected 2 captured stmts in fn main body, got {}",
+            body.len()
+        );
+    }
+}
+
+#[test]
+fn test_transform_module_no_top_level_exprs_no_fn_main_synthesis() {
+    // I-224 T4-1: library mode (declarations only, no executable triggers) →
+    // no synthesized fn main (= LibraryNone dispatch arm). The user can use
+    // the converted Rust as a library, with `cargo build --lib` style
+    // consumption; no binary entry is emitted.
+    let source = "interface Foo { name: string; }";
+    let module = parse_typescript(source).expect("parse failed");
+    let (items, _) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
+    let has_synthesized_main = items
+        .iter()
+        .any(|i| matches!(i, Item::Fn { name, .. } if name == "main"));
+    assert!(
+        !has_synthesized_main,
+        "library-mode source must not produce synthesized fn main, got items: {items:?}"
+    );
+    let has_legacy_init = items
+        .iter()
+        .any(|i| matches!(i, Item::Fn { name, .. } if name == "init"));
+    assert!(
+        !has_legacy_init,
+        "legacy `pub fn init` mechanism must be retired (T4-1), got items: {items:?}"
+    );
+}
+
+// --- T4-1 capture-failure dispatch contract (try_capture Err branch) ---
+//
+// `Transformer::try_capture_module_item_into_main_stmts` returns `Err(_)` when
+// an item is in capture scope (Stmt::Expr / Decl::Var FnMainBodyCapture /
+// ExportDecl(Decl::Var) FnMainBodyCapture) but the inner `convert_expr` call
+// fails (e.g., the captured init contains an unsupported expression form).
+// The caller-side contract is split:
+// - **Abort mode** (`transform_module`): propagate the first error verbatim so
+//   the transpile result fails fast.
+// - **Collecting mode** (`transform_module_collecting`): downcast the error to
+//   `UnsupportedSyntaxError` and accumulate; the captured item is **not**
+//   emitted via `transform_module_item` (= avoids duplicate / partial emission
+//   when the captured init partially converted). Conversion of subsequent
+//   items continues to maximise partial output.
+
+#[test]
+fn test_try_capture_err_branch_abort_mode_propagates_first_error() {
+    // `{a: 1} satisfies Foo` is `TsSatisfies(Object(...))` — currently rejected
+    // by `convert_expr` as an unsupported expression. Wrapping it in a
+    // top-level `Stmt::Expr` (`console.log(...)`) makes the module enter
+    // executable mode (= `is_executable_mode = true`), routing the Stmt::Expr
+    // through `try_capture_module_item_into_main_stmts`. Inside the capture,
+    // `convert_expr` recurses into the call's argument, hits the satisfies
+    // sub-expression, and returns `Err(_)`. In abort mode the error must
+    // propagate as the function's `Err` return value.
+    let source = r#"
+        interface Foo { a: number; }
+        console.log({a: 1} satisfies Foo);
+    "#;
+    let module = parse_typescript(source).expect("parse failed");
+    let result = transform_module(&module, &TypeRegistry::new());
+    let err = match result {
+        Ok(items) => panic!(
+            "expected Err from try_capture failure (abort mode), got Ok with items: {items:?}"
+        ),
+        Err(e) => format!("{e:#}"),
+    };
+    assert!(
+        err.contains("TsSatisfies") || err.to_lowercase().contains("satisfies"),
+        "expected error message to mention TsSatisfies / satisfies (= the unsupported \
+         capture sub-expression), got: `{err}`"
     );
 }
 
 #[test]
-fn test_transform_module_no_top_level_exprs_no_init_fn() {
-    let source = "interface Foo { name: string; }";
+fn test_try_capture_err_branch_collecting_mode_accumulates_and_skips_emission() {
+    // Same source as the abort-mode test. Collecting mode must:
+    //   (a) accumulate the convert_expr error into `unsupported`,
+    //   (b) NOT emit the failed Stmt::Expr (= no `pub fn init` ghost from a
+    //       legacy code path, no double-emission via transform_module_item).
+    //   (c) continue conversion of unrelated items (the interface Foo
+    //       declaration must still emit as `Item::Struct`).
+    let source = r#"
+        interface Foo { a: number; }
+        console.log({a: 1} satisfies Foo);
+    "#;
     let module = parse_typescript(source).expect("parse failed");
-    let (items, _) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
-    let has_init = items
-        .iter()
-        .any(|i| matches!(i, Item::Fn { name, .. } if name == "init"));
+    let (items, unsupported) = transform_module_collecting(&module, &TypeRegistry::new()).unwrap();
+
+    // (a) Accumulator received the satisfies failure.
     assert!(
-        !has_init,
-        "no init() should be generated when no top-level expressions exist"
+        unsupported.iter().any(|u| u.kind.contains("TsSatisfies")
+            || u.kind.to_lowercase().contains("satisfies")),
+        "expected `TsSatisfies` / `satisfies` in accumulated unsupported list, got: {unsupported:?}"
+    );
+
+    // (b) No legacy `init` Item was synthesized despite the captured Stmt::Expr
+    //     failing to convert (= regression guard against re-introducing the
+    //     pre-T4-1 `init_stmts` partial-emit pattern).
+    assert!(
+        !items
+            .iter()
+            .any(|i| matches!(i, Item::Fn { name, .. } if name == "init")),
+        "legacy `pub fn init` mechanism must stay retired even on capture failure, \
+         got items: {items:?}"
+    );
+
+    // (c) The unrelated declaration (interface Foo) is still emitted as a
+    //     struct item (= partial-output contract preserved).
+    assert!(
+        items
+            .iter()
+            .any(|i| matches!(i, Item::Struct { name, .. } if name == "Foo")),
+        "expected `Foo` struct to still be emitted (partial-output contract), \
+         got items: {items:?}"
     );
 }

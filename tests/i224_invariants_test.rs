@@ -70,12 +70,12 @@ fn test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase() {
     // sync substitute (= rewrite the callee identifier). Async-await
     // wrapping (= adding `.await` after the substituted `__ts_main()`) is
     // T8 work; until then, B2 cells produce `__ts_main()` invocation
-    // without `.await`, which compiles correctly inside `pub fn init`
-    // (T3-stage partial integration) but will need T8 to upgrade for the
-    // synthesized `#[tokio::main] async fn main` once T4-1 lands. This
-    // test asserts the **identifier substitution** invariant only — IR
-    // shape of the await wrapping is tested separately in T8's INV-3
-    // full-coverage extension.
+    // without `.await`, which compiles correctly inside the synthesized
+    // `fn main()` body (T4-1 ExecFnSyncRename / ExecFnAsyncRename arm) but
+    // will need T8 to upgrade once `#[tokio::main] async fn main` synthesis
+    // lands the `.await` wrapping for B2 cells. This test asserts the
+    // **identifier substitution** invariant only — IR shape of the await
+    // wrapping is tested separately in T8's INV-3 full-coverage extension.
     //
     // Each entry = (cell #, axis summary, TS source).
     let cells: &[(u32, &str, &str)] = &[
@@ -92,19 +92,26 @@ fn test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase() {
     for (cell, axis_summary, src) in cells {
         let rust = transpile(src)
             .unwrap_or_else(|e| panic!("cell #{cell} ({axis_summary}): transpile failed: {e}"));
-        // 1. User main is renamed at the declaration site:
-        //    - sync B1: `fn __ts_main` exists, no plain `fn main(` at decl
-        //    - async B2: `async fn __ts_main` exists, no `async fn main(`
-        //    Both: the bare `fn main()` declaration form must NOT appear
-        //    (the synthesized binary entry `fn main` lands in T4-1 — until
-        //    then, no `fn main()` should exist at all).
+        // 1. User main is renamed at the declaration site AND a synthesized
+        //    `fn main()` is emitted as the binary entry (T4-1 wiring):
+        //    - sync B1 (cells 13 / 33 / 73): `fn __ts_main` exists; the
+        //      synthesized `fn main()` (sync, no `#[tokio::main]`) wraps the
+        //      captured top-level `main();` call as `__ts_main();`.
+        //    - async B2 (cells 15 / 35 / 75): `async fn __ts_main` exists;
+        //      the synthesized `#[tokio::main] async fn main()` wraps the
+        //      captured top-level call as `__ts_main();` (T8 will upgrade to
+        //      `__ts_main().await` once async wrapping lands).
+        //    Both: the renamed user main must be present AND the synthesized
+        //    binary entry must be present (= INV-1 source-order + dispatch
+        //    arm structural compliance).
         assert!(
             rust.contains("fn __ts_main"),
             "cell #{cell} ({axis_summary}): expected `fn __ts_main` declaration, got:\n{rust}"
         );
         assert!(
-            !rust.contains("fn main()"),
-            "cell #{cell} ({axis_summary}): rename target leaked — `fn main()` must not appear, got:\n{rust}"
+            rust.contains("fn main()"),
+            "cell #{cell} ({axis_summary}): expected synthesized `fn main()` binary \
+             entry (T4-1 ExecFnSyncRename / ExecFnAsyncRename arm), got:\n{rust}"
         );
         // 2. Every user-source `main()` call is substituted to `__ts_main()`.
         //    The TS source contains a single `main();` call — the IR must
@@ -158,12 +165,17 @@ main();\n";
         substituted >= 3,
         "multi-call boundary: expected ≥ 3 substituted `__ts_main()` call sites, got {substituted} in:\n{multi_call_rust}"
     );
-    // No bare `main()` call site (= `\nmain();` or similar pattern) must
-    // leak through. Use a more permissive substring check that covers
-    // the post-rustfmt "    main();" indentation as well.
+    // No bare `main();` call-site leak (= un-substituted user-source call).
+    // Post-rustfmt every body-level call has 4-space indent + semicolon, so a
+    // leaked un-substituted call appears as `    main();`. Note: the broader
+    // ` main()` substring check (used pre-T4-1) cannot be applied any longer
+    // because the synthesized `fn main()` (T4-1 binary entry) declaration
+    // legitimately contains ` main()` — checking against the call-site form
+    // (with semicolon + indent) keeps the leak detection precise without
+    // false positives from the declaration form.
     assert!(
-        !multi_call_rust.contains("    main();") && !multi_call_rust.contains(" main()"),
-        "multi-call boundary: bare `main()` call leaked — substitution gate did not \
+        !multi_call_rust.contains("    main();"),
+        "multi-call boundary: bare `main();` call leaked — substitution gate did not \
          fire for every site, got:\n{multi_call_rust}"
     );
 }
@@ -325,29 +337,102 @@ fn test_invariant_3_sync_async_dispatch_consistency_4_subcases() {
 
 /// INV-4: `pub fn init` mechanism 廃止 invariant
 ///
-/// **Property statement (a)**: 本 PRD 完了後、ts_to_rs の transpile output 内に
-/// `pub fn init()` 識別子が存在しない (= 全 emission path が fn main 統合 or library mode
-/// 実装に migration)。
+/// **Property statement (a)**: I-224 完了後、ts_to_rs production code 内 (= `src/`,
+/// `tools/`, `tests/e2e/rust-runner/`) に `pub fn init(...)` の **function definition**
+/// が存在しない (= 全 emission path が `fn main` 統合 or library mode に migration)。
 ///
-/// **Verification (c)**: Codebase grep `pub fn init` で 0 hits 確認 (test fixtures +
-/// production code)、`build_init_fn` helper 削除確認、CI script
-/// `scripts/audit-no-pub-fn-init.sh` (新規、本 PRD で作成済) で auto verify。
+/// **Verification (c)**: 本 test は **2 つ独立 verifier** で structural lock-in:
+/// 1. `scripts/audit-no-pub-fn-init.sh` を subprocess invoke、`exit=0` を assert
+///    (audit script は declaration-shape pattern `^\s*pub\s+fn\s+init\s*[\(<]` で
+///    function definition のみ match、doc comment / panic message での `pub fn init`
+///    言及は false positive にならない)
+/// 2. Rust source 内 `^\s*pub\s+fn\s+init\s*[\(<]` を直接 grep、enforced paths
+///    (`src/`, `tools/`, `tests/e2e/rust-runner/`) で hits == 0 を assert
 ///
-/// **Pre-T4 expected state**: 本 stub 作成時点 (iteration v7) では `audit-no-pub-fn-init.sh`
-/// は exit=1 で 2 src/ hits + 3 advisory hits を report (= `build_init_fn` doc comment +
-/// test comment + 既存 generated snapshot artefacts)。Implementation Stage T4 で
-/// `build_init_fn` helper 削除 + T5 で e2e re-run = generated snapshots regenerated 後、
-/// `audit-no-pub-fn-init.sh` exit=0 で INV-4 lock-in 達成。
+/// **Why two verifiers**: audit script の bug / disable / 削除 が起きても、独立 grep が
+/// invariant violation を捕捉する。逆も同様。
+///
+/// **Advisory paths exclusion rationale**: snapshot artefacts under
+/// `tests/e2e/scripts/i-205/cell-*.rs` are pre-T4-1 generator output (`pub fn init()`
+/// from the legacy mechanism). These are not authoritative — re-running the e2e
+/// suite regenerates them under the new `fn main` mechanism. The audit script
+/// reports them as advisory hits (no exit=1) and the direct grep below scopes its
+/// pattern to the same enforced paths the audit uses.
+///
+/// **T4-1 + T4-2 + T4-3 fill-in (post production wiring)**: T4-1 retired the
+/// `build_init_fn` production helper, T4-2 expanded `transform_module_item`'s `_`
+/// arm with Rule 11 (d-1) compliance + Tier 2 wording improvements, and T4-3 fills
+/// in this test to lock the invariant in.
 #[test]
-#[ignore = "I-224 INV-4 verification stub: Implementation Stage T4/T5 で fill in \
-            (scripts/audit-no-pub-fn-init.sh exit=0 + codebase grep `pub fn init` 0 hits 確認)"]
 fn test_invariant_4_no_pub_fn_init_in_codebase_post_t4() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T4/T5 で fill in: \
-         scripts/audit-no-pub-fn-init.sh をsubprocess invoke、exit=0 を assert + Rust source 内 \
-         `pub fn init` identifier 0 hits を grep verify (INV-4 codebase invariant lock-in)"
+    use std::process::Command;
+
+    // Locate workspace root (= the directory containing `Cargo.toml` /
+    // `scripts/audit-no-pub-fn-init.sh`). `CARGO_MANIFEST_DIR` is set by
+    // cargo at compile time and points to the package root, which equals the
+    // workspace root for this single-crate workspace.
+    let workspace_root = env!("CARGO_MANIFEST_DIR");
+
+    // === Verifier 1: audit script subprocess invoke ===
+    let audit_script = format!("{workspace_root}/scripts/audit-no-pub-fn-init.sh");
+    let audit_output = Command::new(&audit_script)
+        .current_dir(workspace_root)
+        .output()
+        .unwrap_or_else(|e| panic!("INV-4: failed to spawn audit script `{audit_script}`: {e}"));
+    let stdout = String::from_utf8_lossy(&audit_output.stdout);
+    let stderr = String::from_utf8_lossy(&audit_output.stderr);
+    assert!(
+        audit_output.status.success(),
+        "INV-4: `audit-no-pub-fn-init.sh` returned non-zero exit (= function-definition \
+         leak detected). Status: {:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        audit_output.status,
     );
+    assert!(
+        stdout.contains("OK: 0 hits of `pub fn init`"),
+        "INV-4: audit script success status but expected `OK: 0 hits` summary line was \
+         not found. stdout:\n{stdout}",
+    );
+
+    // === Verifier 2: independent grep (= structural redundancy) ===
+    //
+    // Walk the enforced paths (= the same set the audit script uses) and search
+    // for `^\s*pub\s+fn\s+init\s*[\(<]` matches in `*.rs` files. Use grep -rEn
+    // for portability (the harness already requires bash for the audit script,
+    // so grep is universally available).
+    let enforced_paths = ["src", "tools", "tests/e2e/rust-runner"];
+    for path in &enforced_paths {
+        let abs = format!("{workspace_root}/{path}");
+        if !std::path::Path::new(&abs).exists() {
+            // tools/ may be absent; skip silently per the audit script's
+            // existence guard.
+            continue;
+        }
+        let grep = Command::new("grep")
+            .args([
+                "-rEn",
+                "--include=*.rs",
+                r"^\s*pub\s+fn\s+init\s*[\(<]",
+                &abs,
+            ])
+            .output()
+            .unwrap_or_else(|e| panic!("INV-4: failed to spawn grep for `{abs}`: {e}"));
+        let hits = String::from_utf8_lossy(&grep.stdout);
+        // grep exit code:
+        //   0 = matches found (= violation) — must NOT happen.
+        //   1 = no matches (= invariant holds) — expected.
+        //   2 = error (e.g., bad regex) — fail loudly.
+        match grep.status.code() {
+            Some(0) => panic!(
+                "INV-4: independent grep found `pub fn init(...)` definition(s) in `{path}`:\n{hits}",
+            ),
+            Some(1) => { /* no matches — invariant holds for this path */ }
+            other => panic!(
+                "INV-4: grep returned unexpected status {other:?} for `{abs}`. \
+                 stdout:\n{hits}\nstderr:\n{}",
+                String::from_utf8_lossy(&grep.stderr)
+            ),
+        }
+    }
 }
 
 /// INV-5: `__ts_` namespace reservation extension consistency
@@ -560,9 +645,16 @@ fn test_invariant_5_ts_main_namespace_reservation_with_collision_priority() {
         //     envelope produced by `format_module_item_kind` (swc's auto-derived Debug
         //     prints tuple-struct variants as `<Variant>(<inner>)`).
         if cells_with_alternative_a_axis_reject.contains(cell) {
+            // T4-2 wording substrings:
+            // - Cell 49 (A4 control-flow): the new wording wraps the SWC kind in
+            //   parentheses, so the legacy `Stmt(If(` substring still matches as
+            //   part of the suffix.
+            // - Cell 69 (A5b Debugger): the new wording replaces the SWC kind
+            //   prefix with user-facing guidance; we anchor on the leading
+            //   backtick-quoted token instead.
             let alternative_wording = match cell {
                 49 => "Stmt(If(",
-                69 => "Stmt(Debugger(",
+                69 => "`debugger` statement has no Rust equivalent",
                 _ => unreachable!(
                     "cells_with_alternative_a_axis_reject must be kept in sync with this match arm"
                 ),

@@ -38,33 +38,21 @@
 //!
 //! # Integration status
 //!
-//! Implementation Stage T2 lands the helper as a **standalone foundation**: the
-//! production [`Transformer::transform_module`] / `transform_module_collecting`
-//! still uses the legacy `init_stmts` + `pub fn init` mechanism. Integration is
-//! T4's responsibility (`transform_module` refactor + `pub fn init` removal).
-//! The 80-cell unit tests + `tests/i224_helper_test.rs::test_dispatch_arm_one_to_one_mapping_per_in_scope_cell`
-//! exercise this module directly and lock in the dispatch tree's Rule 9 (a) 1-to-1
-//! mapping invariant ahead of T3/T4 emission code landing.
+//! Implementation Stage T4-1 wires the per-item capture dispatch
+//! ([`Transformer::try_capture_module_item_into_main_stmts`]) into
+//! [`Transformer::transform_module`] / `transform_module_collecting`, replacing
+//! the legacy `init_stmts` + `pub fn init` mechanism with the [`MainStmt`] →
+//! [`Transformer::synthesize_fn_main`] pipeline. The legacy `build_init_fn` helper
+//! has been removed (T4-1 also retired it since the function had no remaining
+//! callers post-refactor — keeping a `#[allow(dead_code)]` placeholder for one
+//! commit would have violated the project's "no dead code in production"
+//! invariant for no structural benefit).
 //!
-//! Most public items (`UserMainKind`, `DispatchArm`, `classify_dispatch_arm`,
-//! `is_executable_mode`, `detect_user_main`, `has_top_level_await`) are exercised by
-//! the external integration tests (`tests/i224_helper_test.rs`,
-//! `tests/i224_invariants_test.rs`); they are reachable from the test target and
-//! never trigger the `dead_code` lint. Four items, however, are consumed only by
-//! Implementation Stage T3 / T4-1 and are unreachable from any current call site:
-//!
-//! - [`MainStmt`] — fn main body capture variants emitted by T3's `synthesize_fn_main`.
-//! - [`DeclVarPath`] — return type of [`classify_decl_var_path`], consumed by both
-//!   [`Transformer::collect_top_level_executions`] and T4-1's per-item routing.
-//! - [`classify_decl_var_path`] — predicate consumed by T4-1's per-item routing.
-//! - [`Transformer::collect_top_level_executions`] — wired into `transform_module`
-//!   by T4-1.
-//!
-//! Per-item `#[allow(dead_code)]` records the staging intent and points to the
-//! consumer task. T4-1 will remove each `#[allow]` once the production call site
-//! exists. The pattern follows
-//! [`crate::transformer::expressions::TS_MAIN_RENAME`] (declared in T1-1, consumed
-//! by T1-2 / T3).
+//! [`Transformer::collect_top_level_executions`] survives as a thin test-facing
+//! wrapper around the per-item helper; the I-228 spec-modori coverage and the
+//! 80-cell unit tests exercise it directly. The `#[allow(dead_code)]` on this
+//! method documents the test-only role — production callers go through
+//! `try_capture_module_item_into_main_stmts` inside their per-item dispatch loop.
 
 use anyhow::Result;
 use swc_ecma_ast::{self as ast, Decl, Expr, Module, ModuleDecl, ModuleItem, Stmt, VarDecl};
@@ -118,9 +106,6 @@ pub(crate) use init_classifier::{classify_init_kind, InitKind};
 /// store the **awaitee** (the operand of `await`), not the `Expr::Await(...)` wrapper.
 /// T3 emission applies `.await` based on the variant tag. This makes ExprAwait /
 /// LetAwait symmetric with the Rust syntax `<expr>.await;` / `let x = <expr>.await;`.
-#[allow(dead_code)]
-// Consumed by T3 (`Transformer::synthesize_fn_main` body emission)
-// and T4-1 (`transform_module` integration of the capture path).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum MainStmt {
     /// Synchronous expression statement: `<expr>;`.
@@ -515,14 +500,15 @@ impl<'a> Transformer<'a> {
     ///
     /// # Errors
     ///
-    /// Propagates [`Transformer::convert_expr`] / [`Transformer::convert_var_decl`]
-    /// errors (e.g., unsupported subexpression). When `transform_module` /
-    /// `transform_module_collecting` integrate this helper (T4), the caller will
-    /// decide between early-abort and accumulating-collect semantics.
-    #[allow(dead_code)] // Wired into `Transformer::transform_module` /
-                        // `transform_module_collecting` by T4-1; until then, this
-                        // method is exercised only by `tests` (unit) and is not
-                        // reachable from the lib build's root.
+    /// Propagates [`Transformer::convert_expr`] errors (e.g., unsupported subexpression).
+    /// `transform_module` (early-abort mode) and `transform_module_collecting`
+    /// (collecting mode) both call [`Self::try_capture_module_item_into_main_stmts`]
+    /// directly inside their per-item dispatch loop, so this wrapper is **test-only**
+    /// post-T4-1 (`#[allow(dead_code)]` documents the intent — kept around as the
+    /// stable test-facing API for `src/transformer/main_synthesis/tests/` and the
+    /// I-228 spec-modori coverage).
+    #[allow(dead_code)] // Test-only wrapper post-T4-1; production callers use
+                        // `try_capture_module_item_into_main_stmts` directly.
     pub(crate) fn collect_top_level_executions(
         &mut self,
         module: &Module,
@@ -531,118 +517,172 @@ impl<'a> Transformer<'a> {
         let user_main_kind = detect_user_main(module);
         let has_top_level_await_flag = has_top_level_await(module);
         let mut main_stmts = Vec::new();
-
         for item in &module.body {
-            match item {
-                // ============== Stmt::Expr (top-level execution) ==============
-                ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => {
-                    if !exec_mode {
-                        // Library mode never hosts Stmt::Expr per `is_executable_mode`
-                        // definition; reaching this arm in library mode would be a
-                        // self-contradiction (a Stmt::Expr would have flipped the mode
-                        // to true). The defensive `unreachable!` documents the
-                        // invariant.
-                        unreachable!(
-                            "Stmt::Expr present in library mode contradicts is_executable_mode: \
-                             fix is_executable_mode or this scan loop"
-                        );
-                    }
-                    // Bare `await x;` → MainStmt::ExprAwait (T3 emits `<inner>.await;`).
-                    // Nested await `f(await x);` → MainStmt::Expr (= whole IR; the inner
-                    // Expr::Await sub-node is preserved by convert_expr and rendered as
-                    // `.await` by T3 emission within the async fn main context).
-                    if let Expr::Await(await_expr) = &*expr_stmt.expr {
-                        let inner = self.convert_expr(&await_expr.arg)?;
-                        main_stmts.push(MainStmt::ExprAwait(inner));
-                    } else {
-                        let converted = self.convert_expr(&expr_stmt.expr)?;
-                        main_stmts.push(MainStmt::Expr(converted));
-                    }
-                }
-
-                // ============== Decl::Var (capture or top-level const path) ==============
-                ModuleItem::Stmt(Stmt::Decl(Decl::Var(var))) => {
-                    self.capture_var_decl_into_main_stmts(var, exec_mode, &mut main_stmts)?;
-                }
-
-                // ============== ExportDecl-wrapped Decl::Var (I-228-c fix) ==============
-                // `export const c = compute();` semantically belongs to Axis A3
-                // (= side-effect Decl::Var) when init is non-Lit. is_executable_mode
-                // now triggers on this shape, so we capture it identically to bare
-                // Stmt::Decl(Decl::Var) — the `pub` modifier of the export is dropped
-                // (= cosmetic loss for executable mode、PRD Spec stage 逆戻り Axis E
-                // orthogonality merge revision 2026-05-07)。Other ExportDecl-wrapped
-                // Decl variants (Fn / Class / Interface / TypeAlias / Enum / Module /
-                // Using) are emitted by transform_module_item via existing path with
-                // `pub` modifier preserved — no main_stmts capture.
-                ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => match &export.decl {
-                    Decl::Var(var) => {
-                        self.capture_var_decl_into_main_stmts(var, exec_mode, &mut main_stmts)?;
-                    }
-                    Decl::Fn(_)
-                    | Decl::Class(_)
-                    | Decl::TsInterface(_)
-                    | Decl::TsTypeAlias(_)
-                    | Decl::TsEnum(_)
-                    | Decl::TsModule(_)
-                    | Decl::Using(_) => {}
-                },
-
-                // ============== Other ModuleDecl: no capture ==============
-                ModuleItem::ModuleDecl(
-                    ModuleDecl::Import(_)
-                    | ModuleDecl::ExportNamed(_)
-                    | ModuleDecl::ExportAll(_)
-                    | ModuleDecl::ExportDefaultDecl(_)
-                    | ModuleDecl::ExportDefaultExpr(_)
-                    | ModuleDecl::TsImportEquals(_)
-                    | ModuleDecl::TsExportAssignment(_)
-                    | ModuleDecl::TsNamespaceExport(_),
-                ) => {}
-
-                // ============== Stmt: declarations / control-flow / Empty / Debugger ==============
-                // Declarations (Fn / Class / Interface / TypeAlias / Enum / Module / Using):
-                // emitted as Rust items by transform_module_item; not main_stmts capture.
-                ModuleItem::Stmt(Stmt::Decl(
-                    Decl::Fn(_)
-                    | Decl::Class(_)
-                    | Decl::TsInterface(_)
-                    | Decl::TsTypeAlias(_)
-                    | Decl::TsEnum(_)
-                    | Decl::TsModule(_)
-                    | Decl::Using(_),
-                )) => {}
-
-                // A5a Empty: silent skip per the per-item dispatch table; no capture.
-                ModuleItem::Stmt(Stmt::Empty(_)) => {}
-
-                // A5b Debugger + A4 control-flow: rejected by transform_module_item
-                // (Tier 2 honest reject); reaching this scan in executable mode is
-                // possible only in collecting mode where transform_module_collecting
-                // accumulates errors and continues. Skip the capture; the rejection
-                // is recorded by the caller's accumulator.
-                ModuleItem::Stmt(Stmt::Debugger(_)) => {}
-                ModuleItem::Stmt(
-                    Stmt::Block(_)
-                    | Stmt::If(_)
-                    | Stmt::Switch(_)
-                    | Stmt::Throw(_)
-                    | Stmt::Try(_)
-                    | Stmt::While(_)
-                    | Stmt::DoWhile(_)
-                    | Stmt::For(_)
-                    | Stmt::ForIn(_)
-                    | Stmt::ForOf(_)
-                    | Stmt::Labeled(_)
-                    | Stmt::Continue(_)
-                    | Stmt::Break(_)
-                    | Stmt::Return(_)
-                    | Stmt::With(_),
-                ) => {}
-            }
+            self.try_capture_module_item_into_main_stmts(item, exec_mode, &mut main_stmts)?;
         }
-
         Ok((main_stmts, user_main_kind, has_top_level_await_flag))
+    }
+
+    /// Per-item capture dispatch — the single source of truth for whether a
+    /// [`ModuleItem`] is routed into the synthesized fn main body or emitted as a
+    /// top-level [`Item`] by [`Transformer::transform_module_item`].
+    ///
+    /// Returns:
+    /// - `Ok(true)` — the item was captured into `main_stmts` (= the caller MUST NOT
+    ///   pass the same item to `transform_module_item`, otherwise the conversion
+    ///   produces duplicate emission).
+    /// - `Ok(false)` — the item is not in capture scope (declarations, library mode,
+    ///   silent-skip / Tier-2-reject shapes); the caller routes it to
+    ///   `transform_module_item` (or its mode's silent-skip pre-arm).
+    /// - `Err(_)` — the item is in capture scope but `convert_expr` failed during
+    ///   init conversion. The item is **not** emitted; the caller decides between
+    ///   abort propagation (`transform_module`) and accumulation
+    ///   (`transform_module_collecting`).
+    ///
+    /// **Per-shape semantics**:
+    /// - `Stmt::Expr` in executable mode → capture as `MainStmt::Expr` (non-await) or
+    ///   `MainStmt::ExprAwait` (bare `await x;`).
+    /// - `Stmt::Decl(Decl::Var)` whose [`classify_decl_var_path`] is
+    ///   `FnMainBodyCapture` → capture per declarator as `MainStmt::Let` or
+    ///   `MainStmt::LetAwait`.
+    /// - `ExportDecl(Decl::Var)` with `FnMainBodyCapture` path → capture identically
+    ///   (the `pub` modifier is dropped per Axis E orthogonality merge revision,
+    ///   I-228-c fix 2026-05-07).
+    /// - All other items → `Ok(false)`.
+    ///
+    /// **Rule 11 (d-1) self-applied compliance**: every `ModuleItem` / `ModuleDecl` /
+    /// `Stmt` / `Decl` variant is enumerated explicitly; new SWC variants force a
+    /// compile error and require this dispatch to be updated in lock-step.
+    pub(crate) fn try_capture_module_item_into_main_stmts(
+        &mut self,
+        item: &ModuleItem,
+        is_executable_mode_flag: bool,
+        main_stmts: &mut Vec<MainStmt>,
+    ) -> Result<bool> {
+        match item {
+            // ============== Stmt::Expr (top-level execution) ==============
+            ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => {
+                if !is_executable_mode_flag {
+                    // Library mode never hosts Stmt::Expr per `is_executable_mode`
+                    // definition; reaching this arm in library mode would be a
+                    // self-contradiction (a Stmt::Expr would have flipped the mode
+                    // to true). The defensive `unreachable!` documents the invariant.
+                    unreachable!(
+                        "Stmt::Expr present in library mode contradicts is_executable_mode: \
+                         fix is_executable_mode or this dispatch"
+                    );
+                }
+                // Bare `await x;` → MainStmt::ExprAwait (synthesize_fn_main emits
+                // `<inner>.await;`). Nested await `f(await x);` → MainStmt::Expr
+                // (= whole IR; the inner Expr::Await sub-node is preserved by
+                // convert_expr and rendered as `.await` within the async fn main
+                // context).
+                if let Expr::Await(await_expr) = &*expr_stmt.expr {
+                    let inner = self.convert_expr(&await_expr.arg)?;
+                    main_stmts.push(MainStmt::ExprAwait(inner));
+                } else {
+                    let converted = self.convert_expr(&expr_stmt.expr)?;
+                    main_stmts.push(MainStmt::Expr(converted));
+                }
+                Ok(true)
+            }
+
+            // ============== Decl::Var (capture or top-level const path) ==============
+            ModuleItem::Stmt(Stmt::Decl(Decl::Var(var))) => {
+                match classify_decl_var_path(var, is_executable_mode_flag) {
+                    DeclVarPath::FnMainBodyCapture => {
+                        self.capture_var_decl_into_main_stmts(
+                            var,
+                            is_executable_mode_flag,
+                            main_stmts,
+                        )?;
+                        Ok(true)
+                    }
+                    DeclVarPath::ToplevelConst | DeclVarPath::LibraryMode => Ok(false),
+                }
+            }
+
+            // ============== ExportDecl-wrapped Decl::Var (I-228-c fix) ==============
+            // `export const c = compute();` semantically belongs to Axis A3
+            // (= side-effect Decl::Var) when init is non-Lit. is_executable_mode
+            // triggers on this shape, so we capture it identically to bare
+            // Stmt::Decl(Decl::Var) — the `pub` modifier of the export is dropped
+            // (= cosmetic loss for executable mode、Spec stage 逆戻り Axis E
+            // orthogonality merge revision 2026-05-07). Other ExportDecl-wrapped
+            // Decl variants (Fn / Class / Interface / TypeAlias / Enum / Module /
+            // Using) fall through to `transform_module_item` for top-level emission
+            // with `pub` preserved.
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => match &export.decl {
+                Decl::Var(var) => match classify_decl_var_path(var, is_executable_mode_flag) {
+                    DeclVarPath::FnMainBodyCapture => {
+                        self.capture_var_decl_into_main_stmts(
+                            var,
+                            is_executable_mode_flag,
+                            main_stmts,
+                        )?;
+                        Ok(true)
+                    }
+                    DeclVarPath::ToplevelConst | DeclVarPath::LibraryMode => Ok(false),
+                },
+                Decl::Fn(_)
+                | Decl::Class(_)
+                | Decl::TsInterface(_)
+                | Decl::TsTypeAlias(_)
+                | Decl::TsEnum(_)
+                | Decl::TsModule(_)
+                | Decl::Using(_) => Ok(false),
+            },
+
+            // ============== Other ModuleDecl: no capture ==============
+            ModuleItem::ModuleDecl(
+                ModuleDecl::Import(_)
+                | ModuleDecl::ExportNamed(_)
+                | ModuleDecl::ExportAll(_)
+                | ModuleDecl::ExportDefaultDecl(_)
+                | ModuleDecl::ExportDefaultExpr(_)
+                | ModuleDecl::TsImportEquals(_)
+                | ModuleDecl::TsExportAssignment(_)
+                | ModuleDecl::TsNamespaceExport(_),
+            ) => Ok(false),
+
+            // ============== Stmt: declarations / control-flow / Empty / Debugger ==============
+            // Declarations (Fn / Class / Interface / TypeAlias / Enum / Module / Using):
+            // emitted as Rust items by `transform_module_item`; no main_stmts capture.
+            ModuleItem::Stmt(Stmt::Decl(
+                Decl::Fn(_)
+                | Decl::Class(_)
+                | Decl::TsInterface(_)
+                | Decl::TsTypeAlias(_)
+                | Decl::TsEnum(_)
+                | Decl::TsModule(_)
+                | Decl::Using(_),
+            )) => Ok(false),
+
+            // A5a Empty: silent skip target — pre-handled by the caller's early
+            // continue (transform_module / transform_module_collecting); reaching
+            // this dispatch is harmless but should never push to main_stmts.
+            // A5b Debugger + A4 control-flow: rejected as Tier 2 honest errors by
+            // `transform_module_item` (T4-2 expansion); never captured here.
+            ModuleItem::Stmt(
+                Stmt::Empty(_)
+                | Stmt::Debugger(_)
+                | Stmt::Block(_)
+                | Stmt::If(_)
+                | Stmt::Switch(_)
+                | Stmt::Throw(_)
+                | Stmt::Try(_)
+                | Stmt::While(_)
+                | Stmt::DoWhile(_)
+                | Stmt::For(_)
+                | Stmt::ForIn(_)
+                | Stmt::ForOf(_)
+                | Stmt::Labeled(_)
+                | Stmt::Continue(_)
+                | Stmt::Break(_)
+                | Stmt::Return(_)
+                | Stmt::With(_),
+            ) => Ok(false),
+        }
     }
 
     /// Helper for [`Self::collect_top_level_executions`]: walks every declarator
@@ -732,12 +772,17 @@ impl<'a> Transformer<'a> {
     ///   `ExecFnAsyncRename` / `ExecFnAsyncRenameAsync` / `ExecNonFnAsync`):
     ///   synthesizes `#[tokio::main] async fn main() { /* main_stmts */ }`
     ///   (`is_async = true`, `attributes = ["tokio::main"]`).
-    /// - **Collision arm**: structurally unreachable — upstream
-    ///   [`super::super::scan_for_ts_namespace_collisions`] in
-    ///   `Transformer::transform_module` rejects the `__ts_main` user identifier
-    ///   before any dispatch-tree call site is reached. The `unreachable!` here
-    ///   is a defensive lock-in that surfaces as a loud panic if a future caller
-    ///   bypasses the upstream namespace lint.
+    /// - **Collision arm**: synthesis suppressed — returns an empty `Vec<Item>`.
+    ///   The `__ts_main` user identifier collision is reported upstream by
+    ///   [`crate::transformer::namespace_lint::scan_for_ts_namespace_collisions`]
+    ///   (called from `Transformer::transform_module(_collecting)`); in abort mode
+    ///   the first collision returns `Err(_)` before this dispatch is ever
+    ///   reached, but in collecting mode the collision is accumulated and the
+    ///   caller still asks for synthesis. Returning an empty Vec honestly
+    ///   reflects "fn main synthesis is suppressed because the user's
+    ///   `__ts_*` identifier collides with the renamed binary entry"; the upstream
+    ///   lint remains the single contract surface for surfacing the violation.
+    ///   See the in-arm comment for the full rationale.
     ///
     /// **`is_executable_mode` derivation**: PRD Design section #2 defines exec mode
     /// as the union of (a) any `Stmt::Expr` / `Decl::Var` with side-effect / await
@@ -759,8 +804,6 @@ impl<'a> Transformer<'a> {
     ///
     /// # Panics
     ///
-    /// - `(_, Collision, _)`: defensive — unreachable in production after
-    ///   `Transformer::transform_module` upstream rejection (see above).
     /// - `(false, _, true)` (forwarded from [`classify_dispatch_arm`]): library
     ///   mode + has_top_level_await=true is structurally impossible by the AST
     ///   mutual-exclusion locked in by
@@ -769,10 +812,10 @@ impl<'a> Transformer<'a> {
     ///   has_top_level_await)` pair violating the
     ///   `is_executable_mode = !main_stmts.is_empty() || has_top_level_await`
     ///   invariant.
-    #[allow(dead_code)]
-    // Wired into `Transformer::transform_module` /
-    // `transform_module_collecting` by T4-1; until then this method is exercised
-    // only by `tests` (unit) and is not reachable from the lib build's root.
+    ///
+    /// The `(_, Collision, _)` case is **not** a panic — the Collision arm
+    /// suppresses synthesis (returns an empty `Vec`) rather than panicking. See
+    /// the per-arm description above for the rationale.
     pub(crate) fn synthesize_fn_main(
         &mut self,
         main_stmts: Vec<MainStmt>,
@@ -813,14 +856,29 @@ impl<'a> Transformer<'a> {
                 vec![build_synthesized_fn_main(body, /* is_async = */ true)]
             }
 
-            // ============== Collision — defensive unreachable ==============
-            DispatchArm::Collision => unreachable!(
-                "synthesize_fn_main reached with UserMainKind::Collision; the \
-                 `__ts_main` identifier collision must be rejected upstream by \
-                 `Transformer::transform_module`'s call to \
-                 `scan_for_ts_namespace_collisions` before any dispatch-tree \
-                 call site (INV-5 highest precedence)."
-            ),
+            // ============== Collision — synthesis suppressed ==============
+            // Reaching this arm means the user defined a `__ts_*`-prefixed
+            // module-level identifier (= I-154 namespace violation, the most
+            // common shape being `function __ts_main()`). The collision was
+            // already reported upstream by `scan_for_ts_namespace_collisions`:
+            //
+            // - In abort mode (`Transformer::transform_module`) the first
+            //   collision returns `Err(_)` and this dispatch is never reached.
+            // - In collecting mode (`Transformer::transform_module_collecting`)
+            //   the collisions are pushed to the `unsupported` accumulator and
+            //   the rest of the transform proceeds; this arm fires when the
+            //   collecting caller asks for synthesis after the lint already
+            //   surfaced the collision.
+            //
+            // Returning `Vec::new()` honestly reflects "fn main synthesis is
+            // suppressed because the user's `__ts_*` identifier collides with
+            // the renamed binary entry symbol". Any captured `main_stmts` /
+            // `has_top_level_await` payload is silently dropped — the user
+            // must rename the colliding identifier and re-run before a
+            // compilable binary entry can be emitted. (See PRD I-224 INV-5
+            // for the namespace reservation invariant; the upstream lint
+            // remains the contract surface for reporting the violation.)
+            DispatchArm::Collision => Vec::new(),
         }
     }
 }
@@ -842,10 +900,6 @@ impl<'a> Transformer<'a> {
 /// `Expr::Await(_)` wrapper at the point of IR emission, keeping the IR symmetric
 /// with the Rust postfix `.await` syntax. (See the [`MainStmt`] doc comment's
 /// "Await-variant invariant".)
-#[allow(dead_code)]
-// Consumed by `Transformer::synthesize_fn_main` (above); the `synthesize_fn_main`
-// method itself is dead until T4-1 wires it into `transform_module`. The
-// `#[allow(dead_code)]` is removable when T4-1 lands the production call site.
 fn main_stmts_to_ir_stmts(main_stmts: Vec<MainStmt>) -> Vec<IrStmt> {
     main_stmts
         .into_iter()
@@ -880,9 +934,6 @@ fn main_stmts_to_ir_stmts(main_stmts: Vec<MainStmt>) -> Vec<IrStmt> {
 /// Visibility is `Private` (= no `pub`): the binary entry point convention does
 /// not require / permit `pub fn main`, and the synthesized fn never participates
 /// in cross-module API surfaces (= INV-5 / Axis E orthogonality cross-reference).
-#[allow(dead_code)]
-// Consumed by `Transformer::synthesize_fn_main` (above); same dead-until-T4-1
-// rationale as `main_stmts_to_ir_stmts`.
 fn build_synthesized_fn_main(body: Vec<IrStmt>, is_async: bool) -> Item {
     let attributes = if is_async {
         vec!["tokio::main".to_string()]

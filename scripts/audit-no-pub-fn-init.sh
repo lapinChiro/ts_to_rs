@@ -41,9 +41,22 @@ declare -a ADVISORY_PATHS=(
     "tests/e2e/scripts/"
 )
 
-# `pub fn init` token pattern. `\b` boundaries ensure we don't match e.g.
-# `pub fn initialize` or other identifiers that happen to begin with `init`.
-PATTERN='\bpub\s+fn\s+init\b'
+# `pub fn init` declaration pattern.
+#
+# **Match**: actual Rust function definitions of the legacy `pub fn init` shape:
+#   `pub fn init(...)` (sync params)
+#   `pub fn init<T>(...)` (generic params)
+# **Don't match**: doc comments, panic / format strings, or other prose mentions
+#   of the historic mechanism — these are textual references to the design's
+#   evolution and have no runtime impact on the converted binary.
+#
+# Implementation: anchor the identifier to start-of-line whitespace (rejects
+# lines that have any non-whitespace prefix, including `//`, `///`, `//!`, or
+# the leading `"`/`'` of a string literal) AND require an opening parenthesis
+# or angle bracket after `init` (= the syntactic shape of a function header).
+# This is the empirical lock-in for INV-4: only true function definitions are
+# rejected; doc commentary that names the mechanism stays free to discuss it.
+PATTERN='^\s*pub\s+fn\s+init\s*[\(<]'
 
 violations=0
 

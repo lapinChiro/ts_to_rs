@@ -9,23 +9,24 @@
 
 ---
 
-## 現在の状態 (2026-05-07 post I-224 T2 完了 + adversarial deep review 3 round + Spec stage 逆戻り Iteration v8 batch fix (I-228 系 4 sub-entries 全 resolve + Layer 3 extension fix Object computed key + Class shape outer-context await) = main_synthesis foundation module + 105 unit tests + dispatch arm 1-to-1 mapping integration test + INV-3 (C0 partial) / INV-6 invariants test fill-in + recursive Await walker (38 Expr + Class + ClassMember + PropName 全 enumerate per Rule 11 (d-1)) + ExportDecl-wrapped Decl::Var Axis A trigger + multi-declarator iter ANY-rule classification)
+## 現在の状態 (2026-05-07 post I-224 T4 完了 = transform_module(_collecting) を `try_capture_module_item_into_main_stmts` + `synthesize_fn_main` 経由に refactor + transform_module_item `_ => Err` arm を Rule 11 (d-1) compliance に expand + A4/A5b Tier 2 wording 改善 + `build_init_fn` helper 削除 + `namespace_lint.rs` sub-module 抽出 + INV-4 invariants test fill-in + 4-layer review pass)
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | **111/158 (70.3%)** = T7/T8/T9/T10/T12 baseline と同一 (Preservation、T2 production module は dead code from production POV until T4 integration、Hono への影響 0 件) |
-| Hono bench errors | **63** (baseline と同一、no new compile errors、本 PRD scope 外への regression 0 件) |
-| cargo test (lib) | 3477 pass / 0 fail / 0 ignored (T1-3 baseline 3372 + 105 NEW = 64 baseline + 9 declare-marked + 3 deep-review + 17 Spec stage 逆戻り I-228 fix tests + 12 Layer 3 extension fix tests = nested-await walker 8 + ExportDecl wrap 4 + multi-declarator iter 5 + Object computed key 6 + Class shape 7) |
+| Hono bench clean | **108/158 (68.4%)** at /tmp/hono-src f10dee8 SHA (= post-T4 working tree、Hono 4.12.18) / **109/158 (69.0%)** at SHA-pinned 027e3df (= T4 vs T3=111/63 baseline = -2 clean / +4 errors、4 件全件 **Tier 1 silent semantic change → Tier 2 honest error** 化 = `conversion-correctness-priority.md` 観点で **Improvement** = silent semantic loss を honest error に elevate、cloudflare-workers/websocket.ts + deno/websocket.ts の `export const upgradeWebSocket = defineWebSocketHelper(...)` がそれまで silently dropped されていた事実を T4 の deeper convert_expr 経由 capture が surfacing) |
+| Hono bench errors | **68** at f10dee8 / **67** at 027e3df (Tier-transition Improvement、broken-fix PRD allowed pattern per `prd-completion.md`) |
+| cargo test (lib) | **3520 pass / 0 fail / 0 ignored** (T3 baseline 3513 + 7 NEW T4 unit tests = 6 A4 control-flow Tier 2 wording + 1 A5b debugger Tier 2 wording) |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
 | cargo test (E2E) | 159 pass + 70 `#[ignore]` |
-| cargo test (i224_invariants_test) | **3 pass / 4 ignored** (T1-3 で INV-5 fill-in + T2-3 で INV-3 partial / INV-6 fill-in、INV-1/2/4/7 は T3-T9 で順次 fill-in 予定) |
-| cargo test (i224_helper_test) | **1 pass / 3 ignored** (T2-2 で test_dispatch_arm_one_to_one_mapping_per_in_scope_cell fill-in、Axis B / Axis E / A5a compositional probes は T3-2/T3-4 で fill-in 予定) |
+| cargo test (i224_invariants_test) | **5 pass / 2 ignored** (T1-3 で INV-5 + T2 で INV-3 partial / INV-6 + T3-4 で INV-2 + T4-3 で **INV-4 fill-in**、INV-1/INV-7 は T5/T9 で順次 fill-in 予定) |
+| cargo test (i224_helper_test) | **5 pass / 0 ignored** |
 | cargo test (i205_helper_test) | **4 pass / 0 ignored** |
 | cargo test (i205_invariants_test) | **2 pass / 5 ignored** |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
-| ./scripts/check-file-lines.sh | OK (全 .rs file < 1000 行、main_synthesis/{mod.rs = 953 / await_walker.rs = 287 / user_main.rs = 265 / tests/mod.rs = 266 / tests/i228_spec_modori.rs = 838} 行 = 5 file directory module split で Iteration v8 fix volume を吸収) |
+| `scripts/audit-no-pub-fn-init.sh` | exit=0 (= INV-4 codebase invariant lock-in、enforced paths `src/`/`tools/`/`tests/e2e/rust-runner/` で 0 hits) |
+| ./scripts/check-file-lines.sh | OK (全 .rs file < 1000 行、`transformer/mod.rs` 932 行 (= 1078 → 932、`namespace_lint.rs` 185 行抽出 + `build_init_fn` 削除で削減)) |
 
 **bench 非決定性**: ±1 clean / ±2 errors の noise variance を [I-172] として記録 (test/bench infra defect、別 PRD)。
 
@@ -62,7 +63,7 @@
 | T1: `__ts_` namespace + collision detection | ~~T1-1~~ ✓ / ~~T1-2~~ ✓ / ~~T1-3~~ ✓ (= INV-5 fill-in + 4-layer review) | ✓ **T1 完了 (2026-05-07)** |
 | T2: IR enums + helper | ~~T2-1~~ ✓ / ~~T2-2~~ ✓ / ~~T2-3~~ ✓ (= INV-3 partial + INV-6 + 4-layer review、user 指示で T2-1/T2-2/T2-3 を 1 commit に bundle) | ✓ **T2 完了 (2026-05-07)** |
 | T3: fn main synthesis + rename + substitute + Axis B/E probes | ~~T3-1~~ ✓ / ~~T3-2~~ ✓ / ~~T3-3~~ ✓ / ~~T3-4~~ ✓ (= Axis E + A5a probes + 4-layer review、user 指示で 1 commit に bundle) | ✓ **T3 完了 (2026-05-07)** |
-| T4: transform_module refactor + pub fn init 廃止 | T4-1 / T4-2 / T4-3 (= INV-4 + 4-layer review) | 未着手 |
+| T4: transform_module refactor + pub fn init 廃止 | ~~T4-1~~ ✓ / ~~T4-2~~ ✓ / ~~T4-3~~ ✓ (= INV-4 + 4-layer review、user 指示で T4-1/T4-2/T4-3 を 1 commit に bundle) | ✓ **T4 完了 (2026-05-07)** |
 | T5: E2E green-ify (existing C0) + I-205 cell-09 unblock | T5-1 / T5-2 (= NEW C0 + INV-7 + 4-layer review) | 未着手 |
 | T6a: I-154 doc + audit script CI integration | T6a (single sub-commit、4-layer review 内包) | 未着手 |
 | T7: Test harness ESM upgrade permanent integration | T7-1 / T7-2 (= --esm CI flow + 4-layer review) | 未着手 |
@@ -117,7 +118,47 @@
 - **PRD T4 着手前 prerequisite**: T3 で `pub fn init` synthesis は **依然 build_init_fn 経由で残存**、T4-1 で `synthesize_fn_main` 経由 path に refactor + `build_init_fn` 削除予定。INV-4 (codebase 内 `pub fn init` 0 件) は T4-3 で fill-in。
 - **Commit (proposed)**: `[WIP] I-224 T3 完了: synthesize_fn_main + user main rename + main() substitution + Axis B/E/A5a orthogonality probe + InitKind NonTrigger Spec extension (Arrow/Fn/Class/Object/Array/type-wrappers 拡張) + Stmt::Empty silent skip + init_classifier.rs sub-module 抽出 + 4-layer review pass (1 Spec gap structural fix + 2 Review insight deferred)`。
 
-**plan.md chain 影響**: Option β 採用で I-226 entry を chain から削除済 (= 本 plan.md の chain section)、I-224 scope は Axis C0 + Axis C1 cohesive batch (T1-T9 sequence、計 23 sub-commits)。次着手は T4 (transform_module refactor + pub fn init 廃止)。
+**T4 完了 (2026-05-07、T4-1 + T4-2 + T4-3 を 1 commit に bundle、`/check_job` 4-layer self-applied review = Layer 1-4 全 0 findings + Hono bench Tier-transition Improvement = silent → honest 化 4 件)**: I-224 fn main mechanism の **production wiring 完成** + `pub fn init` mechanism 完全廃止。
+
+- **T4-1 (transform_module / transform_module_collecting refactor)**:
+  - `Transformer::try_capture_module_item_into_main_stmts(&mut self, item, is_executable_mode_flag, &mut Vec<MainStmt>) -> Result<bool>` 新規 method を `src/transformer/main_synthesis/mod.rs` に追加 = per-item capture dispatch single source of truth、`Ok(true) = captured / Ok(false) = not in capture scope / Err(_) = capture attempted but convert_expr failed`。Rule 11 (d-1) self-applied compliance で全 ModuleItem / ModuleDecl / Stmt / Decl variants explicit enumerate。
+  - `transform_module` / `transform_module_collecting` の dispatch loop を refactor = (a) namespace collision scan (existing) → (b) is_executable_mode + detect_user_main + has_top_level_await + user_main_substitution flag activation (= upfront pre-compute) → (c) pre_scan_classes + iface_methods + build_mut_method_names → (d) **single-pass dispatch loop** (Stmt::Empty silent skip pre-arm + try_capture / transform_module_item routing) → (e) `synthesize_fn_main` で fn main Items emit。`init_stmts` 変数削除、`build_init_fn` 呼び出し撤去。
+  - **synthesize_fn_main Collision arm structural fix (Spec gap、self-resolved)**: 当初 `Collision arm = unreachable!()` だったが、collecting mode では `scan_for_ts_namespace_collisions` が accumulate (= Err return せず)、後続 dispatch で Collision に到達するため `Vec::new()` (= synthesis suppressed) に変更。`#[should_panic]` test を `assert!(items.is_empty())` form に migrate + non-empty payload 時も synthesis suppress を追加 lock-in。
+  - `collect_top_level_executions` は **test-only thin wrapper** に降格 (= `#[allow(dead_code)]` 付き、production callers は `try_capture_module_item_into_main_stmts` を直接 call)。test API 互換性維持。
+  - `src/transformer/main_synthesis/{mod.rs, init_classifier.rs}` の T1-T3 由来の `#[allow(dead_code)]` 全廃 (= production wiring 完成で all consumed)。
+- **T4-2 (transform_module_item _ arm refactor + Tier 2 wording 改善)**:
+  - `transform_module_item` の `_ => Err(format_module_item_kind(...))` arm を Rule 11 (d-1) compliance で expand: ModuleItem 全 variants explicit enumerate (Decl-bearing / Import-export / TS legacy module forms / A4 control-flow / A5b Debugger / pre-handled-by-caller `unreachable!()` for Stmt::Empty + Stmt::Expr)。
+  - **A4 (control-flow) Tier 2 wording 改善**: `format!("ControlFlow at top-level requires fn main wrapping; lift to a named function or use I-203 future expansion ({suffix})", ...)` = SWC AST kind を suffix に preserve しつつ user-facing guidance を prepend。Stmt 15 variants (Block/If/Switch/Throw/Try/While/DoWhile/For/ForIn/ForOf/Labeled/Continue/Break/Return/With) を unified arm で route。
+  - **A5b (Debugger) Tier 2 wording 改善**: `` "`debugger` statement has no Rust equivalent (use `panic!()` for a hard stop or `std::dbg!()` for value tracing per the user's intent)" `` = user-facing alternative guidance。
+  - `build_init_fn` helper 完全削除 (= 0 callers、T4-1 で routing 撤去、T4-2 で削除完成)。`src/transformer/mod.rs` 1003 → 932 行に削減 = `namespace_lint.rs` 185 行抽出 (Rule 11 (d-1) 全 ModuleItem / ModuleDecl / Stmt / Decl / DefaultDecl 変種 enumerate version) + `build_init_fn` 削除 + 新 transform_module_item dispatch tree。
+  - `tests/i224_invariants_test.rs::test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase` の `fn main()` 検出 assert を update (= T4-1 wiring で synthesized fn main が emit されるため、cell 13/15/33/35/73/75 で `fn __ts_main` + `fn main()` 両者を assert)、cell 49/69 alternative wording substring を T4-2 後 form (`Stmt(If(` → 同 + ControlFlow prefix、`Stmt(Debugger(` → `` `debugger` statement has no Rust equivalent ``) に update。
+  - 7 NEW unit tests in `src/transformer/statements/tests/loops.rs` (A4 partition: if/for/while/try/switch/block で `ControlFlow at top-level` substring 検出 + A5b: debugger で `panic!()` / `std::dbg!()` substring 検出)。
+  - `src/transformer/tests/module_items.rs` の 3 既存 tests を新 form (= `fn main()` synthesis) に migrate (`test_transform_module_top_level_expr_stmt_synthesizes_fn_main` + `..._merge_into_single_fn_main` + `..._no_fn_main_synthesis`)、INV-4 lock-in (= 各 test で legacy `init` Item 0 件 assert)。
+- **T4-3 (INV-4 invariants test fill-in + audit script regex tightening)**:
+  - `tests/i224_invariants_test.rs::test_invariant_4_no_pub_fn_init_in_codebase_post_t4` の `#[ignore]` 解除 + fill-in = **2 件独立 verifier**: (1) `scripts/audit-no-pub-fn-init.sh` subprocess invoke で `exit=0` + `OK: 0 hits` summary line 検出、(2) Rust source の enforced paths (`src/`/`tools/`/`tests/e2e/rust-runner/`) で `^\s*pub\s+fn\s+init\s*[\(<]` (= function definition のみ match) 直接 grep で hits=0 verify。
+  - `scripts/audit-no-pub-fn-init.sh` の regex pattern を tighten = `\bpub\s+fn\s+init\b` (= doc comment / panic message での mention にも match) → `^\s*pub\s+fn\s+init\s*[\(<]` (= function definition のみ match、historic mention の文字列は false positive にならず)。`HONO_SRC` / `HONO_CLEAN` env var override も追加 (= SHA-pinned bench compare 用)。
+  - **`/check_job` 4-layer self-applied review (T4 commit 前、deep + Hono bench Tier-transition Improvement verification)**:
+    - **Layer 1 (Mechanical)**: 0 findings (clippy / fmt / file-line / test name pattern / Rule 11 (d-1) 全 compliance、production unwrap/panic 不在)
+    - **Layer 2 (Empirical)**: 0 findings (cargo test 3520 lib + 159 e2e + 122 integration + 24 binaries 全 green、INV-4 audit script + grep 両 verifier pass)
+    - **Layer 3 (Structural cross-axis)**: 0 findings (Rule 11 (d-1) 全 enum 変種 enumerate、`unreachable!()` defensive arms with documented invariants、namespace_lint extraction で structural cohesion 改善)
+    - **Layer 4 (Adversarial trade-off)**: 0 findings (Hono bench at SHA-pinned 027e3df = T3 baseline 111/63 vs T4 working tree 109/67 = -2 clean / +4 errors、4 件全件 **Tier 1 silent semantic change → Tier 2 honest error** transition: cloudflare-workers/websocket.ts + deno/websocket.ts は T3 で `export const upgradeWebSocket = defineWebSocketHelper(async ...)` を silently dropped、T4 の deeper `convert_expr` 経由 capture で Object literal Prop::Getter unsupported syntax を honest surface = `conversion-correctness-priority.md` 観点で **Improvement** = `prd-completion.md` broken-fix PRD の **allowed Improvement classification**。bun/websocket.ts + helper/css/index.ts の 2 件は既存 Tier 2 file に追加 honest error 出現 = 同 silent → honest pattern。0 件の T4 architectural concern scope への new compile error)
+  - **Defect Classification 5 Category (final)**: Grammar gap / Oracle gap = 0、Spec gap = 1 (= synthesize_fn_main Collision arm collecting-mode reachability、self-resolved + #[should_panic] test → assert form migrate)、Implementation gap = 0、Review insight = 0。
+- **Production code 修正 file**:
+  - `src/transformer/mod.rs` (1003 → 932 行): transform_module / transform_module_collecting refactor + transform_module_item _ arm Rule 11 (d-1) expand + Tier 2 wording 改善 + `build_init_fn` 削除 + `namespace_lint::scan_for_ts_namespace_collisions` import。
+  - `src/transformer/namespace_lint.rs` (新規 185 行): scan_for_ts_namespace_collisions + scan_module_item_for_collisions + scan_decl_for_collisions + scan_default_decl_for_collisions + check_ident_for_collision を抽出、Rule 11 (d-1) self-applied compliance。
+  - `src/transformer/main_synthesis/mod.rs`: `try_capture_module_item_into_main_stmts` 新規追加、`collect_top_level_executions` を thin wrapper に降格、Collision arm `unreachable!()` → `Vec::new()` migrate、T1-T3 由来の `#[allow(dead_code)]` 全廃。
+  - `src/transformer/main_synthesis/init_classifier.rs`: T1-T3 由来の `#[allow(dead_code)]` 全廃。
+- **Test 修正 file**:
+  - `src/transformer/main_synthesis/tests/mod.rs`: `test_synthesize_panics_on_collision_arm` を `test_synthesize_emits_no_items_on_collision_arm` に migrate (= `assert!(items.is_empty())` form、empty + non-empty payload 両 case lock-in)。
+  - `src/transformer/statements/tests/loops.rs`: 7 NEW T4-2 wording tests (A4 if/for/while/try/switch/block の ControlFlow substring + A5b debugger の panic!()/std::dbg!() substring)。
+  - `src/transformer/tests/module_items.rs`: 3 既存 tests を `fn main()` synthesis form に migrate + INV-4 (legacy `init` Item 0 件) assert 追加。
+  - `tests/i224_helper_test.rs::test_axis_b_b1a_b_c_rename_dispatch_symmetric`: assertion update = `fn __ts_main` + `fn main()` synthesized binary entry 両者 assert (= T4-1 wiring で synthesized fn main が emit されるため)。
+  - `tests/i224_invariants_test.rs`: INV-2 cell-level assertion update + INV-5 cell 49/69 alternative wording substring を T4-2 form に update + **INV-4 fill-in** (subprocess audit script invoke + 独立 grep verify)。
+  - `scripts/audit-no-pub-fn-init.sh`: pattern tighten + HONO_SRC / HONO_CLEAN env override 追加。
+- **Quality gate**: cargo test 全 pass (lib **3520** = T3 baseline 3513 + 7 NEW T4 wording tests / e2e 159 + 70 ignored / compile_test 3 / integration 122 / **i224 helper 5 pass + 0 ignored** / **i224 invariants 5 pass + 2 ignored** = INV-4 fill-in、INV-1/INV-7 は T5/T9 defer / i205 helper 4 pass / i205 invariants 2 pass + 5 ignored) / cargo fmt 0 diff / cargo clippy --all-targets --all-features -- -D warnings 0 warning / `./scripts/check-file-lines.sh` OK (`transformer/mod.rs` 932 行 / `namespace_lint.rs` 185 行) / **`scripts/audit-no-pub-fn-init.sh` exit=0 (INV-4 codebase invariant lock-in)** / **Hono bench Tier-transition Improvement** (= 027e3df pinned baseline 111/63 → T4 working tree 109/67、4 件 silent → honest 化、broken-fix PRD allowed pattern)。
+- **Commit (proposed)**: `[WIP] I-224 T4 完了: transform_module(_collecting) を try_capture_module_item_into_main_stmts + synthesize_fn_main 経由に refactor + transform_module_item _ arm Rule 11 (d-1) expand + A4/A5b Tier 2 wording 改善 + build_init_fn 削除 + namespace_lint.rs 抽出 + INV-4 invariants test fill-in (audit script + grep 2 verifier) + 4-layer review pass (Hono bench Tier-transition Improvement = silent → honest 4 件 + 0 new compile errors)`。
+
+**plan.md chain 影響**: T4 完了で I-224 production wiring 完成、`pub fn init` mechanism 完全廃止 (INV-4 lock-in)。次着手は T5 (E2E green-ify (existing C0) + I-205 cell-09 unblock + INV-1 source-order invariants test fill-in)。
 
 **I-205 status**: Implementation Stage T1〜T13 完了 (2026-05-01)、T11 削除済。**T14-T16 は案 β Phase 1-A (I-224 → I-225 → I-162) 完了後に再開**。I-205 architectural concern (= class member access dispatch with getter/setter framework) は **unit tests + CLI manual probes で functional 完成**、E2E green-ify (T14) は universal infra prerequisite block により待機中。
 
