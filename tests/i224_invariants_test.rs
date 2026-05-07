@@ -60,15 +60,111 @@ fn test_invariant_1_ts_rust_execution_order_byte_exact() {
 /// `main(); main();` form) を cell #13 boundary value test fixture として keep、user main
 /// の multiple call sites が全 `__ts_main()` に substitute されることを probe。
 #[test]
-#[ignore = "I-224 INV-2 verification stub: Implementation Stage T3 で fill in \
-            (in-scope B1/B2 cells 12 件 + cell-31 multi-call boundary value で main() → __ts_main() \
-            substitute completeness を fixture probe + IR token-level assert)"]
 fn test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T3 で fill in: \
-         in-scope cells 13/14/15/16/33/34/35/36/73/74/75/76 で main() call substitution + \
-         cell-31 multi-call boundary value で全 call sites substitution を assert"
+    // INV-2 (B1/B2 cells): the user-defined `main` symbol must be renamed
+    // to `__ts_main` AND every user-source `main()` call must be substituted
+    // to `__ts_main()`. Verified at the IR-text level (= post-transpile
+    // Rust string) for the in-scope B1/B2 cells in the C0 partition.
+    //
+    // **Async substitute (cells 15/16/35/36/75/76)**: T3-3 implements the
+    // sync substitute (= rewrite the callee identifier). Async-await
+    // wrapping (= adding `.await` after the substituted `__ts_main()`) is
+    // T8 work; until then, B2 cells produce `__ts_main()` invocation
+    // without `.await`, which compiles correctly inside `pub fn init`
+    // (T3-stage partial integration) but will need T8 to upgrade for the
+    // synthesized `#[tokio::main] async fn main` once T4-1 lands. This
+    // test asserts the **identifier substitution** invariant only — IR
+    // shape of the await wrapping is tested separately in T8's INV-3
+    // full-coverage extension.
+    //
+    // Each entry = (cell #, axis summary, TS source).
+    let cells: &[(u32, &str, &str)] = &[
+        // ===== Executable A1 + B1 sync user main + C0 =====
+        (13, "A1+B1+C0", "function main(): void { }\nmain();\n"),
+        (33, "A3+B1+C0", "declare function f(): number;\nfunction main(): void { }\nconst c = f();\nmain();\n"),
+        (73, "A6+B1+C0", "const X: number = 1;\nfunction main(): void { }\nmain();\nconsole.log(X);\n"),
+        // ===== Executable + B2 async user main + C0 (sync substitute baseline) =====
+        (15, "A1+B2+C0", "async function main(): Promise<void> { }\nmain();\n"),
+        (35, "A3+B2+C0", "declare function f(): number;\nasync function main(): Promise<void> { }\nconst c = f();\nmain();\n"),
+        (75, "A6+B2+C0", "const X: number = 1;\nasync function main(): Promise<void> { }\nmain();\nconsole.log(X);\n"),
+    ];
+
+    for (cell, axis_summary, src) in cells {
+        let rust = transpile(src)
+            .unwrap_or_else(|e| panic!("cell #{cell} ({axis_summary}): transpile failed: {e}"));
+        // 1. User main is renamed at the declaration site:
+        //    - sync B1: `fn __ts_main` exists, no plain `fn main(` at decl
+        //    - async B2: `async fn __ts_main` exists, no `async fn main(`
+        //    Both: the bare `fn main()` declaration form must NOT appear
+        //    (the synthesized binary entry `fn main` lands in T4-1 — until
+        //    then, no `fn main()` should exist at all).
+        assert!(
+            rust.contains("fn __ts_main"),
+            "cell #{cell} ({axis_summary}): expected `fn __ts_main` declaration, got:\n{rust}"
+        );
+        assert!(
+            !rust.contains("fn main()"),
+            "cell #{cell} ({axis_summary}): rename target leaked — `fn main()` must not appear, got:\n{rust}"
+        );
+        // 2. Every user-source `main()` call is substituted to `__ts_main()`.
+        //    The TS source contains a single `main();` call — the IR must
+        //    contain a `__ts_main()` invocation reference. (The original
+        //    user-source `main();` call is removed by the substitution; if
+        //    a bare `main()` reference leaked through, that would indicate
+        //    the substitution gate failed to fire.)
+        assert!(
+            rust.contains("__ts_main()"),
+            "cell #{cell} ({axis_summary}): expected substituted `__ts_main()` call site, got:\n{rust}"
+        );
+        // Cross-axis sanity: TypeResolver / TypeRegistry layer must classify
+        // the user main correctly so the rename gate fires only for B1/B2.
+        let module = parse_typescript(src)
+            .unwrap_or_else(|e| panic!("cell #{cell} ({axis_summary}): parse failed: {e}"));
+        let kind = detect_user_main(&module);
+        assert!(
+            matches!(kind, UserMainKind::FnSync | UserMainKind::FnAsync),
+            "cell #{cell} ({axis_summary}): detect_user_main returned {kind:?}, \
+             expected FnSync or FnAsync (= rename gate trigger)"
+        );
+        // C-axis sanity: these cells are C0 (= no top-level await).
+        assert!(
+            !has_top_level_await(&module),
+            "cell #{cell} ({axis_summary}): unexpected top-level await — fixture corruption"
+        );
+    }
+
+    // ===== Multi-call boundary value sub-case (cell 31 PRD-named, A3+B1+C0
+    // with explicit multi-`main()` calls). Per the PRD H-7 Fix B
+    // wording: "user main の multiple call sites が全 `__ts_main()` に
+    // substitute される". Counts ≥ 2 substituted occurrences in the
+    // post-transpile source; the original user-source `main();` calls have
+    // all been rewritten — no bare `main();` invocation must remain. =====
+    let multi_call_src = "\
+function main(): void {\n\
+  console.log(\"a\");\n\
+}\n\
+main();\n\
+console.log(\"between\");\n\
+main();\n\
+main();\n";
+    let multi_call_rust =
+        transpile(multi_call_src).expect("multi-call boundary fixture must transpile successfully");
+    let substituted = multi_call_rust.matches("__ts_main()").count();
+    // 3 user-source `main();` call sites + the user main DEFINITION must
+    // produce ≥ 3 `__ts_main()` call-site occurrences (the definition
+    // itself contains `fn __ts_main` not `__ts_main()`, so the count
+    // captures call sites only).
+    assert!(
+        substituted >= 3,
+        "multi-call boundary: expected ≥ 3 substituted `__ts_main()` call sites, got {substituted} in:\n{multi_call_rust}"
+    );
+    // No bare `main()` call site (= `\nmain();` or similar pattern) must
+    // leak through. Use a more permissive substring check that covers
+    // the post-rustfmt "    main();" indentation as well.
+    assert!(
+        !multi_call_rust.contains("    main();") && !multi_call_rust.contains(" main()"),
+        "multi-call boundary: bare `main()` call leaked — substitution gate did not \
+         fire for every site, got:\n{multi_call_rust}"
     );
 }
 
@@ -399,11 +495,20 @@ fn test_invariant_5_ts_main_namespace_reservation_with_collision_priority() {
 
     // Cells whose A-axis dispatch alone (i.e., without collision detection) would
     // produce a non-collision Tier 2 reject in the **current** transformer state
-    // (post T1-2, pre T2/T3 / T4-2). Used for the structural priority sub-check:
-    // collision must be at `unsupported[0]` even when these alternative rejects would
-    // otherwise fire. See the function docstring's "Cell 59 forward-compat note" for
-    // the planned evolution when T2/T3 silent-skips Stmt::Empty.
-    let cells_with_alternative_a_axis_reject: &[u32] = &[49, 59, 69];
+    // (post T3-4 silent-skip of Stmt::Empty, pre T4-2 full _ arm refactor). Used
+    // for the structural priority sub-check: collision must be at
+    // `unsupported[0]` even when these alternative rejects would otherwise fire.
+    //
+    // **Cell 59 evolution (T3-4 fix landed)**: T3-4 added `Stmt::Empty` silent
+    // skip in `transform_module` / `transform_module_collecting` per PRD Design
+    // section #3 ("A5a partition: silent skip per the per-item dispatch table").
+    // Cell 59's `;` no longer produces an alternative reject — only the
+    // collision is reported. The cell is therefore removed from this list; the
+    // primary check (= collision at unsupported[0]) above still verifies the
+    // INV-5 priority for cell 59. The `cells_with_alternative_a_axis_reject`
+    // entries remaining (49 / 69) are for A4 (control-flow) and A5b (Debugger),
+    // which still produce A-axis rejects in the pre-T4-2 state.
+    let cells_with_alternative_a_axis_reject: &[u32] = &[49, 69];
 
     for (cell, axis_summary, src) in cases {
         // (1) Public API: `transpile` must Err with collision wording.
@@ -457,7 +562,6 @@ fn test_invariant_5_ts_main_namespace_reservation_with_collision_priority() {
         if cells_with_alternative_a_axis_reject.contains(cell) {
             let alternative_wording = match cell {
                 49 => "Stmt(If(",
-                59 => "Stmt(Empty(",
                 69 => "Stmt(Debugger(",
                 _ => unreachable!(
                     "cells_with_alternative_a_axis_reject must be kept in sync with this match arm"

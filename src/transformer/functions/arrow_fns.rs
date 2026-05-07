@@ -33,6 +33,26 @@ impl<'a> Transformer<'a> {
                     all_warnings.extend(result.1);
                     continue;
                 }
+                // I-224 T3-2: B1c form `const main = function() {}` flows
+                // through `convert_fn_decl` (rename gate single-source) so
+                // 3-form (B1a/B1b/B1c) emission collapses identically.
+                // Generator (`function*`) is silently skipped to preserve
+                // pre-T3 silent-drop (Yield unsupported); see
+                // `tests/i224_helper_test.rs::test_b1c_fn_expr_generator_guard_*`.
+                ast::Expr::Fn(fn_expr) if !fn_expr.function.is_generator => {
+                    let ast::Pat::Ident(binding) = &decl.name else {
+                        continue;
+                    };
+                    let synthetic = ast::FnDecl {
+                        ident: binding.id.clone(),
+                        declare: false,
+                        function: fn_expr.function.clone(),
+                    };
+                    let (cs, ws) = self.convert_fn_decl(&synthetic, vis, resilient)?;
+                    items.extend(cs);
+                    all_warnings.extend(ws);
+                    continue;
+                }
                 ast::Expr::Lit(lit) => {
                     if let Some(item) = self.convert_lit_var_decl(decl, lit, vis)? {
                         items.push(item);
@@ -99,6 +119,19 @@ impl<'a> Transformer<'a> {
             _ => return Ok((vec![], vec![])),
         };
         let name = ident.id.sym.to_string();
+
+        // I-224 T3-2 (B1b form): rename `main → __ts_main` + drop `pub` (INV-5)
+        // when in executable mode + B1/B2. Symmetric with `convert_fn_decl`
+        // (B1a) and the B1c synthetic-FnDecl path flowing through it —
+        // locks in 3-form orthogonality across cells 13 / 14 / 15 / 16 /
+        // 33 / 34 / 35 / 36 / 73 / 74 / 75 / 76.
+        let renamed = self.user_main_substitution && name == "main";
+        let name = if renamed {
+            crate::transformer::expressions::TS_MAIN_RENAME.to_string()
+        } else {
+            name
+        };
+        let vis = if renamed { Visibility::Private } else { vis };
         let var_rust_type = ident
             .type_ann
             .as_ref()

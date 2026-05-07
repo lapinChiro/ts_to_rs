@@ -217,6 +217,39 @@ impl<'a> Transformer<'a> {
             body = new_body;
         }
 
+        // I-224 T3-2: rename user `function main()` to `__ts_main` when the
+        // module is in executable mode + B1/B2 (= `user_main_substitution`
+        // gate). The synthesized binary entry `fn main()` is owned by
+        // `synthesize_fn_main`; the user main becomes a callee renamed to
+        // [`crate::transformer::expressions::TS_MAIN_RENAME`] and its
+        // call sites are substituted by `convert_call_expr` (T3-3).
+        //
+        // The rename runs **before** the `is_async && name == "main"` →
+        // `#[tokio::main]` attribute computation below, so the post-rename
+        // name `"__ts_main"` no longer matches `"main"` and the
+        // `#[tokio::main]` attribute is automatically dropped — that is the
+        // structurally correct behavior because the synthesized fn main
+        // owns the `#[tokio::main]` attribute (Trigger 1 / 2 INV-3 (a)
+        // dispatch), not the renamed user main.
+        //
+        // **Visibility drop (INV-5 / Axis E orthogonality)**: when the rename
+        // fires the visibility is forced to `Private` regardless of the
+        // input `vis`. The renamed identifier `__ts_main` is a
+        // transpiler-internal symbol per the I-154 namespace reservation;
+        // exposing it as `pub fn __ts_main()` would leak the synthesis
+        // detail to consumers and violate INV-5. The user's intent of
+        // `export function main()` is preserved at the binary-entry layer
+        // (the synthesized `fn main` synthesized by `synthesize_fn_main`
+        // remains private per Rust binary entry-point convention; the
+        // user's exec semantics flow through `__ts_main()` invocation).
+        let renamed = self.user_main_substitution && name == "main";
+        let name = if renamed {
+            crate::transformer::expressions::TS_MAIN_RENAME.to_string()
+        } else {
+            name
+        };
+        let vis = if renamed { Visibility::Private } else { vis };
+
         let attributes = if is_async && name == "main" {
             vec!["tokio::main".to_string()]
         } else {

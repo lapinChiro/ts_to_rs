@@ -132,11 +132,46 @@ impl<'a> Transformer<'a> {
                     };
                     let args =
                         self.convert_call_args_with_types(&call.args, param_types, has_rest)?;
+                    // I-224 T3-3: substitute `main()` call sites to `__ts_main()`
+                    // when the module is in executable mode + B1/B2. The rename
+                    // is applied **after** all registry / FileTypeResolution
+                    // lookups (which use the original user-source-text `"main"`
+                    // key) so the param-type / has-rest detection above remains
+                    // consistent with the un-renamed signature visible to
+                    // TypeResolver. Substitution at the IR emission boundary
+                    // (= `target` construction) keeps the rewrite transparent
+                    // to upstream resolution while ensuring every IR
+                    // `CallTarget::Free` reference targets the renamed user
+                    // main (which `convert_fn_decl` / `convert_arrow_var_decl`
+                    // emit at `__ts_main`).
+                    //
+                    // **Async-await substitute**: T3-3 covers the sync substitute
+                    // (= rewrite the callee identifier only). For async user
+                    // main + executable mode (cells 15 / 35 / 75 / 16 / 36 / 76),
+                    // T8 will additionally wrap the `Expr::FnCall` in
+                    // `Expr::Await` so the synthesized async fn main awaits
+                    // the renamed `__ts_main().await`. Until T8 lands, the
+                    // sync `__ts_main()` call inside a sync synthesized
+                    // fn main works correctly for cells 13 / 33 / 73; async
+                    // cells produce sync `__ts_main()` invocation which T8
+                    // upgrades to `__ts_main().await` for proper async
+                    // dispatch within `#[tokio::main] async fn main`.
+                    let fn_name = if self.user_main_substitution && fn_name == "main" {
+                        crate::transformer::expressions::TS_MAIN_RENAME.to_string()
+                    } else {
+                        fn_name
+                    };
                     // Ident callee: classify by `TypeRegistry` lookup.
                     // NOTE: Callable interfaces are intercepted above by
                     // `try_convert_callable_trait_call` and never reach here.
                     // - Struct / Enum → `UserTupleCtor` で walker 登録を維持
                     // - Plain functions / unknown / imported → `Free`
+                    //
+                    // The post-rename `fn_name` ("__ts_main" or original) drives
+                    // the classification. Since `__ts_main` is a synthesized
+                    // identifier never present in the registry, the renamed
+                    // case always falls into the `_ => Free` arm — matching
+                    // the user main's emission as `Item::Fn`.
                     let target = match self.reg().get(&fn_name) {
                         Some(TypeDef::Struct { .. } | TypeDef::Enum { .. }) => {
                             CallTarget::UserTupleCtor(UserTypeRef::new(fn_name))

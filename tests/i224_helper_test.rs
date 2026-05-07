@@ -188,15 +188,68 @@ fn test_dispatch_arm_one_to_one_mapping_per_in_scope_cell() {
 /// cell symmetry probe を Implementation stage で empirical lock-in。各 (A, C) cell with B1
 /// が 3 forms 共通 dispatch を生成することの structural assertion。
 #[test]
-#[ignore = "I-224 helper test stub: Implementation Stage T3 で fill in (3 fixture variants \
-            with same Axis A+C, different B1 form、transpile 出力 IR token-level identical assert)"]
 fn test_axis_b_b1a_b_c_rename_dispatch_symmetric() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T3 で fill in: \
-         3 fixture variants (B1a function decl / B1b const arrow / B1c const fn expr) を \
-         同 Axis A+C で構築、各 transpile 結果が `fn __ts_main()` rename + main() substitute \
-         output で identical を assert"
+    // Axis A+C fixed at A1+C0 (= cell 13 representative): a top-level
+    // `console.log("hi");` ensures executable mode is true (= rename gate
+    // fires), and the absence of any top-level await stays in the C0 partition.
+    // Each fixture varies ONLY the B1 sub-form (function decl / const arrow /
+    // const fn expr); the user main body is `console.log("hi"); main();`
+    // (= internal main() recursive call to also exercise the call-substitute
+    // path inside the user main body, providing an additional structural
+    // probe that the substitute mechanism applies uniformly to all callers).
+    //
+    // The single user-source-text difference between the three fixtures is
+    // limited to the B1 declaration-form keyword(s) ("function" / "=" /
+    // "function" with assignment), so any difference in the resulting Rust
+    // would imply the dispatch is NOT 3-form symmetric (= would falsify
+    // the orthogonality merge claim of Rule 1 (1-4-c) for B-axis B1).
+    let body = "console.log(\"hi\");\n  main();\n";
+    let trailing = "main();\n";
+    let b1a = format!("function main(): void {{\n  {body}}}\n{trailing}",);
+    let b1b = format!("const main = (): void => {{\n  {body}}};\n{trailing}",);
+    let b1c = format!("const main = function(): void {{\n  {body}}};\n{trailing}",);
+
+    let r_a = transpile(&b1a).expect("B1a transpile must succeed");
+    let r_b = transpile(&b1b).expect("B1b transpile must succeed");
+    let r_c = transpile(&b1c).expect("B1c transpile must succeed");
+
+    // Structural rename + substitute lock-in: every form must contain the
+    // renamed declaration AND the renamed call (= the rename gate fired AND
+    // the substitution gate fired, both for the user-supplied `main` and
+    // the synthesized `__ts_main` symbol within the user body).
+    for (label, source) in [("B1a", &r_a), ("B1b", &r_b), ("B1c", &r_c)] {
+        assert!(
+            source.contains("fn __ts_main"),
+            "{label}: expected `fn __ts_main` in output, got:\n{source}"
+        );
+        assert!(
+            !source.contains("fn main()"),
+            "{label}: rename target leaked — `fn main()` must not appear, got:\n{source}"
+        );
+        // Substituted call sites: at least 2 occurrences of `__ts_main()`
+        // (one inside the body's recursive call, one at top-level captured
+        // into the existing `pub fn init` body until T4-1 lands).
+        let occurrences = source.matches("__ts_main()").count();
+        assert!(
+            occurrences >= 2,
+            "{label}: expected ≥ 2 `__ts_main()` substituted call sites, got {occurrences} in:\n{source}"
+        );
+    }
+
+    // Byte-exact symmetry: the three forms must produce IDENTICAL output
+    // (= the only differences in user-source-text between the fixtures are
+    // structural shape variants of the same B-axis B1 declaration; their
+    // post-rename IR collapses to the same `fn __ts_main` definition + the
+    // same call-site substitution scheme).
+    assert_eq!(
+        r_a, r_b,
+        "B1a vs B1b output diverges — orthogonality merge violated:\n\
+         === B1a ===\n{r_a}\n=== B1b ===\n{r_b}"
+    );
+    assert_eq!(
+        r_b, r_c,
+        "B1b vs B1c output diverges — orthogonality merge violated:\n\
+         === B1b ===\n{r_b}\n=== B1c ===\n{r_c}"
     );
 }
 
@@ -213,14 +266,67 @@ fn test_axis_b_b1a_b_c_rename_dispatch_symmetric() {
 /// declaration の structural verify probe。representative reachable cells 11/13/31 から
 /// E1 form を probe。
 #[test]
-#[ignore = "I-224 helper test stub: Implementation Stage T3 で fill in (E1 form fixtures with \
-            export keyword、Rust 出力 `pub` modifier 配置を per-symbol assert)"]
 fn test_axis_e_export_preserve_symmetric() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T3 で fill in: \
-         E1 form input (export function helper / export function main) で transpile、\
-         Rust 出力で `pub fn helper()` preserve かつ `fn __ts_main()` private (no pub) を assert"
+    // Axis E E1 (= export keyword present) probe. Two distinct claims must
+    // hold simultaneously:
+    //   1. **`pub` modifier preservation** for non-`__ts_main` symbols:
+    //      `export function helper()` → `pub fn helper()` survives the
+    //      I-224 rewrite path unchanged (= existing `transform_decl`
+    //      ExportDecl path with `Visibility::Public` continues to apply).
+    //   2. **`pub` modifier drop** for the `__ts_main` rename target:
+    //      `export function main()` (= user wrote an exported main, treats
+    //      it as public surface) is renamed to `__ts_main` with visibility
+    //      forced to `Private` per INV-5 (= the renamed identifier is a
+    //      transpiler-internal symbol; exposing it would leak the
+    //      synthesis detail).
+    //
+    // The two claims are independent dimensions of the Axis E orthogonality
+    // — they must be probed on the SAME fixture to observe both at once
+    // (= regression in either direction breaks the orthogonality merge).
+    //
+    // Fixture: cell 13 representative (A1 + B1 + C0) in E1 form. The user
+    // main + helper export pair captures both symbols.
+    let src = "\
+export function helper(): number {\n\
+  return 7;\n\
+}\n\
+export function main(): void {\n\
+  console.log(\"hi\");\n\
+}\n\
+main();\n";
+    let rust = transpile(src).expect("Axis E E1 fixture must transpile successfully");
+
+    // Claim 1: `pub fn helper()` preserved (= the user's export of `helper`
+    // produces a `pub` Rust function; INV-5 does not apply to non-rename
+    // identifiers).
+    assert!(
+        rust.contains("pub fn helper"),
+        "Axis E: `pub fn helper` (= export preservation for non-rename symbol) \
+         must be present, got:\n{rust}"
+    );
+
+    // Claim 2: `__ts_main` rename target is private (= INV-5 compliance).
+    // Asserts the negative form (`pub fn __ts_main` must not appear) AND
+    // the positive form (the bare `fn __ts_main` declaration must appear).
+    assert!(
+        !rust.contains("pub fn __ts_main"),
+        "Axis E / INV-5: `pub fn __ts_main` must NOT appear — the rename \
+         target is transpiler-internal and visibility is forced to Private. \
+         got:\n{rust}"
+    );
+    assert!(
+        rust.contains("fn __ts_main"),
+        "Axis E: bare `fn __ts_main` declaration must be present (= rename \
+         fired and emitted the user's main as private). got:\n{rust}"
+    );
+
+    // Cross-axis sanity: the call site is also substituted (= T3-3 gate
+    // fired in the same fixture, validating the rename + substitution
+    // pair fires uniformly under the `user_main_substitution` flag).
+    assert!(
+        rust.contains("__ts_main()"),
+        "Axis E: substituted `__ts_main()` call site must be present (= \
+         the rename-substitute pair is symmetric). got:\n{rust}"
     );
 }
 
@@ -238,13 +344,194 @@ fn test_axis_e_export_preserve_symmetric() {
 /// する仕様を Implementation 後 empirical lock-in (= matrix Scope 列の "regression lock-in
 /// (orthogonality merged)" claim の structural verification)。
 #[test]
-#[ignore = "I-224 helper test stub: Implementation Stage T3 で fill in (A5a fixture を 4 B variants \
-            (B0/B1/B2/B3/B4) で構築、cells 51/53/55/57/59 期待出力との byte-exact match assert)"]
 fn test_axis_a5a_compositional_orthogonality_with_b_axis() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T3 で fill in: \
-         cell 51 (A5a + B0) representative fixture + B0/B1/B2/B3/B4 variants 4 件で transpile、\
-         cells 51/53/55/57/59 期待 Rust 出力との byte-exact assertion"
+    // A5a (Stmt::Empty) is a silent-skip top-level item per PRD Design
+    // section #3 (= no Rust emission, no executable trigger). The
+    // orthogonality merge declaration claims that cells 51 / 53 / 55 / 57
+    // / 59 (A5a + B0 / B1 / B2 / B3 / B4) emit identically to their
+    // A0-axis equivalents (cells 1 / 3 / 5 / 7 / 9). This probe verifies
+    // the **byte-exact equivalence** of each (A5a, Bn) cell with its
+    // (A0, Bn) baseline, locking in the merge claim against future
+    // refactoring that might silently change the silent-skip semantics
+    // (e.g., to "skip but log a warning" or "skip with side-effect").
+    //
+    // **Cell 59 (A5a + B4 collision)** is verified separately as a
+    // negative-path probe: both the (A0, B4) baseline (cell 9) and the
+    // (A5a, B4) variant (cell 59) must yield a transpile error with the
+    // same INV-5 collision wording (= the namespace lint fires before
+    // any A-axis dispatch, regardless of whether `;` precedes the
+    // `function __ts_main()` declaration).
+    //
+    // Each entry = (axis summary, A0 baseline source, A5a variant source).
+    let success_cases: &[(&str, &str, &str)] = &[
+        // Cell 51 vs Cell 1 (B0): library-mode declarations only emit.
+        (
+            "B0 (cells 51 vs 1)",
+            // A0 baseline: empty / declarations only.
+            "function helper(): number { return 7; }\n",
+            // A5a variant: `;` prepended (silent skip).
+            ";\nfunction helper(): number { return 7; }\n",
+        ),
+        // Cell 53 vs Cell 3 (B1 sync): `fn main` directly emits user body.
+        (
+            "B1 (cells 53 vs 3)",
+            "function main(): void {\n  console.log(\"hi\");\n}\n",
+            ";\nfunction main(): void {\n  console.log(\"hi\");\n}\n",
+        ),
+        // Cell 55 vs Cell 5 (B2 async): `#[tokio::main] async fn main`.
+        (
+            "B2 (cells 55 vs 5)",
+            "async function main(): Promise<void> {\n  console.log(\"hi\");\n}\n",
+            ";\nasync function main(): Promise<void> {\n  console.log(\"hi\");\n}\n",
+        ),
+        // Cell 57 vs Cell 7 (B3 NonFn): non-fn symbol preserved.
+        (
+            "B3 (cells 57 vs 7)",
+            "interface main {\n  x: number;\n}\n",
+            ";\ninterface main {\n  x: number;\n}\n",
+        ),
+    ];
+
+    for (axis, baseline_src, variant_src) in success_cases {
+        let baseline = transpile(baseline_src).unwrap_or_else(|e| {
+            panic!("{axis}: A0 baseline must transpile: {e}\nsource:\n{baseline_src}")
+        });
+        let variant = transpile(variant_src).unwrap_or_else(|e| {
+            panic!("{axis}: A5a variant must transpile: {e}\nsource:\n{variant_src}")
+        });
+        assert_eq!(
+            baseline, variant,
+            "{axis}: A5a + Bn must produce byte-exact same output as A0 + Bn \
+             (= silent-skip orthogonality merge). \n=== A0 baseline ===\n{baseline}\n\
+             === A5a variant ===\n{variant}"
+        );
+    }
+
+    // ===== Cell 59 vs Cell 9 (B4 collision) negative-path probe =====
+    // Both must abort with INV-5 namespace collision wording. The lint
+    // runs before any A-axis dispatch in `transform_module`, so the `;`
+    // prefix has no effect on the rejection.
+    let cell9_src = "function __ts_main(): void { }\n";
+    let cell59_src = ";\nfunction __ts_main(): void { }\n";
+    let cell9_err = transpile(cell9_src).expect_err(
+        "cell 9 (A0 + B4 collision): INV-5 namespace lint must reject __ts_main user identifier",
+    );
+    let cell59_err = transpile(cell59_src).expect_err(
+        "cell 59 (A5a + B4 collision): silent-skip prefix must not bypass INV-5 namespace lint",
+    );
+    let cell9_msg = cell9_err.to_string();
+    let cell59_msg = cell59_err.to_string();
+    // Both errors must mention the `__ts_main` namespace reservation as
+    // the collision source. Substring lock-in is conservative — the exact
+    // wording is owned by `scan_for_ts_namespace_collisions` and may
+    // evolve, but `__ts_main` must remain in the message.
+    assert!(
+        cell9_msg.contains("__ts_main"),
+        "cell 9: error message must reference __ts_main, got: {cell9_msg}"
+    );
+    assert!(
+        cell59_msg.contains("__ts_main"),
+        "cell 59: error message must reference __ts_main, got: {cell59_msg}"
+    );
+    // Symmetric wording: the `;` silent-skip prefix should produce
+    // structurally identical error wording up to the trailing byte
+    // offset (which inherently differs because the source position of
+    // `__ts_main` shifts by the `;\n` prefix length). Strip the trailing
+    // ` at byte <N>` suffix and compare the structural message body.
+    let strip_byte_offset = |msg: &str| -> String {
+        match msg.rfind(" at byte ") {
+            Some(pos) => msg[..pos].to_string(),
+            None => msg.to_string(),
+        }
+    };
+    assert_eq!(
+        strip_byte_offset(&cell9_msg),
+        strip_byte_offset(&cell59_msg),
+        "B4 collision priority: cell 9 vs cell 59 error message bodies \
+         must be identical modulo byte offset (= silent-skip orthogonality \
+         with collision arm; the byte offset inherently shifts by the `;\\n` \
+         prefix length and is not part of the structural wording). \n\
+         === cell 9 ===\n{cell9_msg}\n=== cell 59 ===\n{cell59_msg}"
+    );
+}
+
+/// T3-4 generator guard regression lock-in: the B1c arm in
+/// `convert_var_decl_module_level` (`Expr::Fn` synthetic FnDecl path) MUST
+/// skip generator function expressions (`function*`) to preserve the
+/// pre-T3 silent-drop behavior for those forms (= `convert_fn_decl` does
+/// not support `Yield` and would otherwise expose previously-hidden
+/// unsupported-syntax errors).
+///
+/// **Lesson source**: T3-4 `/check_job` deep review (2026-05-07) caught a
+/// Hono bench regression on `helper/ssg/ssg.ts:203` (`export const
+/// fetchRoutesContent = function* <...>`) — pre-T3 the FnExpr init was
+/// silently dropped by the legacy `_ => continue` arm; post-T3 the new
+/// B1c arm routed it through `convert_fn_decl`, which surfaced the
+/// `Yield` body as an unsupported-expression error (= +1 OTHER bench
+/// category). The fix narrows the B1c arm to non-generator FnExpr only,
+/// restoring Tier-transition Preservation (clean 111 / errors 63).
+///
+/// This test asserts:
+/// - Non-generator FnExpr init produces a renamed-or-named `fn` declaration.
+/// - Generator FnExpr init does **not** produce any `fn` declaration
+///   (= silent drop preserved).
+#[test]
+fn test_b1c_fn_expr_generator_guard_preserves_silent_drop() {
+    // (1) Non-generator FnExpr init: B1c form for arbitrary name (non-`main`).
+    //     The B1c arm routes through `convert_fn_decl` and emits an
+    //     `Item::Fn`. (No rename because the binding name isn't "main"
+    //     and `user_main_substitution` is false in library mode.)
+    let non_gen = transpile("const helper = function(): number { return 7; };\n")
+        .expect("non-generator FnExpr init must transpile cleanly");
+    assert!(
+        non_gen.contains("fn helper"),
+        "non-generator FnExpr init must emit `fn helper` (B1c handling); got:\n{non_gen}"
+    );
+
+    // (2) Generator FnExpr init: must be silently dropped by the
+    //     generator guard. No `fn` declaration emitted; the FnExpr
+    //     binding is invisible in the Rust output (= preserves the
+    //     pre-T3 `_ => continue` fallback for this shape).
+    //
+    //     The generator body's `yield` is a separate Tier 3
+    //     unsupported-syntax owner (I-016 / future PRD); skipping the
+    //     binding entirely avoids surfacing it via the B1c path.
+    let gen = transpile("const stream = function* (): Generator<number> { yield 1; };\n")
+        .expect("generator FnExpr init must transpile cleanly (silent drop)");
+    assert!(
+        !gen.contains("fn stream"),
+        "generator FnExpr init must NOT emit `fn stream` (= silent drop \
+         preserved by generator guard); got:\n{gen}"
+    );
+    assert!(
+        !gen.contains("yield"),
+        "generator FnExpr body must NOT leak into output (= silent drop \
+         applies to the entire FnExpr); got:\n{gen}"
+    );
+
+    // (3) Async non-generator FnExpr: still supported (= async function
+    //     expression for B1c async user main case, cell 5 / 15 / etc.).
+    //     The guard targets `is_generator` only, not `is_async`.
+    let async_non_gen =
+        transpile("const fetcher = async function(): Promise<number> { return 7; };\n")
+            .expect("async non-generator FnExpr init must transpile cleanly");
+    assert!(
+        async_non_gen.contains("async fn fetcher") || async_non_gen.contains("fn fetcher"),
+        "async non-generator FnExpr init must emit a fn (async or sync); got:\n{async_non_gen}"
+    );
+
+    // (4) Async generator FnExpr (`async function*`): also `is_generator=true`,
+    //     so the guard fires and the binding is silently dropped (= same
+    //     treatment as sync generator). Locks in symmetric guard behavior
+    //     for the async-generator AST shape, ensuring a future refactor
+    //     that narrows the guard to sync `function*` only does not regress
+    //     async-generator handling.
+    let async_gen =
+        transpile("const asyncStream = async function* (): AsyncGenerator<number> { yield 1; };\n")
+            .expect("async generator FnExpr init must transpile cleanly (silent drop)");
+    assert!(
+        !async_gen.contains("fn asyncStream"),
+        "async generator FnExpr init must NOT emit `fn asyncStream` (= silent drop \
+         preserved by generator guard, symmetric with sync generator); got:\n{async_gen}"
     );
 }

@@ -67,11 +67,9 @@
 //! by T1-2 / T3).
 
 use anyhow::Result;
-use swc_ecma_ast::{
-    self as ast, Decl, Expr, Lit, Module, ModuleDecl, ModuleItem, Stmt, UnaryOp, VarDecl,
-};
+use swc_ecma_ast::{self as ast, Decl, Expr, Module, ModuleDecl, ModuleItem, Stmt, VarDecl};
 
-use crate::ir::Expr as IrExpr;
+use crate::ir::{Expr as IrExpr, Item, Stmt as IrStmt, Visibility};
 use crate::transformer::Transformer;
 
 // Recursive Await walker sub-module (= I-228 main fix per Spec stage 逆戻り
@@ -87,6 +85,22 @@ use await_walker::{class_contains_await_recursive, expr_contains_await_recursive
 mod user_main;
 #[doc(hidden)] // I-224 internal predicate, exposed for external integration tests.
 pub use user_main::detect_user_main;
+
+// Decl::Var initializer classification (`InitKind` / `DeclVarPath` enums +
+// `classify_init_kind` / `has_side_effect_init` / `classify_decl_var_path` +
+// `expr_init_kind` private helper). Extracted from mod.rs for the same
+// file-line reason as await_walker / user_main.
+mod init_classifier;
+// Items used directly in mod.rs (via `Self::capture_var_decl_into_main_stmts`
+// and the `Decl::Var` arm of `collect_top_level_executions`) — `DeclVarPath`,
+// `has_side_effect_init`, `classify_decl_var_path`.
+pub(crate) use init_classifier::{classify_decl_var_path, has_side_effect_init, DeclVarPath};
+// Items consumed by the unit tests in `tests/mod.rs` (via `super::*`) and by
+// callers of `classify_init_kind` outside this module. `#[allow(unused_imports)]`
+// records that `mod.rs` itself does not directly use these symbols — they are
+// re-exported for downstream consumers.
+#[allow(unused_imports)]
+pub(crate) use init_classifier::{classify_init_kind, InitKind};
 
 /// Top-level execution statement, captured into the synthesized `fn main` body.
 ///
@@ -152,45 +166,6 @@ pub enum UserMainKind {
     Collision,
 }
 
-/// Decl::Var initializer expression classification.
-///
-/// Drives [`classify_decl_var_path`] (Library / Toplevel-const / Fn-main-body-capture)
-/// and contributes to [`is_executable_mode`] (the A3 partition trigger).
-///
-/// **Multi-declarator note**: when a `VarDecl` contains multiple declarators
-/// (`const a = 1, b = 2;`), this classifier inspects only the **first** declarator
-/// per the PRD Design section #3 spec. Multi-declarator with mixed init shapes is
-/// not enumerated in the I-224 problem space; if encountered, it falls under the
-/// behavior of the first declarator (out-of-scope for this PRD).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum InitKind {
-    /// `Expr::Lit(_)` or `-Lit::Num/-Lit::BigInt` — Rust `const` compatible.
-    Lit,
-    /// `Expr::Await(_)` — top-level await initializer (Axis C1).
-    AwaitInit,
-    /// Any other expression (Call / Ident / New / etc.) — Axis A3 trigger.
-    SideEffect,
-}
-
-/// Decl::Var dispatch path: where the declaration's emission goes.
-#[allow(dead_code)]
-// Consumed by T4-1 (`transform_module` per-item routing) — until
-// then, only `Transformer::collect_top_level_executions`
-// (also dead at T2) constructs / inspects these variants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DeclVarPath {
-    /// Library mode: existing `convert_var_decl_module_level` path emits a top-level
-    /// `Item::Const` / `Item::Let`.
-    LibraryMode,
-    /// Executable mode + Lit init: same top-level emission as `LibraryMode` (the const
-    /// is hoisted to top-level). INV-1 source-order preservation holds because Lit
-    /// init has no observable runtime side effect.
-    ToplevelConst,
-    /// Executable mode + side-effect / await init: captured into [`MainStmt::Let`] /
-    /// [`MainStmt::LetAwait`] and emitted inside the synthesized fn main body.
-    FnMainBodyCapture,
-}
-
 /// Identifier of the dispatch tree leaf (PRD Design section #2) selected by a
 /// `(is_executable_mode, user_main_kind, has_top_level_await)` 3-tuple.
 ///
@@ -252,214 +227,6 @@ pub enum DispatchArm {
     /// `(true, NonFn, true)` — non-fn preserved + top-await capture + `#[tokio::main]`.
     /// Covers cells 18 / 38 / 78.
     ExecNonFnAsync,
-}
-
-/// Classifies a `VarDecl`'s initializer expression into [`InitKind`].
-///
-/// See [`InitKind`] for the partition definition and the PRD Design section #3 for the
-/// rationale behind the literal-only / await / side-effect three-way split.
-///
-/// **Lit variant filtering (PRD design-intent reconciliation, T2 review fix)**:
-/// PRD Design section #3 line 970 prefix defines `InitKind::Lit` as "compile-time
-/// constant expressible form (Rust `const` 適合)" but the bullet enumeration
-/// includes `Lit::Regex`, which is **NOT** Rust-const-compatible
-/// (`regex::Regex::new("...")` is a runtime call, not a `const fn`). Following
-/// the prefix's design intent (the load-bearing semantic — `classify_decl_var_path`
-/// routes `InitKind::Lit` to `DeclVarPath::ToplevelConst` = `Item::Const` emit,
-/// which fails to compile for Regex), this implementation matches **only the
-/// Rust-const-compatible Lit variants** (`Num` / `Bool` / `Str` / `Null` /
-/// `BigInt`). Regex / JSXText fall through to `InitKind::SideEffect` so T3
-/// emission routes them to `MainStmt::Let` (fn main body capture,
-/// `let r = Regex::new("ab").unwrap();` — Rust-compilable). Lit::JSXText is
-/// structurally unreachable in VarDecl init position (JSX text only appears
-/// inside JSX element children); the filtered match excludes it defensively.
-///
-/// **Spec-stage cleanup TODO**: PRD Design section #3 line 970-971 bullet list
-/// of `Lit::Num/Bool/Str/Null/BigInt/Regex` should be revised to remove `Regex`,
-/// reconciling the prefix and the bullets. Tracked alongside `[I-228]` Axis C
-/// Spec gap (= same pattern of "AST-shape literal vs design intent" PRD
-/// inconsistency).
-///
-/// # Panics
-///
-/// Panics if `var.decls` is empty or the first declarator has no init expression.
-/// Both shapes are caller-precondition violations: ambient `declare const x: T;`
-/// and uninitialized `let x;` are filtered upstream by `has_side_effect_init` /
-/// `classify_decl_var_path` defensive guards. The `unreachable!` macro records
-/// the precondition explicitly so any future bypass-path caller surfaces as a
-/// loud panic instead of a silent misclassification.
-pub(crate) fn classify_init_kind(var: &VarDecl) -> InitKind {
-    if var.decls.is_empty() {
-        unreachable!(
-            "VarDecl must have at least 1 declarator (TS parser invariant); callers \
-             must guard against empty-decls Var via has_side_effect_init / \
-             classify_decl_var_path before calling this predicate"
-        );
-    };
-    let mut has_init_in_any_declarator = false;
-    let mut has_await = false;
-    let mut has_side_effect = false;
-    for decl in &var.decls {
-        let Some(init) = decl.init.as_deref() else {
-            // Mid-list no-init declarator (e.g., `let a = 1, b;`): TS allows for
-            // `let` only. No contribution to side-effect detection — the lacking
-            // init is a separate concern handled by the existing convert_var_decl_*
-            // path. We continue scanning the remaining declarators rather than
-            // panicking, so a partial-no-init multi-declarator can still be
-            // classified by its initialized declarators.
-            continue;
-        };
-        has_init_in_any_declarator = true;
-        // Recursive Await detection (= I-228 main fix): nested `Expr::Await` inside
-        // an init expression is a top-level await trigger, even if the init's outer
-        // shape isn't Expr::Await directly. Examples:
-        //   const c = process(await fetch());  // outer Call, inner Await arg
-        //   const c = await fetch();           // outer Await directly
-        //   const c = -await x;                // outer Unary, inner Await operand
-        if expr_contains_await_recursive(init) {
-            has_await = true;
-            continue;
-        }
-        match init {
-            // === Rust-const-compatible Lit variants (PRD design intent "Rust `const`
-            // 適合"、I-228-b fix narrows the over-broad bullet enumeration) ===
-            Expr::Lit(Lit::Num(_) | Lit::Bool(_) | Lit::Str(_) | Lit::Null(_) | Lit::BigInt(_)) => {
-            }
-            Expr::Unary(unary)
-                if matches!(unary.op, UnaryOp::Minus)
-                    && matches!(*unary.arg, Expr::Lit(Lit::Num(_) | Lit::BigInt(_))) => {}
-
-            // === Side-effect-bearing variants (= ALL other Expr shapes) ===
-            // Rule 11 (d-1) self-applied compliance: every remaining `Expr` variant
-            // enumerated explicitly, no `_ =>` arm. New SWC variants will produce a
-            // compile error and force this match to be updated. The grouped `|`
-            // pattern keeps the body single-statement while preserving exhaustive
-            // enumeration.
-            Expr::Lit(Lit::Regex(_) | Lit::JSXText(_))
-            | Expr::This(_)
-            | Expr::Ident(_)
-            | Expr::MetaProp(_)
-            | Expr::PrivateName(_)
-            | Expr::Invalid(_)
-            | Expr::JSXEmpty(_)
-            | Expr::JSXNamespacedName(_)
-            | Expr::JSXMember(_)
-            | Expr::Array(_)
-            | Expr::Object(_)
-            | Expr::Fn(_)
-            | Expr::Unary(_) // non-Minus-Lit fallback (after the guarded arm above)
-            | Expr::Update(_)
-            | Expr::Bin(_)
-            | Expr::Assign(_)
-            | Expr::Member(_)
-            | Expr::SuperProp(_)
-            | Expr::Cond(_)
-            | Expr::Call(_)
-            | Expr::New(_)
-            | Expr::Seq(_)
-            | Expr::Tpl(_)
-            | Expr::TaggedTpl(_)
-            | Expr::Arrow(_)
-            | Expr::Class(_)
-            | Expr::Yield(_)
-            | Expr::Await(_) // unreachable in practice (filtered by recursive walker
-                             //   above); enumerated defensively for compile-time
-                             //   exhaustiveness.
-            | Expr::Paren(_)
-            | Expr::JSXElement(_)
-            | Expr::JSXFragment(_)
-            | Expr::TsTypeAssertion(_)
-            | Expr::TsConstAssertion(_)
-            | Expr::TsNonNull(_)
-            | Expr::TsAs(_)
-            | Expr::TsInstantiation(_)
-            | Expr::TsSatisfies(_)
-            | Expr::OptChain(_) => has_side_effect = true,
-        }
-    }
-    // Precondition violation guard: VarDecl with ALL declarators having no init
-    // (= declare-marked Var or empty-init multi-declarator) must be filtered by
-    // upstream defensive guards (`has_side_effect_init` / `classify_decl_var_path`)
-    // before reaching this predicate. Reaching here with no initialized declarator
-    // indicates a caller-side bug; loud panic surfaces it immediately rather than
-    // silently misclassifying.
-    if !has_init_in_any_declarator {
-        unreachable!(
-            "TS Decl::Var requires init in at least one declarator (callers must guard \
-             against all-no-init Var via has_side_effect_init / classify_decl_var_path \
-             defensive guards before calling classify_init_kind)"
-        );
-    }
-    // Precedence: AwaitInit > SideEffect > Lit (= I-228-d ANY-rule per PRD spec
-    // revision 2026-05-07). Multi-declarator with mixed init shapes (e.g.,
-    // `const a = 1, b = compute();`) classifies based on the union of all
-    // declarators' shapes: ANY AwaitInit → AwaitInit, ANY SideEffect → SideEffect,
-    // all Lit → Lit. ToplevelConst routing requires unanimous Lit; FnMainBodyCapture
-    // captures the entire VarDecl into fn main body when ANY declarator triggers.
-    if has_await {
-        InitKind::AwaitInit
-    } else if has_side_effect {
-        InitKind::SideEffect
-    } else {
-        InitKind::Lit
-    }
-}
-
-/// Returns `true` if the (first declarator of the) `VarDecl` is the A3 trigger of
-/// [`is_executable_mode`] — i.e., a non-`Lit` initializer.
-///
-/// `AwaitInit` returns `true` so that Axis C1 cells reach the `is_executable_mode=true`
-/// arm of the dispatch tree.
-///
-/// **Ambient / no-init guard**: returns `false` for `declare const x: T;` (ambient,
-/// type-only) and `let x;` (no init expression). Both shapes lie outside the I-224
-/// matrix's A3 partition (which requires a non-Lit init expression) and never
-/// contribute to executable mode.
-pub(crate) fn has_side_effect_init(var: &VarDecl) -> bool {
-    if var.declare {
-        return false;
-    }
-    let Some(first) = var.decls.first() else {
-        return false;
-    };
-    if first.init.is_none() {
-        return false;
-    }
-    matches!(
-        classify_init_kind(var),
-        InitKind::SideEffect | InitKind::AwaitInit
-    )
-}
-
-/// Classifies a Decl::Var into a [`DeclVarPath`] given the module-level
-/// `is_executable_mode` value.
-///
-/// See [`DeclVarPath`] for the path semantics; the table here records the full
-/// `(is_executable_mode, init_kind)` Cartesian product:
-///
-/// | is_executable_mode | InitKind::Lit | InitKind::SideEffect | InitKind::AwaitInit |
-/// |---|---|---|---|
-/// | `false` (library) | LibraryMode | LibraryMode | LibraryMode (AST-impossible per `swc_parser_top_level_await_test`) |
-/// | `true` (executable) | ToplevelConst | FnMainBodyCapture | FnMainBodyCapture |
-#[allow(dead_code)] // Consumed by T4-1 (`transform_module` per-item routing); also
-                    // called by `Transformer::collect_top_level_executions` (also
-                    // dead at T2). Removable when T4-1 lands the integration.
-pub(crate) fn classify_decl_var_path(var: &VarDecl, is_executable_mode: bool) -> DeclVarPath {
-    // Defensive: ambient / no-init Var has no init expression to classify and
-    // emits via the existing library-mode path (no fn main capture). This
-    // mirrors the guard in [`has_side_effect_init`] so callers can pass any
-    // `&VarDecl` without precondition checks.
-    if var.declare || var.decls.first().is_none_or(|d| d.init.is_none()) {
-        return DeclVarPath::LibraryMode;
-    }
-    let init_kind = classify_init_kind(var);
-    match (is_executable_mode, init_kind) {
-        (false, _) => DeclVarPath::LibraryMode,
-        (true, InitKind::Lit) => DeclVarPath::ToplevelConst,
-        (true, InitKind::SideEffect) | (true, InitKind::AwaitInit) => {
-            DeclVarPath::FnMainBodyCapture
-        }
-    }
 }
 
 /// Returns `true` iff the module body contains any A1 (`Stmt::Expr`) or A3
@@ -946,6 +713,191 @@ impl<'a> Transformer<'a> {
             DeclVarPath::ToplevelConst | DeclVarPath::LibraryMode => {}
         }
         Ok(())
+    }
+
+    /// Synthesizes the `fn main` IR [`Item`]s required by the I-224 dispatch tree
+    /// (PRD Design section #2 + #5).
+    ///
+    /// The 3-tuple `(is_executable_mode, user_main_kind, has_top_level_await)` is
+    /// classified by [`classify_dispatch_arm`]; each arm produces:
+    ///
+    /// - **Library arms** (`LibraryNone` / `LibraryFnSyncDirect` /
+    ///   `LibraryFnAsyncDirect` / `LibraryNonFn`): no synthesized fn main —
+    ///   `transform_decl` directly emits the user's `main` (or no entry point at all
+    ///   for `LibraryNone` / `LibraryNonFn`). Returns an empty `Vec<Item>`.
+    /// - **Executable sync arms** (`ExecNoneSync` / `ExecFnSyncRename` /
+    ///   `ExecNonFnSync`): synthesizes a single `fn main() { /* main_stmts */ }`
+    ///   without the `#[tokio::main]` attribute (`is_async = false`).
+    /// - **Executable async arms** (`ExecNoneAsync` / `ExecFnSyncRenameAsync` /
+    ///   `ExecFnAsyncRename` / `ExecFnAsyncRenameAsync` / `ExecNonFnAsync`):
+    ///   synthesizes `#[tokio::main] async fn main() { /* main_stmts */ }`
+    ///   (`is_async = true`, `attributes = ["tokio::main"]`).
+    /// - **Collision arm**: structurally unreachable — upstream
+    ///   [`super::super::scan_for_ts_namespace_collisions`] in
+    ///   `Transformer::transform_module` rejects the `__ts_main` user identifier
+    ///   before any dispatch-tree call site is reached. The `unreachable!` here
+    ///   is a defensive lock-in that surfaces as a loud panic if a future caller
+    ///   bypasses the upstream namespace lint.
+    ///
+    /// **`is_executable_mode` derivation**: PRD Design section #2 defines exec mode
+    /// as the union of (a) any `Stmt::Expr` / `Decl::Var` with side-effect / await
+    /// init at the top level (= drives `main_stmts.is_empty()`) and (b) class
+    /// declarations whose `super_class` / decorators / member computed keys contain
+    /// outer-context await (= I-228 main scope extension, drives
+    /// `has_top_level_await=true` even when `main_stmts` is empty). The disjunction
+    /// `!main_stmts.is_empty() || has_top_level_await` reproduces the predicate
+    /// without re-walking the module — it is exactly equivalent to
+    /// [`is_executable_mode`] modulo the order in which the predicates were applied
+    /// (the caller, when `main_stmts` came from
+    /// [`Self::collect_top_level_executions`], has already ensured this equivalence).
+    ///
+    /// **Body emission**: the `Vec<MainStmt>` is converted in-place via
+    /// [`main_stmts_to_ir_stmts`] — the per-variant mapping preserves source order
+    /// (= INV-1) and applies `Expr::Await` wrapping for `ExprAwait` / `LetAwait`
+    /// (which store the **awaitee**, not the `Expr::Await(_)` wrapper, per the
+    /// [`MainStmt`] documentation).
+    ///
+    /// # Panics
+    ///
+    /// - `(_, Collision, _)`: defensive — unreachable in production after
+    ///   `Transformer::transform_module` upstream rejection (see above).
+    /// - `(false, _, true)` (forwarded from [`classify_dispatch_arm`]): library
+    ///   mode + has_top_level_await=true is structurally impossible by the AST
+    ///   mutual-exclusion locked in by
+    ///   `tests/swc_parser_top_level_await_test.rs`. Reaching this combination
+    ///   indicates an inconsistent caller that built a `(main_stmts,
+    ///   has_top_level_await)` pair violating the
+    ///   `is_executable_mode = !main_stmts.is_empty() || has_top_level_await`
+    ///   invariant.
+    #[allow(dead_code)]
+    // Wired into `Transformer::transform_module` /
+    // `transform_module_collecting` by T4-1; until then this method is exercised
+    // only by `tests` (unit) and is not reachable from the lib build's root.
+    pub(crate) fn synthesize_fn_main(
+        &mut self,
+        main_stmts: Vec<MainStmt>,
+        user_main_kind: UserMainKind,
+        has_top_level_await: bool,
+    ) -> Vec<Item> {
+        let is_executable_mode = !main_stmts.is_empty() || has_top_level_await;
+        let arm = classify_dispatch_arm(is_executable_mode, user_main_kind, has_top_level_await);
+
+        match arm {
+            // ============== Library mode arms — no synthesized fn main ==============
+            // The user's existing `main` (if any) is the binary entry directly via
+            // `transform_decl` (or the binary has no entry point at all in
+            // LibraryNone / LibraryNonFn — that is consistent with TS module-load
+            // semantics: declarations only, no execution).
+            DispatchArm::LibraryNone
+            | DispatchArm::LibraryFnSyncDirect
+            | DispatchArm::LibraryFnAsyncDirect
+            | DispatchArm::LibraryNonFn => Vec::new(),
+
+            // ============== Executable mode + sync dispatch ==============
+            DispatchArm::ExecNoneSync
+            | DispatchArm::ExecFnSyncRename
+            | DispatchArm::ExecNonFnSync => {
+                let body = main_stmts_to_ir_stmts(main_stmts);
+                vec![build_synthesized_fn_main(body, /* is_async = */ false)]
+            }
+
+            // ============== Executable mode + async dispatch ==============
+            // Trigger 1 (FnAsync) / Trigger 2 (top-await) / both — all collapse to
+            // `#[tokio::main] async fn main()` per INV-3 (a) integration.
+            DispatchArm::ExecNoneAsync
+            | DispatchArm::ExecFnSyncRenameAsync
+            | DispatchArm::ExecFnAsyncRename
+            | DispatchArm::ExecFnAsyncRenameAsync
+            | DispatchArm::ExecNonFnAsync => {
+                let body = main_stmts_to_ir_stmts(main_stmts);
+                vec![build_synthesized_fn_main(body, /* is_async = */ true)]
+            }
+
+            // ============== Collision — defensive unreachable ==============
+            DispatchArm::Collision => unreachable!(
+                "synthesize_fn_main reached with UserMainKind::Collision; the \
+                 `__ts_main` identifier collision must be rejected upstream by \
+                 `Transformer::transform_module`'s call to \
+                 `scan_for_ts_namespace_collisions` before any dispatch-tree \
+                 call site (INV-5 highest precedence)."
+            ),
+        }
+    }
+}
+
+/// Maps a `Vec<MainStmt>` to the IR statement list inserted into the synthesized
+/// `fn main` body, preserving source order (= INV-1).
+///
+/// The per-variant mapping is total (every [`MainStmt`] variant is enumerated):
+///
+/// | [`MainStmt`] variant | [`IrStmt`] result | Rust emission |
+/// |---|---|---|
+/// | `Expr(e)` | `IrStmt::Expr(e)` | `<e>;` |
+/// | `ExprAwait(inner)` | `IrStmt::Expr(IrExpr::Await(Box::new(inner)))` | `<inner>.await;` |
+/// | `Let { name, init }` | `IrStmt::Let { mutable: false, name, ty: None, init: Some(init) }` | `let <name> = <init>;` |
+/// | `LetAwait { name, init }` | `IrStmt::Let { mutable: false, name, ty: None, init: Some(IrExpr::Await(Box::new(init))) }` | `let <name> = <init>.await;` |
+///
+/// **Await wrapping**: `ExprAwait` and `LetAwait` carry the **awaitee** (the operand
+/// of TS `await`), not an outer `Expr::Await(_)`. This helper restores the
+/// `Expr::Await(_)` wrapper at the point of IR emission, keeping the IR symmetric
+/// with the Rust postfix `.await` syntax. (See the [`MainStmt`] doc comment's
+/// "Await-variant invariant".)
+#[allow(dead_code)]
+// Consumed by `Transformer::synthesize_fn_main` (above); the `synthesize_fn_main`
+// method itself is dead until T4-1 wires it into `transform_module`. The
+// `#[allow(dead_code)]` is removable when T4-1 lands the production call site.
+fn main_stmts_to_ir_stmts(main_stmts: Vec<MainStmt>) -> Vec<IrStmt> {
+    main_stmts
+        .into_iter()
+        .map(|main_stmt| match main_stmt {
+            MainStmt::Expr(e) => IrStmt::Expr(e),
+            MainStmt::ExprAwait(inner) => IrStmt::Expr(IrExpr::Await(Box::new(inner))),
+            MainStmt::Let { name, init } => IrStmt::Let {
+                mutable: false,
+                name,
+                ty: None,
+                init: Some(init),
+            },
+            MainStmt::LetAwait { name, init } => IrStmt::Let {
+                mutable: false,
+                name,
+                ty: None,
+                init: Some(IrExpr::Await(Box::new(init))),
+            },
+        })
+        .collect()
+}
+
+/// Builds the IR [`Item::Fn`] for the synthesized binary entry-point `fn main`.
+///
+/// Sync dispatch (`is_async = false`) emits `fn main() { body }` with no attributes.
+/// Async dispatch (`is_async = true`) emits `#[tokio::main] async fn main() { body }`
+/// — this is the unified emission for all five executable-async dispatch arms
+/// (`ExecNoneAsync` / `ExecFnSyncRenameAsync` / `ExecFnAsyncRename` /
+/// `ExecFnAsyncRenameAsync` / `ExecNonFnAsync`) per INV-3 (a) async dispatch
+/// trigger integration.
+///
+/// Visibility is `Private` (= no `pub`): the binary entry point convention does
+/// not require / permit `pub fn main`, and the synthesized fn never participates
+/// in cross-module API surfaces (= INV-5 / Axis E orthogonality cross-reference).
+#[allow(dead_code)]
+// Consumed by `Transformer::synthesize_fn_main` (above); same dead-until-T4-1
+// rationale as `main_stmts_to_ir_stmts`.
+fn build_synthesized_fn_main(body: Vec<IrStmt>, is_async: bool) -> Item {
+    let attributes = if is_async {
+        vec!["tokio::main".to_string()]
+    } else {
+        Vec::new()
+    };
+    Item::Fn {
+        vis: Visibility::Private,
+        attributes,
+        is_async,
+        name: "main".to_string(),
+        type_params: Vec::new(),
+        params: Vec::new(),
+        return_type: None,
+        body,
     }
 }
 

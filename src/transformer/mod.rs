@@ -49,6 +49,44 @@ pub(crate) struct Transformer<'a> {
     /// Callable interface marker struct 名の使用済み集合 (INV-1)。
     /// PascalCase collision を検出し、suffix 付与で unique 化する。
     used_marker_names: std::collections::HashSet<String>,
+    /// I-224 user `main` rename + call substitution gate.
+    ///
+    /// `true` when the module is in **executable mode** AND the user-defined
+    /// `main` symbol is callable (B1 / B2 = `UserMainKind::FnSync` /
+    /// `UserMainKind::FnAsync`). Activated by `transform_module` /
+    /// `transform_module_collecting` after computing the
+    /// (`is_executable_mode`, `user_main_kind`) pair from the module body.
+    ///
+    /// When set, two transparent rewrites apply during IR conversion:
+    ///
+    /// 1. **Decl emission rename**: `convert_fn_decl` (B1a / B2a function decl)
+    ///    and the FnExpr / Arrow init paths in
+    ///    `convert_var_decl_module_level` (B1b / B2b / B1c / B2c) substitute
+    ///    the emitted `Item::Fn { name }` from `"main"` to
+    ///    [`crate::transformer::expressions::TS_MAIN_RENAME`] (= `"__ts_main"`).
+    ///    The legacy `is_async && name == "main"` → `#[tokio::main]` attribute
+    ///    in `convert_fn_decl` is automatically dropped because the rename
+    ///    runs before the attribute computation, so the post-rename name no
+    ///    longer matches `"main"`.
+    /// 2. **Call substitution**: `convert_call_expr` substitutes
+    ///    `Expr::Call { callee: Ident("main"), .. }` to `CallTarget::Free("__ts_main")`
+    ///    so every `main()` call site (including the multi-call boundary cases
+    ///    locked in by INV-2) targets the renamed user main rather than the
+    ///    synthesized binary entry.
+    ///
+    /// **Inheritance to nested scopes**: `spawn_nested_scope` /
+    /// `spawn_nested_scope_with_local_synthetic` propagate this flag verbatim
+    /// so call substitution fires uniformly within function bodies, arrow
+    /// bodies, class methods, etc.
+    ///
+    /// **Library mode + B1 / B2 (cells 3 / 5 / 23 / 25)**: this flag stays
+    /// `false` because the user's `main` is the binary entry point directly
+    /// per the `LibraryFnSyncDirect` / `LibraryFnAsyncDirect` arms — no
+    /// rename or substitution required. The dispatch tree's `(false, FnSync,
+    /// false)` and `(false, FnAsync, false)` arms in
+    /// `Transformer::synthesize_fn_main` correspondingly emit nothing,
+    /// leaving `transform_decl`'s emit as the binary entry.
+    pub(crate) user_main_substitution: bool,
 }
 
 impl<'a> Transformer<'a> {
@@ -62,6 +100,7 @@ impl<'a> Transformer<'a> {
             synthetic,
             mut_method_names: std::collections::HashSet::new(),
             used_marker_names: std::collections::HashSet::new(),
+            user_main_substitution: false,
         }
     }
 
@@ -75,6 +114,7 @@ impl<'a> Transformer<'a> {
             synthetic: &mut *self.synthetic,
             mut_method_names: self.mut_method_names.clone(),
             used_marker_names: std::collections::HashSet::new(),
+            user_main_substitution: self.user_main_substitution,
         }
     }
 
@@ -93,6 +133,7 @@ impl<'a> Transformer<'a> {
             synthetic: local,
             mut_method_names: self.mut_method_names.clone(),
             used_marker_names: std::collections::HashSet::new(),
+            user_main_substitution: self.user_main_substitution,
         }
     }
 
@@ -308,6 +349,24 @@ impl<'a> Transformer<'a> {
             return Err(collision.into());
         }
 
+        // I-224 T3-2 partial integration: activate user `main` rename + call
+        // substitution for **executable mode** + B1/B2 cells (= cells 13 /
+        // 14 / 15 / 16 / 33 / 34 / 35 / 36 / 73 / 74 / 75 / 76). Library mode
+        // + B1/B2 (cells 3 / 5 / 23 / 25) keeps the user's `main` as the
+        // binary entry directly, so the gate stays `false`. The synthesized
+        // fn main wiring (`Self::synthesize_fn_main` invocation) lands in
+        // T4-1; this T3 commit only enables the rename + substitution
+        // observable to the helper / invariants tests.
+        {
+            let exec_mode = main_synthesis::is_executable_mode(module);
+            let user_main_kind = main_synthesis::detect_user_main(module);
+            self.user_main_substitution = exec_mode
+                && matches!(
+                    user_main_kind,
+                    main_synthesis::UserMainKind::FnSync | main_synthesis::UserMainKind::FnAsync
+                );
+        }
+
         // Pre-scan: collect class info for inheritance resolution
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
@@ -316,6 +375,20 @@ impl<'a> Transformer<'a> {
         let mut items = Vec::new();
         let mut init_stmts = Vec::new();
         for module_item in &module.body {
+            // I-224 T3-4: A5a (`Stmt::Empty`) silent skip per PRD Design
+            // section #3 ("Stmt::Empty: silent skip per the per-item
+            // dispatch table; no capture"). The legacy
+            // `transform_module_item` `_ => Err` arm rejected `Stmt::Empty`
+            // as Tier 2 unsupported; T4-2's full _ arm refactor will
+            // explicitly enumerate every variant. Adding the skip here
+            // (= ahead of `transform_module_item` dispatch) is a minimal
+            // structural fix that lands the silent-skip semantics required
+            // for the cells 51/53/55/57/59 orthogonality probe in
+            // `tests/i224_helper_test.rs::test_axis_a5a_compositional_orthogonality_with_b_axis`
+            // without otherwise touching T4-2's scope.
+            if matches!(module_item, ModuleItem::Stmt(Stmt::Empty(_))) {
+                continue;
+            }
             // Collect top-level expression statements for init() function
             if let ModuleItem::Stmt(Stmt::Expr(expr_stmt)) = module_item {
                 let expr = self.convert_expr(&expr_stmt.expr)?;
@@ -349,6 +422,21 @@ impl<'a> Transformer<'a> {
         // of the module continues to be transformed for partial output.
         let mut unsupported: Vec<UnsupportedSyntaxError> = scan_for_ts_namespace_collisions(module);
 
+        // I-224 T3-2 partial integration (= symmetric with `transform_module`).
+        // Flag activation runs after the namespace-lint scan so collision-mode
+        // modules with user `main` still get the rename gate set; the rename
+        // applies to non-collision identifiers and the namespace lint
+        // accumulates the `__ts_main` collision separately.
+        {
+            let exec_mode = main_synthesis::is_executable_mode(module);
+            let user_main_kind = main_synthesis::detect_user_main(module);
+            self.user_main_substitution = exec_mode
+                && matches!(
+                    user_main_kind,
+                    main_synthesis::UserMainKind::FnSync | main_synthesis::UserMainKind::FnAsync
+                );
+        }
+
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);
         self.build_mut_method_names(&class_map);
@@ -357,6 +445,13 @@ impl<'a> Transformer<'a> {
         let mut init_stmts = Vec::new();
 
         for module_item in &module.body {
+            // I-224 T3-4: A5a (`Stmt::Empty`) silent skip (= symmetric with
+            // `transform_module`'s loop). See that helper's comment for the
+            // PRD Design section #3 rationale and the T4-2 work-scope
+            // boundary.
+            if matches!(module_item, ModuleItem::Stmt(Stmt::Empty(_))) {
+                continue;
+            }
             // Collect top-level expression statements for init() function
             if let ModuleItem::Stmt(Stmt::Expr(expr_stmt)) = module_item {
                 match self.convert_expr(&expr_stmt.expr) {
