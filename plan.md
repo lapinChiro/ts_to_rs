@@ -9,21 +9,23 @@
 
 ---
 
-## 現在の状態 (2026-05-06 post I-224 T1-2 完了 = `__ts_main` collision validator + module-level scan + Tier 2 honest error reject + 13 unit tests、B4 collision dispatch path 確立)
+## 現在の状態 (2026-05-07 post I-224 T1-3 完了 = INV-5 collision priority structural lock-in、`test_invariant_5_*` integration test fill-in、4-layer review 0 findings、production code 0 LOC change)
 
 | 指標 | 値 |
 |------|-----|
-| Hono bench clean | **111/158 (70.3%)** = T7/T8/T9/T10/T12 baseline と同一 (Preservation、本 T1-2 で Hono 内 `__ts_*` user identifier 0 件のため Hono 系 bench に regression 不在 = INV-5 R-4 audit pre-existing 確認結果と整合) |
+| Hono bench clean | **111/158 (70.3%)** = T7/T8/T9/T10/T12 baseline と同一 (Preservation、production code 0 LOC change のため bench 再取得不要、T1-2 baseline carries forward) |
 | Hono bench errors | **63** (T7/T8/T9/T10/T12 baseline と同一、no new compile errors、本 PRD scope 外への regression 0 件) |
-| cargo test (lib) | 3372 pass / 0 fail / 0 ignored (I-224 T1-2 = 3359 T1-1 baseline + 13 NEW = `i224_t12_*` 13 件 = Decl variants 全 cover + ExportDecl + ExportDefaultDecl + 一般 `__ts_*` prefix + sanity + matrix cell # 19 representative) |
+| cargo test (lib) | 3372 pass / 0 fail / 0 ignored (T1-2 baseline と同一、本 T1-3 = test-only change、production lib 不変) |
 | cargo test (integration) | 122 pass |
 | cargo test (compile) | 3 pass |
 | cargo test (E2E) | 159 pass + 70 `#[ignore]` |
+| cargo test (i224_invariants_test) | **1 pass / 6 ignored** (T1-3 で INV-5 fill-in、INV-1/2/3/4/6/7 は T2-T9 で順次 fill-in 予定) |
+| cargo test (i224_helper_test) | 0 pass / 4 ignored (T2/T3 で fill-in 予定) |
 | cargo test (i205_helper_test) | **4 pass / 0 ignored** (T13 で全 stub fill-in、registry-level + integration-level 2 layer test design) |
 | cargo test (i205_invariants_test) | **2 pass / 5 ignored** (T13 で INV-5 getter + setter symmetric counterpart fill-in、INV-1〜4/6 は T15 defer) |
 | clippy | 0 warnings |
 | fmt | 0 diffs |
-| ./scripts/check-file-lines.sh | OK (全 .rs file < 1000 行、2026-04-29 file-line refactor で 4 violations を構造的解消) |
+| ./scripts/check-file-lines.sh | OK (全 .rs file < 1000 行、tests/i224_invariants_test.rs = 428 行 < 1000 threshold) |
 
 **bench 非決定性**: ±1 clean / ±2 errors の noise variance を [I-172] として記録 (test/bench infra defect、別 PRD)。
 
@@ -57,8 +59,8 @@
 
 | Phase | Sub-commits | Status |
 |---|---|---|
-| T1: `__ts_` namespace + collision detection | ~~T1-1~~ ✓ / ~~T1-2~~ ✓ / T1-3 (= INV-5 fill-in + 4-layer review) | 🔜 **次着手 (T1-3)** |
-| T2: IR enums + helper | T2-1 / T2-2 / T2-3 (= INV-3 partial + INV-6 + 4-layer review) | 未着手 |
+| T1: `__ts_` namespace + collision detection | ~~T1-1~~ ✓ / ~~T1-2~~ ✓ / ~~T1-3~~ ✓ (= INV-5 fill-in + 4-layer review) | ✓ **T1 完了 (2026-05-07)** |
+| T2: IR enums + helper | T2-1 / T2-2 / T2-3 (= INV-3 partial + INV-6 + 4-layer review) | 🔜 **次着手 (T2-1)** |
 | T3: fn main synthesis + rename + substitute + Axis B/E probes | T3-1 / T3-2 / T3-3 / T3-4 (= Axis E + A5a probes + 4-layer review) | 未着手 |
 | T4: transform_module refactor + pub fn init 廃止 | T4-1 / T4-2 / T4-3 (= INV-4 + 4-layer review) | 未着手 |
 | T5: E2E green-ify (existing C0) + I-205 cell-09 unblock | T5-1 / T5-2 (= NEW C0 + INV-7 + 4-layer review) | 未着手 |
@@ -71,11 +73,12 @@
 
 **T1-2 完了 (2026-05-06)**: `src/transformer/statements/mod.rs:67-95` に `check_ts_internal_fn_name_namespace(name: &str, span: swc_common::Span) -> Result<()>` 新規 validator 追加 (label-side validator と symmetric、`__ts_` prefix-based reject、parametric wording) + `src/transformer/mod.rs:701-844` に scan helper `scan_for_ts_namespace_collisions` + per-item dispatcher (Rule 11 (d-1) 全 ModuleItem / ModuleDecl / Stmt / Decl variants explicit enumerate) 追加 + `Transformer::transform_module` (line 313-318) と `Transformer::transform_module_collecting` (line 348-356) に scan integration (transform_module = early-Err、transform_module_collecting = unsupported accumulator seed) + `src/transformer/statements/tests/loops.rs:367-525` に 13 unit tests (Decl variants 全 cover + ExportDecl + ExportDefaultDecl + 一般 `__ts_` prefix + sanity + matrix cell # 19 representative)。**Quality gate**: cargo check / cargo test --lib 3372 pass (3359 baseline + 13 NEW) / cargo fmt 0 diff / cargo clippy 0 warning / check-file-lines OK。**Commit (proposed)**: `[WIP] I-224 T1-2: __ts_main collision validator + Tier 2 honest error reject (matrix # 9/19/20 + collision-merged 29/39/40/49/59/69/79/80)`。
 
-**次の `/start` で着手する task = T1-3 (INV-5 invariants test fill-in + 4-layer review)**:
-- **Work**: `tests/i224_invariants_test.rs::test_invariant_5_ts_main_namespace_reservation_with_collision_priority` の `#[ignore]` 解除 + fill-in (全 reachable B4 cells = matrix # 9/19/20/29/39/40/49/59/69/79/80 で transpile → Err with collision wording assert + INV-5 collision priority arm が A/C 軸 dispatch より先行 reject 確認、cells 49/59/69 の A4/A5a/A5b + B4 cases も同 wording で reject)
-- **Quality gate**: `test_invariant_5_*` green (`#[ignore]` 解除)、Layer 1-4 全 0 findings (or 全 fix 後 0 findings)
-- **Commit message**: `[WIP] I-224 T1 完了: INV-5 collision priority structural lock-in (invariants test fill-in) + 4-layer review pass`
-- **Co-Authored-By**: `Claude Opus 4.7 (1M context) <noreply@anthropic.com>`
+**T1-3 完了 (2026-05-07)**: `tests/i224_invariants_test.rs::test_invariant_5_ts_main_namespace_reservation_with_collision_priority` の `#[ignore]` 解除 + fill-in (全 reachable B4 cells = matrix # 9/19/20/29/39/40/49/59/69/79/80 を 11 case の table-driven integration test として実装、各 cell で `transpile()` Err with collision wording + `transpile_collecting()` `unsupported[0]` collision wording を assert)。**Cells 49/59/69 priority sub-check** で A-axis 代替 reject (`Stmt(If(`、`Stmt(Empty(`、`Stmt(Debugger(` wording、`format_module_item_kind` の `format!("Stmt({stmt:?})")` envelope 込み substring match) が unsupported list 内に存在するが index 0 ではない (= collision arm が priority で勝つ) ことを **non-trivial structural assert**。**Quality gate**: cargo test --lib 3372 pass / cargo test (full 24 binaries) all green / cargo fmt 0 diff / cargo clippy 0 warning / check-file-lines OK (test file 428 行 < 1000)。**`/check_job` 4-layer self-applied review (敵対的 deep review)**: 初回 review で Layer 3 / Layer 4 finding = cell 59 (A5a Empty) を `cells_with_alternative_a_axis_reject` から除外していた compromise を発見 → empirical probe で current state (post T1-2 / pre T2/T3) では cell 59 unsupported list に `Stmt(Empty(` が index 1 に structural pinning 可能と確認 → cell 59 を non-trivial priority sub-check に追加 + cell 49/69 substring を `Stmt(<Variant>(` envelope 込み form に tighten + docstring に "Cell 59 forward-compat note" 追加 (T4-2 で Stmt::Empty silent-skip lands 時の test update guidance) で **structural strengthening fix**。Re-review で Layer 1-4 全 **0 findings ✓**。**Defect Classification 5 category (final)**: Grammar gap / Oracle gap / Spec gap = 0、Implementation gap = 1 (= self-applied fix で resolved)、Review insight = 1 (= L1 substring tightening、self-applied fix で resolved)。**Commit (proposed)**: `[WIP] I-224 T1 完了: INV-5 collision priority structural lock-in (invariants test fill-in、cells 49/59/69 non-trivial priority + envelope-match substring) + 4-layer self-applied review pass`。
+
+**次の `/start` で着手する task = T2-1 (IR enum 追加: MainStmt + UserMainKind + collect_top_level_executions skeleton)**:
+- **Work**: `src/transformer/main_synthesis.rs` (新規 file) に IR enums (`MainStmt`, `UserMainKind`) + helper skeleton (`collect_top_level_executions`) 追加、PRD doc Design section #2 (`derive_dispatch_tuple` + dispatch tree) に対応する production code skeleton 着手 (実装 logic は T2-2/T2-3 で漸進)。test 観点では `tests/i224_invariants_test.rs::test_invariant_3_*` (sync/async dispatch consistency) と `tests/i224_invariants_test.rs::test_invariant_6_*` (TypeResolver layer unaffected) の `#[ignore]` 解除 + helper test (`tests/i224_helper_test.rs::test_dispatch_arm_one_to_one_mapping_per_in_scope_cell`) も T2 内で fill-in。
+- **Quality gate**: cargo check / cargo fmt 0 diff / cargo clippy 0 warning。
+- **詳細は `backlog/I-224-top-level-fn-main-mechanism.md` Implementation Stage Tasks > T2 section 参照**。
 
 **plan.md chain 影響**: Option β 採用で I-226 entry を chain から削除済 (= 本 plan.md の chain section)、I-224 scope は Axis C0 + Axis C1 cohesive batch (T1-T9 sequence、計 23 sub-commits)。
 

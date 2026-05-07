@@ -141,23 +141,223 @@ fn test_invariant_4_no_pub_fn_init_in_codebase_post_t4() {
 /// empirical pre-existing user-code audit (R-4 task = TS-7 で実施完了、codebase + Hono
 /// grep `__ts_main` 0 hits 確認) で Tier-transition prerequisite 担保。
 ///
-/// **Collision priority verification**: dispatch tree `(_, Collision, _)` arm が A/C 軸
-/// dispatch より先行 reject (= cells 49/59/69 の A4/A5a/A5b + B4 cells も collision arm で
-/// 統一 reject、INV-5 highest priority precedence)。
+/// **Collision priority verification (structural)**: Implementation 上、collision detection
+/// は `Transformer::transform_module_collecting` の最先頭 (= per-item dispatch + A-axis /
+/// C-axis routing 開始前) で `scan_for_ts_namespace_collisions` を call し
+/// `unsupported` accumulator に seed する。`transpile` 公開 API は `unsupported.first()`
+/// を Err として bail するため、collision を含む source では公開 API 視点で
+/// **「最初に報告される Err == collision wording」** が constructive proof。これにより
+/// dispatch tree `(_, Collision, _)` arm が A/C 軸 dispatch より先行 reject される (=
+/// cells 49/59/69 の A4 control-flow / A5a Empty / A5b Debugger reject よりも collision
+/// wording で reject される) 不変性を public API 経由で empirical lock-in する。
+///
+/// 補強として、cells 49/59/69 (A4 control-flow / A5a Empty / A5b Debugger) では
+/// `transpile_collecting` 経由で **alternative reject (`Stmt(If(`、`Stmt(Empty(`、
+/// `Stmt(Debugger(` wording) も unsupported list に存在しうる** が collision が
+/// `unsupported[0]` に置かれる (= priority arm が先) ことを別途 assert (= non-trivial
+/// priority lock-in)。当該 alternative wording は `format_module_item_kind` の
+/// `format!("Stmt({stmt:?})")` envelope に依存するため、`Stmt(<Variant>(` 形式で
+/// substring match (swc Debug 形式の偶然依存を排除)。
+///
+/// **Cell 59 forward-compat note**: 現在 (post T1-2 / pre T2/T3) `Stmt::Empty` は
+/// `transform_module_item` 末尾の `_ => Err(format_module_item_kind(...))` arm で
+/// reject される (alternative wording = `Stmt(Empty(`)。Implementation Stage T2/T3
+/// で A5a (Empty) の silent-skip 実装が landed すると alternative wording は
+/// 消失する → 本 test の cell 59 alternative-reject 行 (`59 => "Stmt(Empty("`) を
+/// その時点で除去 (= intended test evolution、structural drift ではない)。<br/>
+/// 本 evolution の trigger は PRD doc Implementation Stage Tasks > T4-2 の
+/// `transform_module_item` `_` arm refactor + A5a silent-skip 実装で発火、
+/// **本 test を `Stmt(Empty(` 検出から `unsupported len == 1` 検出 (= vacuous
+/// priority) に切替** することが ideal implementation。T1-3 時点では現状を
+/// structurally lock-in する。
 #[test]
-#[ignore = "I-224 INV-5 verification stub: Implementation Stage T1 で fill in \
-            (matrix # 9/19/20/29/39/40/49/59/69/79/80 collision cells で transpile → Tier 2 \
-            honest error reject + I-154 namespace test 拡張)"]
 fn test_invariant_5_ts_main_namespace_reservation_with_collision_priority() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T1 で fill in: \
-         全 reachable B4 collision cells (matrix # 9/19/20/29/39/40/49/59/69/79/80) で \
-         transpile → Err with `__ts_main is reserved for transpiler-internal use` wording \
-         を assert、INV-5 collision priority arm が A/C 軸 dispatch より先行 reject \
-         (cells 49/59/69 が control-flow / Empty / Debugger reject よりも collision wording \
-         で reject される) を verify"
-    );
+    use ts_to_rs::transpile_collecting;
+
+    // Each entry = (matrix cell #, axis summary, TS source). The axis summary documents
+    // the (Axis A, Axis B=B4 collision, Axis C) shape so a reader can map a failing case
+    // back to the PRD matrix without re-deriving the tuple.
+    //
+    // **Source construction principle**: every source carries a top-level
+    // `function __ts_main()` declaration (= Axis B4 marker), plus an Axis-A-shaped body
+    // (declarations only / Stmt::Expr / Decl::Var lit-init / Decl::Var side-effect-init /
+    // control-flow / Stmt::Empty / Stmt::Debugger / mixed) and optionally a top-level
+    // `await` expression (Axis C1). C1 cells include a `declare const ...: Promise<_>`
+    // so SWC parses the await expression in a self-consistent context.
+    let cases: &[(u32, &str, &str)] = &[
+        // Cell 9: A0 (declarations only / library mode) + B4 + C0
+        (
+            9,
+            "A0+B4+C0 (library-form `__ts_main` collision, no top-level execution)",
+            "function __ts_main(): void { console.log('user __ts_main'); }\n",
+        ),
+        // Cell 19: A1 (top-level Stmt::Expr only) + B4 + C0
+        (
+            19,
+            "A1+B4+C0 (Stmt::Expr top-level + collision)",
+            "function __ts_main(): void { console.log('user'); }\n\
+             console.log('top-level');\n\
+             __ts_main();\n",
+        ),
+        // Cell 20: A1 + B4 + C1 (top-level await)
+        (
+            20,
+            "A1+B4+C1 (Stmt::Expr top-level + collision + top-level await)",
+            "declare const p: Promise<number>;\n\
+             function __ts_main(): void { console.log('user'); }\n\
+             console.log('top-level');\n\
+             await p;\n",
+        ),
+        // Cell 29: A2 (Decl::Var with literal init only) + B4 + C0
+        (
+            29,
+            "A2+B4+C0 (Lit-init top-level const + collision)",
+            "function __ts_main(): void { console.log('user'); }\n\
+             const x: number = 0;\n",
+        ),
+        // Cell 39: A3 (Decl::Var with side-effect / non-const init) + B4 + C0
+        (
+            39,
+            "A3+B4+C0 (side-effect-init top-level const + collision)",
+            "declare function fetchSync(): number;\n\
+             function __ts_main(): void { console.log('user'); }\n\
+             const c: number = fetchSync();\n",
+        ),
+        // Cell 40: A3 + B4 + C1 (top-level await as init)
+        (
+            40,
+            "A3+B4+C1 (await-init top-level const + collision)",
+            "declare function fetchAsync(): Promise<number>;\n\
+             function __ts_main(): void { console.log('user'); }\n\
+             const c: number = await fetchAsync();\n",
+        ),
+        // Cell 49: A4 (control-flow at top-level) + B4 + C0
+        (
+            49,
+            "A4+B4+C0 (top-level control-flow + collision; collision precedes A4 reject)",
+            "function __ts_main(): void { console.log('user'); }\n\
+             if (true) { console.log('top-if'); }\n",
+        ),
+        // Cell 59: A5a (Stmt::Empty) + B4 + C0
+        (
+            59,
+            "A5a+B4+C0 (top-level empty stmt + collision; collision precedes A5a path)",
+            "function __ts_main(): void { console.log('user'); }\n\
+             ;\n",
+        ),
+        // Cell 69: A5b (Stmt::Debugger) + B4 + C0
+        (
+            69,
+            "A5b+B4+C0 (top-level debugger + collision; collision precedes A5b reject)",
+            "function __ts_main(): void { console.log('user'); }\n\
+             debugger;\n",
+        ),
+        // Cell 79: A6 (mixed) + B4 + C0
+        (
+            79,
+            "A6+B4+C0 (mixed top-level + collision)",
+            "function __ts_main(): void { console.log('user'); }\n\
+             const x: number = 0;\n\
+             console.log('mixed');\n",
+        ),
+        // Cell 80: A6 + B4 + C1 (mixed + top-level await)
+        (
+            80,
+            "A6+B4+C1 (mixed top-level + collision + top-level await)",
+            "declare const p: Promise<number>;\n\
+             function __ts_main(): void { console.log('user'); }\n\
+             const x: number = 0;\n\
+             console.log('mixed');\n\
+             await p;\n",
+        ),
+    ];
+
+    // Cells whose A-axis dispatch alone (i.e., without collision detection) would
+    // produce a non-collision Tier 2 reject in the **current** transformer state
+    // (post T1-2, pre T2/T3 / T4-2). Used for the structural priority sub-check:
+    // collision must be at `unsupported[0]` even when these alternative rejects would
+    // otherwise fire. See the function docstring's "Cell 59 forward-compat note" for
+    // the planned evolution when T2/T3 silent-skips Stmt::Empty.
+    let cells_with_alternative_a_axis_reject: &[u32] = &[49, 59, 69];
+
+    for (cell, axis_summary, src) in cases {
+        // (1) Public API: `transpile` must Err with collision wording.
+        //     Because `transpile` reports `unsupported.first()`, this transitively
+        //     proves collision is at index 0 (= structural priority).
+        let abort_result = transpile(src);
+        let err = match abort_result {
+            Ok(rust) => panic!(
+                "cell #{cell} ({axis_summary}): expected Tier 2 honest reject for `__ts_main` \
+                 collision, but transpile() returned Ok with rust source:\n{rust}"
+            ),
+            Err(e) => e,
+        };
+        let err_msg = format!("{err:#}");
+        assert!(
+            err_msg.contains("__ts_main") && err_msg.contains("is reserved"),
+            "cell #{cell} ({axis_summary}): expected error message to contain `__ts_main` and \
+             `is reserved` (collision wording per `check_ts_internal_fn_name_namespace`); got: \
+             `{err_msg}`"
+        );
+
+        // (2) Collecting API: structural lock-in that `unsupported[0]` is the collision.
+        //     This is the primary INV-5 priority statement: collision is seeded into the
+        //     accumulator before per-item dispatch runs.
+        let (_rust_partial, unsupported) = transpile_collecting(src).unwrap_or_else(|e| {
+            panic!("cell #{cell} ({axis_summary}): transpile_collecting failed unexpectedly: {e}")
+        });
+        let first = unsupported.first().unwrap_or_else(|| {
+            panic!(
+                "cell #{cell} ({axis_summary}): expected collision in unsupported list, got empty list"
+            )
+        });
+        assert!(
+            first.kind.contains("__ts_main") && first.kind.contains("is reserved"),
+            "cell #{cell} ({axis_summary}): expected unsupported[0] to be the collision wording \
+             (= structural priority of `(_, Collision, _)` arm over A/C-axis dispatch); got \
+             unsupported[0].kind = `{}`, full list = {unsupported:?}",
+            first.kind,
+        );
+
+        // (3) Priority sub-check for cells 49/59/69: their A-axis would otherwise produce
+        //     a non-collision reject (in the current state, see the function docstring's
+        //     "Cell 59 forward-compat note" for cell 59's planned evolution). We verify
+        //     the alternative wording IS present in the unsupported list (proving the
+        //     source is non-trivially rejected by A-axis as well), but NOT at index 0
+        //     (proving collision wins).
+        //
+        //     Substring form `Stmt(<Variant>(` matches the `format!("Stmt({stmt:?})")`
+        //     envelope produced by `format_module_item_kind` (swc's auto-derived Debug
+        //     prints tuple-struct variants as `<Variant>(<inner>)`).
+        if cells_with_alternative_a_axis_reject.contains(cell) {
+            let alternative_wording = match cell {
+                49 => "Stmt(If(",
+                59 => "Stmt(Empty(",
+                69 => "Stmt(Debugger(",
+                _ => unreachable!(
+                    "cells_with_alternative_a_axis_reject must be kept in sync with this match arm"
+                ),
+            };
+            let has_alternative = unsupported
+                .iter()
+                .any(|u| u.kind.contains(alternative_wording));
+            assert!(
+                has_alternative,
+                "cell #{cell} ({axis_summary}): expected unsupported list to also contain the \
+                 A-axis alternative reject wording (substring `{alternative_wording}`) so that \
+                 the priority assertion is non-trivial; got unsupported list = {unsupported:?}"
+            );
+            // The alternative reject must NOT be at index 0 — that slot is reserved for
+            // the collision (= INV-5 structural priority).
+            assert!(
+                !first.kind.contains(alternative_wording),
+                "cell #{cell} ({axis_summary}): unsupported[0] unexpectedly contains the \
+                 A-axis alternative wording (`{alternative_wording}`) — collision must be \
+                 at index 0, not the A-axis reject; got unsupported[0].kind = `{}`",
+                first.kind,
+            );
+        }
+    }
 }
 
 /// INV-6: TypeResolver layer unaffected (third-party review R-3 source)
