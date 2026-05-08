@@ -9,133 +9,95 @@
 
 ---
 
-## 現在の状態 (2026-05-08)
+## 現在の状態 (2026-05-09)
 
-**進行中**: 案 β Phase 1-A = **I-224 (B2 fn main mechanism) T7 chain 再開**。I-399 (universal infra prerequisite for I-224 T9 = E2E test isolation defect) は PRD close 完了 (= `backlog/` から削除済、`backlog-management` skill "Completed Item Handling" 規定準拠、commit `[CLOSE] I-399 PRD 完了` で git history 参照)、INV-T1/T2/T3 が `tests/i399_isolation_test.rs` 経由 structural lock-in 化、e2e empirical verification 信頼性 base が確立済。
+**進行中**: 案 γ Phase 0 = **PRD I-D (Framework rule integration cohesive batch) 着手予定**。
 
-**Spec stage 逆戻り Iteration v12 (2026-05-08)**: T7 chain 再開時 prerequisite 調査で **T7 spec wording vs 実体 infra work の乖離** を発見、`spec-first-prd.md` 「Spec への逆戻り」procedure 発動。T7-1 spec を `tokio dep verify (既存 = N/A) + tests/e2e_test.rs harness 側 ESM mode write 拡張 (= prepare_single_file_ts_exec + prepare_multi_file_ts_exec で ts-exec dir に package.json {"type":"module"} unconditional 書き出し)`、T7-2 spec を `observe-tsc.sh --esm flag permanent retention verify + 4-layer review` に revise。詳細 = `backlog/I-224-top-level-fn-main-mechanism.md` Iteration v12 entry。
+**最新の完了**: I-224 (B2 fn main mechanism、Option β cohesive batch) close (2026-05-09)。詳細 = § 直近の完了作業 + git log `[CLOSE] I-224 PRD 完了` commit + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 16 sub-sections、12 度 v12-2 pattern recurrence chain evidence、9 framework 改善 candidates table embed)。
 
-**T7 (Iteration v12 revise) 完了 (2026-05-08)**: T7-1 = `ESM_PACKAGE_JSON` constant + `reset_ts_exec_dir` で `package.json {"type":"module"}` unconditional 書き出し (= single-file + multi-file 両 path symmetric cover) + 3 NEW tests (single-file ESM lock-in / multi-file ESM lock-in / top-await tsx empirical end-to-end) / T7-2 = observe-tsc.sh `--esm` + `--no-auto-main` flag retention verify (6 references retained from TS-5 trial、line 30/31/44/51/59/167/176) + `/check_job` 4-layer review **2 round** pass: 1st-round で L1-1 (PRD Test Plan section update 漏れ) + L4-1 (tests/e2e_test.rs file size broken-window) 発見 → 即 fix / 2nd-round (deep) で L1-2 (PRD doc 187→185 baseline 数値誤り) + L1-3 (270→281 math error) + L4-2 (TODO I-180 empirical state update = I-224 T5-1 副作用で likely resolved finding) 発見 → 即 fix / 計 5 findings 全 fix-in-review、最終的に Layer 1-4 全 0 findings achieved (= Mechanical: production code 0 LOC change / Empirical: 185 → 188 e2e active GREEN +3 NEW、93 ignored unchanged / Structural cross-axis: symmetric path coverage via reset_ts_exec_dir DRY single source of truth / Adversarial trade-off: regression 0 + preservation 全維持 + structural fix not patch)。
+**開発順序の見直し (2026-05-09 user 確定)**: 旧案 β (= I-225 → I-162 → I-205 T14-T16 → I-D) を **案 γ (= I-D first → I-225 → I-162 → I-205 T14-T16)** に再設計。Rationale = framework quality first principle (= "PRD作成 / ワークフロー品質 を上げる対応から着手")、4 度連続 v12-2 pattern empirical lock-in を踏まえ I-D framework 整備を I-225/I-162/I-205 T14-T16 の prerequisite に位置付け、後続 PRDs の spec stage iteration cost を構造的削減。
 
-**次着手**: I-224 **T8 (top-await synthesis logic)** → T9 (Axis C1 cells e2e green-ify + Hono bench Tier-transition compliance verify + `[CLOSE]` I-224 PRD 完了)。`backlog/I-224-top-level-fn-main-mechanism.md` Sub-commits 一覧 row #19 (T8-1) 着手前 markup 適用候補。
+**次着手**: PRD I-D = Framework rule integration cohesive batch (32 candidates / 14 rounds adversarial review 累積、`doc/handoff/design-decisions.md` framework lesson archive section + TODO `[I-D]` entry を primary reference)。
 
-**I-399 PRD 完了 summary** (詳細は § 直近の完了作業 table + git log の `[CLOSE] I-399 PRD 完了` commit):
-
-- T1 = per-test content-hash-derived bin design 実装 (`tests/e2e_test.rs` 新 API = `content_hash_bin_name` / `RunnerOutput` / `run_with_source` / `run_with_multi_file_sources` 等)
-- T2 = N/A re-classify
-- T3 = INV-T1/T2/T3 empirical verify (4 mode × 8 invocations 全 187/0/93 identical、INV-T3 post-fix mean 159.88s vs baseline 165.72s = -3.5%)
-- T4 = /check_job 4-layer review final pass (1st-round で Critical 1 + High 1 + Low 2 + Spec gap 2 + Review insight 2 発見 → T4-b で `tests/i399_isolation_test.rs` 5 named tests + `tests/i399_runner_mech.rs` shared module 新設で全 fix → T4-c/d で Spec gap → I-D batch v11-10/11、Review insight → I-400/401/402 TODO 起票 → T4-e 2nd-round で Layer 1-4 全 0 findings)
-- Layer 2 empirical post-fix mean **128.77s vs baseline 165.72s = -22%** (PRD T3 claim より良好)
-
-### Quality Gate (post I-224 T7-1 Iteration v12 revise、2026-05-08)
+### Quality Gate (post I-224 PRD close、2026-05-09)
 
 | 指標 | 値 |
 |------|-----|
-| cargo test (25 binaries) | lib **3546** / integration 122 / compile 3 / i224_invariants 7 / i224_helper 5 / i205_invariants 2 + 5 ignored / i205_helper 4 / e2e_test **188 active + 93 ignored** (+3 NEW = single-file ESM lock-in / multi-file ESM lock-in / top-await tsx empirical end-to-end) / **i399_isolation_test 2 active (T4-a/T4-b 毎 CI) + 3 ignored (T1/T2/T3 heavyweight #[ignore])** / 全 green。**total active 190** (= post-T7-1 baseline、+3 from pre-T7-1 = 187)。e2e_test post-fix mean ~111s baseline 維持、INV-T1/T2/T3 全 GREEN structural lock-in 維持 |
-| cargo clippy / fmt / file-line | 0 warnings / 0 diffs / 全 .rs file < 1000 行 (transformer/mod.rs 931 / main_synthesis/mod.rs 974 / expressions/mod.rs 935 / user_main.rs 389) |
-| audit-prd-rule10-compliance.py (= I-205 + I-224 active PRDs、default mode auto-detect via `## Rule 10 Application` section presence、I-224 T7 /check_problem 由来 2026-05-08 structural fix で legacy `PRD-*` prefix glob から content-based auto-detect に置換) / audit-no-pub-fn-init.sh (CI-integrated post T6a) / audit-no-init-call-site.sh | PASS / exit=0 (INV-4 + INV-7 + CI merge gate lock-in) |
-| Hono bench | clean **107** / errors **72** at SHA-pinned 027e3df (= I-399 で production code 0 LOC change、Preservation classification 維持) |
+| cargo test | lib **3546** / e2e_test **201 active + 80 ignored** / i224_invariants 7 / i224_helper 5 / i205_invariants 2 + 5 ignored / i205_helper 4 / i399_isolation_test 2 active + 3 ignored / 全 green |
+| cargo clippy / fmt / file-line src | 0 warnings / 0 diffs / 全 src/.rs file < 1000 行 (注: `tests/i224_invariants_test.rs` 1502 行 + `tests/e2e_test.rs` 3022 行 = project-wide policy 違反、scripts/check-file-lines.sh は src/ scope = auto detect なし、I-176 entry 拡張済 = 案 γ Phase 0 後 test layout split refactor として fix 予定) |
+| audit-prd-rule10 / audit-no-pub-fn-init / audit-no-init-call-site | PASS / exit=0 (INV-4 + INV-7 CI merge gate 維持) |
+| Hono bench | clean **107** / errors **72** at SHA-pinned 027e3df (Preservation classification 維持) |
 
 **bench 非決定性**: ±1 clean / ±2 errors の noise variance を [I-172] として記録 (test/bench infra defect、別 PRD)。
-
-### I-224 PRD: Implementation Stage 進捗 (T1〜T9 sub-commits 一覧)
-
-| Phase | Status | 完了日 |
-|-------|--------|--------|
-| T1: `__ts_` namespace + collision detection (INV-5 fill-in) | ✓ 完了 | 2026-05-07 |
-| T2: IR enums + helper (INV-3 partial / INV-6 fill-in) | ✓ 完了 | 2026-05-07 |
-| T3: fn main synthesis + rename + substitute + Axis B/E probes | ✓ 完了 | 2026-05-07 |
-| T4: transform_module refactor + `pub fn init` 廃止 (INV-4 fill-in) | ✓ 完了 | 2026-05-07 |
-| **T5-1**: Existing C0 cells e2e green-ify + I-205 cell-09 unblock + INV-1 fill-in | ✓ 完了 | 2026-05-08 |
-| **T5-2**: NEW C0 fixtures e2e green (cell-77 GREEN + cell-41 / cell-79 Tier 2 lock-in 確認) + B2 .await wrap fix (cells 11/23/75 unblock = Iteration v11 Spec への逆戻り) + INV-7 fill-in + 4-layer review | ✓ 完了 | 2026-05-08 |
-| **T6a**: I-154 namespace doc 3-category 拡張 (labels + value bindings + fn rename target) + `scripts/audit-no-pub-fn-init.sh` CI integration (PR merge gate) + 4-layer review (Layer 1 で pre-existing line-ref drift 2 件 broken-window fix) | ✓ 完了 | 2026-05-08 |
-| **T7 (Iteration v12 revise)**: tokio dep N/A note + e2e_test.rs harness 側 ESM mode write 拡張 (`reset_ts_exec_dir` で `package.json {"type":"module"}` symmetric write、3 NEW lock-in tests) + observe-tsc.sh `--esm` permanent retention verify + 4-layer review pass | ✓ 完了 | 2026-05-08 |
-| T8: Top-level await synthesis logic | **次着手** | — |
-| T9: Axis C1 cells e2e green + Hono bench verify + `[CLOSE]` PRD 完了 | 未着手 | — |
-
-各 T の詳細 task spec + completion criteria は [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) Sub-commits 一覧 table 参照。
-
-### I-224 PRD: Spec への逆戻り Iteration log (audit trail summary)
-
-| Iteration | 日付 | 概要 |
-|-----------|------|------|
-| v1〜v7 | 2026-05-01 | Spec stage 5 rounds adversarial review + convention compliance、52 件 actions 全 resolve、Spec stage true closure 達成 |
-| v8 | 2026-05-07 | T2 完了時、I-228 sub-entries 4 件 (recursive Await detection 等) Spec への逆戻り |
-| v9 | 2026-05-08 | T5-1 着手中、cell-12/24 silent-drop Tier 1 fix 用 `InitKind` 4→5 variant split (NonTriggerDef + NonTriggerData) |
-| v10 | 2026-05-08 | T5-1 完了後 `/check_job` 3 iteration + `/check_problem` 2 round の累積 structural fix 5 件 record |
-| **v11** | 2026-05-08 | T5-2 着手時、B2 + executable-mode `__ts_main()` substitute call **Tier 1 silent semantic loss** 発見 (cells 11/23/75) → `UserMainSubstitution` enum + `from_dispatch` constructor DRY 解消 + `UserMainKind` / `UserMainSubstitution` / `detect_user_main` の `user_main.rs` 同居 cohesion 向上 + `.claude/rules/file-size-resolution.md` 新設 (= 機械的末尾切り出し禁止) |
-| **v12** | 2026-05-08 | T7 chain 再開時 prerequisite 調査で **T7 spec wording vs 実体 infra work の乖離** 発見 → `spec-first-prd.md` 「Spec への逆戻り」procedure 発動。T7-1 = `tokio dep verify (既存 = N/A) + harness 側 ESM mode write 拡張` / T7-2 = `observe-tsc.sh permanent retention verify + 4-layer review` に revise (= cells 14-18/30/32-40 top-await fixture e2e green-ify 用 infra)。Framework 改善 v12-1 (Implementation stage 着手直前 prerequisite 調査 mandatory) + v12-2 (Spec wording vs 実体 infra work cross-check Layer 3 sub-rule) を I-D PRD 起票候補化 |
-
-詳細 audit trail 全文 = [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) `## Spec Review Iteration Log`。
 
 ---
 
 ## /start 再開時の手順
 
 ### Step 1: 状態確認
-1. **本 plan.md** を読む = 現在の状態 + 次着手 = **I-224 T7 chain 再開** (I-399 PRD close 完了)
-2. **I-224 PRD doc を読む** = [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) (= 再開 PRD、T7-T9 待機、I-399 完了で structural lock-in 確立)
-3. **I-399 完了 (= closed PRD)**: PRD doc は `backlog/` から削除済 (`backlog-management` skill 準拠)、詳細は git log で `[CLOSE] I-399 PRD 完了` commit を参照
-4. **TS-1 root cause investigation report** = [`report/I-399-root-cause-investigation.md`](report/I-399-root-cause-investigation.md) (= empirical investigation deliverable、historical reference)
-5. **TODO 確認** = [`TODO`](TODO) (関連 entries: I-172 / I-180 / I-395 / I-396 / I-397 / I-398 + **I-399 follow-up 3 件**: I-400 (E2E runner mechanism defensive design = multi-file hash key + ensure_bin_entry path verify) / I-401 (CI scheduled workflow for heavyweight invariants) / I-402 (project-wide test layout subdirectory pattern migration)、I-D batch v11-1〜v11-11 + v12-1/v12-2 framework gap candidates 計 25 件)
+1. **本 plan.md** を読む = 現在の状態 + 次着手 = **PRD I-D (Framework rule integration cohesive batch)** 着手 (案 γ Phase 0)
+2. **TODO `[I-D]` entry** を読む = 32 framework 改善 candidates 全列挙 (R-1 + R-5 + 改善 v2-1〜v13-7、14 rounds adversarial review 累積)
+3. **[`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section** を読む = 16 sub-sections の cross-PRD applicable design patterns + 4 度連続 v12-2 pattern recurrence chain evidence + 9 candidates I-224-derived chain detailed table = I-D PRD 起票時の **primary lesson source**
+4. **closed PRDs**: I-224 / I-399 / I-180 は `backlog/` から削除済、git log audit trail + design-decisions.md framework lesson archive から access
 
-### Step 2: I-224 T7 chain 再開 (次着手)
+### Step 2: PRD I-D 着手 (次着手)
 
-**Pre-requisite verify** (= I-399 完了で達成済):
-- I-399 PRD close (= `tests/i399_isolation_test.rs` で INV-T1/T2/T3 structural lock-in 化)
-- e2e empirical verification 信頼性 (= 全 PRD review iteration の偽陽性/偽陰性 source 構造的排除済)
+**Pre-requisite verify** (= I-224 完了で達成済):
+- I-224 PRD close (= INV-1〜INV-7 全 GREEN structural lock-in、e2e empirical verification 信頼性 base 確立 by I-399)
 - Quality gate: cargo test 全 pass / cargo clippy 0 warnings / cargo fmt 0 diffs / 全 audit PASS
+- 32 framework candidates が 14 rounds adversarial review を経て累積、design-decisions.md に primary lesson source embed 済
 
-**Work** (= I-224 PRD doc Sub-commits 一覧 row #17 から):
-1. **T7-1 (tokio runtime dependency 確認)**: `tests/e2e/rust-runner/Cargo.toml` 内 tokio 既存 (= `features = ["full"]` で含まれる)、T7-1 work は empirical verify のみ (= 冗長の可能性、実装不要なら N/A re-classify)
-2. **T7-2 (`tests/e2e_test.rs` runner template ESM-mode 拡張)**: `--esm` mode の TS fixture 実行 path 追加
-3. **T7-3 (`scripts/observe-tsc.sh --esm` permanent CI flow)**: TS fixture observation を `.mjs` / `--esm` flag で永続 CI integrate
-4. **T8 (top-await synthesis logic)**: INV-3 sync/async dispatch trigger 拡張、`fn main` synthesis に top-await detection logic 追加
-5. **T9 (Axis C1 cells e2e green-ify + Hono bench Tier-transition compliance verify + `[CLOSE]` I-224 PRD 完了)**: Axis C1 fixtures 全 GREEN + 「直近の完了作業」更新 + I-224 PRD close
+**Work**: TODO `[I-D]` entry + design-decisions.md framework lesson archive を参照、Discovery → spec stage matrix (`prd-template` skill 適用) → cohesive batch boundary 確定 (= 32 candidates の sub-domain split or 単一 PRD の判断、spec stage で確定) → Implementation stage TDD。
 
 **Completion criteria**:
-- I-224 T7-T9 全完了 + Hono bench Tier-transition compliance (= broken-fix PRD wording、`prd-completion.md` 参照)
-- 次 chain (= I-225 / I-162 / I-205 T14-T16) の prerequisite path clean
+- 32 candidates の rule target / resolution direction を spec で確定 (Spec stage)
+- framework rule files (`spec-stage-adversarial-checklist.md` / `check-job-review-layers.md` / `spec-first-prd.md` / `prd-completion.md` 等) + audit scripts (`audit-prd-rule10-compliance.py` 等) の改修実装 (Implementation stage)
+- self-applied integration: 本 PRD I-D 自身が新 framework rules で structural compliance verify (= v12-2 pattern 5 度連続再発防止 empirical lock-in)
+- 後続 PRDs (I-225 / I-162 / I-205 T14-T16) prerequisite path clean
 
 ---
 
-## 実行順序 (prerequisite chain、案 β = Universal infra leverage first + L1 mid-priority)
+## 実行順序 (prerequisite chain、案 γ = Framework quality first + Universal infra leverage)
 
-**案 β 採用根拠** (2026-05-01 user 承認、星取表 20/24 で 4 案中最良判定): Leverage 最大化 (B2/B3 を最先で fix → 全 future PRD の e2e verification + class field 変換が構造的に正しくなる)、Methodology infra 早期 codify (I-D を I-205 close 直後に整備 → 後続 PRD spec stage が第 1 反復で完成可能)、L1 Tier 0 (I-177) 中盤投入 (I-D 完了直後 = framework v2.x 安定後で I-177 spec stage の re-iteration risk 圧縮)。
+**案 γ 採用根拠 (2026-05-09 user 確定)**:
+- Framework quality first (= PRD作成 / ワークフローそのものの品質を上げる対応から着手) = 全 future PRDs に leverage
+- 4 度連続 v12-2 pattern empirical lock-in (= I-224 chain で確認) → I-D 未対処なら I-225 spec stage で 5 度連続再発の risk
+- I-D 完了で audit scripts CI integration + framework rule strengthening = 後続 PRDs spec stage iteration cost 構造的削減 (= initial iteration で完成可能化)
+- 旧案 β (I-225 → I-162 → I-205 T14-T16 → I-D) は scope-based ordering、framework leverage を後回しにする structural compromise
 
 ```
 [完了] PRD 1〜2.7 (I-177-D / I-177-E / I-177-B / I-177-F / I-198+199+200 batch) — 2026-04-26〜27
    ↓
-[完了] PRD 2.75 = I-205 (Class member access dispatch with getter/setter framework、T1-T13 完了) — 2026-05-01
-   T14-T16 は案 β Phase 1-A 完了後に再開 (= I-224 / I-225 / I-162 universal infra prerequisite block)
+[完了] PRD 2.75 = I-205 (T1-T13 完了) — 2026-05-01
+   T14-T16 は案 γ Phase 1 完了後に再開 (= I-225 / I-162 universal infra prerequisite block)
    ↓
-═════ 案 β Phase 1-A: I-205 T14 prerequisite (3 PRD 逐次起票 + I-399 prerequisite block) ═════
+[完了] PRD α-0 = **I-399 (E2E test isolation defect)** — 2026-05-08 (= e2e empirical verification 信頼性 base 構造的 lock-in)
    ↓
-[完了] PRD α-0-prerequisite = **I-399 (E2E test isolation defect)** — 2026-05-08 Implementation T1〜T4 全完了、universal infra prerequisite for I-224 T9 確立 (= INV-T1/T2/T3 が `tests/i399_isolation_test.rs` 経由 structural lock-in)
+[完了] PRD α-1 = **I-224 (B2 fn main mechanism)** — 2026-05-09 (= top-level fn main mechanism + Option β cohesive batch、INV-1〜INV-7 structural lock-in)
    ↓
-[次] PRD α-1 = I-224 (B2 fn main mechanism) — T6a 完了 2026-05-08 (commit 80d9df1)、I-399 完了で T7 chain 再開可能
+═════ 案 γ Phase 0: Framework quality integration (NEW、2026-05-09 順序入れ替え = 旧案 β I-D を Phase 1-C → Phase 0 へ前倒し) ═════
+   ↓
+[次] **PRD I-D = Framework rule integration cohesive batch** (= 32 candidates / 14 rounds adversarial review 累積、4 度連続 v12-2 pattern 構造的解消)。**起票時 primary reference** = TODO `[I-D]` entry + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section
+   ↓
+═════ 案 γ Phase 1: I-205 T14 prerequisite chain (旧案 β Phase 1-A、framework quality 後着手) ═════
    ↓
 [次] PRD α-2 = I-225 (B3 class field literal-only initializer type inference)
    ↓
 [次] PRD α-3 = I-162 (constructor synthesis `Self::new()` for no-explicit-constructor classes)
    ↓
-═════ 案 β Phase 1-B: I-205 close (T14 → T15 → T16) ═════
+═════ 案 γ Phase 2: I-205 close (旧案 β Phase 1-B) ═════
    ↓
 [次] I-205 T14: E2E fixtures green-ify (B2/B3/I-162 verified end-to-end、34 cells)
    ↓
-[次] I-205 T15: /check_job 4-layer review + 13-rule self-applied verify
+[次] I-205 T15: /check_job 4-layer review + 12-rule self-applied verify (= I-D で強化された framework 適用)
    ↓
 [次] I-205 T16: Task-ID-based naming → semantic naming refactor + I-205 範囲内 unwrap() cleanup
    ↓
-═════ 案 β Phase 1-C: Methodology infra codify ═════
-   ↓
-[次] 新 PRD I-D: Framework rule integration cohesive batch (D-1〜D-4 + B2/B3/I-162 lessons + I-224 v3〜v12 framework gap candidates + I-399 Spec stage 2nd/3rd-round candidates + I-399 Implementation T4 /check_job candidates、計 25 件 = R-1 + R-5 + 改善 v2-1 + v3-4/5/6 + v4-1/2/3 + v5-1/2 + v6-1/2 + v11-1/3/4/5/6/7/8/9/10/11 + v12-1/v12-2、11 rounds adversarial review 累積)
-   ↓
-═════ 案 β Phase 2: L1 Tier 0 priority ═════
+═════ 案 γ Phase 3: L1 Tier 0 priority (旧案 β Phase 2) ═════
    ↓
 [次] PRD 3 = I-177 mutation propagation 本体 (Tier 0 silent semantic change、L1)
    ↓
-═════ 案 β Phase 3: Class dispatch group → L1 silent decorator ═════
+═════ 案 γ Phase 4: Class dispatch group → L1 silent decorator (旧案 β Phase 3) ═════
    ↓
 [次] PRD 2.76 = I-A (Method static-ness IR field propagation、元 I-205 T11-b)
    ↓
@@ -147,7 +109,7 @@
    ↓
 [次] PRD 7 = I-201-B (Decorator framework 完全変換、TC39 Stage 3、L1 silent semantic change)
    ↓
-═════ 案 β Phase 4: Narrow refinements (post-L1 cleanup) ═════
+═════ 案 γ Phase 5: Narrow refinements (旧案 β Phase 4、post-L1 cleanup) ═════
    ↓
 [次] PRD 4 = I-177-A (else_block_pattern Let-wrap + I-194 typeof if-block elision 拡張可)
    ↓
@@ -162,19 +124,18 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 ---
 
-## 次の作業 table (priority order)
+## 次の作業 table (priority order、案 γ 反映)
 
 | 優先度 | レベル | PRD | architectural concern (= 1 PRD = 1 concern) |
 |--------|-------|-----|---------------------------------------------|
-| **次着手** | L3 | **I-224 (B2 fn main mechanism)** T7〜T9 | top-level executable script の Rust emission で `fn main()` 自動生成 + Option β (top-await Tier 1 + ESM harness) cohesive batch |
-| 次優先 2 | L3 | **I-225 (B3)** | Class field の literal-only initializer (annotation 無) で type inference 完成 |
-| 次優先 2 | L3 | **I-162** | Constructor synthesis `Self::new()` for no-explicit-constructor classes |
-| 次優先 3 | L2 | **I-205 T14〜T16** | Class member access dispatch with getter/setter framework 完了 (e2e green-ify + naming refactor) |
-| 次優先 4 (post-I-205 close) | L4 | **I-D Framework rule integration cohesive batch** | task-ID 命名禁止 + Iteration v18 改善 4 件 + T7/T8 framework gap + T5 lessons + Iteration v9/v10/v11 lessons + B2/B3/I-162 lessons + T6a 2nd-round adversarial lessons (3 candidates v11-5/6/7) + I-399 Spec stage 2nd-round candidate (v11-8) + I-399 v3 transition candidate (v11-9) + **I-399 T4 /check_job candidates (v11-10 = Rule 8 (c) per-flow prototype probe coverage / v11-11 = Rule 10 default check axis に test infra-specific cargo profile + rustc variance enumerate)** + **I-224 Iteration v12 candidates (v12-1 = Implementation stage 着手直前 prerequisite 調査 mandatory / v12-2 = Spec wording vs 実体 infra work cross-check Layer 3 sub-rule)** (cohesive batch、計 25 candidates) |
-| L1 Tier 0 | L1 | **PRD 3 (I-177 mutation propagation)** | F1/F3 narrow body 内 mutation の outer Option<T> propagation (silent semantic change 解消) |
-| Class group | L3 | **PRD 2.76 (I-A) + 2.77 (I-B) + 2.8 (I-201-A) + 2.9 (I-202)** | Method static-ness IR field / Class TypeName context detection / AutoAccessor / Object literal getter/setter |
-| L1 silent | L1 | **PRD 7 (I-201-B)** | Decorator framework 完全変換 (TC39 Stage 3) |
-| Narrow refinements | L3 | **PRD 4-6 (I-177-A / I-177-C / I-048)** | typeof Let-wrap / symmetric XOR / closure ownership 推論 |
+| **次着手 (案 γ Phase 0)** | L4 (framework quality) | **PRD I-D Framework rule integration cohesive batch** | 32 framework 改善 candidates の cohesive integration (= R-1 + R-5 + 改善 v2-1〜v13-7、14 rounds adversarial review 累積)。**Canonical source**: TODO `[I-D]` entry (32 件全列挙) + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 9 candidates I-224-derived chain detailed table + 12 度 v12-2 pattern recurrence chain evidence)。Cohesive batch boundary (= 単一 PRD or sub-domain split) は spec stage で確定 |
+| 次優先 (案 γ Phase 1) | L3 | **I-225 (B3)** | Class field の literal-only initializer (annotation 無) で type inference 完成 |
+| 次優先 (案 γ Phase 1) | L3 | **I-162** | Constructor synthesis `Self::new()` for no-explicit-constructor classes |
+| 次優先 (案 γ Phase 2) | L2 | **I-205 T14〜T16** | Class member access dispatch with getter/setter framework 完了 (e2e green-ify + naming refactor) |
+| L1 Tier 0 (案 γ Phase 3) | L1 | **PRD 3 (I-177 mutation propagation)** | F1/F3 narrow body 内 mutation の outer Option<T> propagation (silent semantic change 解消) |
+| Class group (案 γ Phase 4) | L3 | **PRD 2.76 (I-A) + 2.77 (I-B) + 2.8 (I-201-A) + 2.9 (I-202)** | Method static-ness IR field / Class TypeName context detection / AutoAccessor / Object literal getter/setter |
+| L1 silent (案 γ Phase 4) | L1 | **PRD 7 (I-201-B)** | Decorator framework 完全変換 (TC39 Stage 3) |
+| Narrow refinements (案 γ Phase 5) | L3 | **PRD 4-6 (I-177-A / I-177-C / I-048)** | typeof Let-wrap / symmetric XOR / closure ownership 推論 |
 | Phase A continuations | L3 | **I-162 → Step 5 → I-015 → I-158+I-159 → Step 6 → I-143 / Step 7 / Phase B** | compile_test skip 解消 chain |
 
 詳細 architectural concern + 着手順 rationale + completion criteria は各 PRD の TODO entry / backlog/ doc 参照。
@@ -184,9 +145,9 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 - **I-395** = Class expression conversion (anonymous class lifting、I-201-A / I-201-B 系 cohesive batch 候補)
 - **I-396** = Module-level destructuring pattern proper conversion (I-016 silent drop family、5-axis matrix-driven PRD 候補)
 - **I-397** = e2e harness `should_auto_append_main_call` detection edge cases (low priority infra)
-- **I-400** = E2E runner mechanism defensive design improvements (= I-399 T4 /check_job Review insight 由来、(a) `run_with_multi_file_sources` の hash 入力に modules content も含める structural collision-resistance 強化 + (b) `ensure_bin_entry` の idempotent check に path 一致 verify を追加、empirical 非問題だが structural defensive design として ideal、low priority infra)
-- **I-401** = I-399 heavyweight invariants の CI scheduled workflow 配置 (= I-399 T4 /check_job 2nd-round Review insight 由来、`tests/i399_isolation_test.rs` の `#[ignore]` gated heavyweight tests を週次 cron で `--ignored` opt-in 自動実行、INV-T1/T2/T3 の periodic CI monitoring 確立、I-400 と batch 化候補)
-- **I-402** = `tests/` 共有 module の subdirectory pattern migration (= project-wide test layout refactor、I-399 T4 /check_job 2nd-round Review insight 由来、`tests/test_helpers.rs` + `tests/i399_runner_mech.rs` を `tests/common/<name>/mod.rs` に migrate して cargo auto-discover empty test binary 回避、I-176 と batch 化候補)
+- **I-400** = E2E runner mechanism defensive design improvements (I-399 T4 由来、test infra cluster sister)
+- **I-401** = I-399 heavyweight invariants の CI scheduled workflow 配置 (週次 cron `--ignored` opt-in 自動実行、I-400 と batch 化候補)
+- **I-402** = `tests/` 共有 module の subdirectory pattern migration (= project-wide test layout refactor、I-176 と batch 化候補)
 
 ---
 
@@ -196,39 +157,31 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | PRD / Phase | 日付 | 後続への影響 |
 |-------------|------|-------------|
-| **audit-prd-rule10-compliance.py default mode structural fix (= I-224 T7 /check_problem Issue #1 由来 2026-05-08)** (CI invocation `python3 scripts/audit-prd-rule10-compliance.py` (引数なし) の default mode が `PRD-*.md` prefix glob のみで I-* prefix の post-PRD-2.7 framework 適用 PRD (I-205 + I-224) を **false-skip** していた pre-existing CI defect を発見 → root cause = file name prefix-based filter が PRD 命名 convention 実体と mismatch / 設計意図 = "新 framework 適用 PRD のみ audit" を file name で表現 / fix = `## Rule 10 Application` section presence による content-based auto-detect 化 (= post-PRD-2.7 framework Rule 12 (e-5) `## Rule 10 Application` heading mandatory spec を structural marker として活用) → `is_matrix_driven_prd(path: Path) -> bool` helper + default mode の glob を `*.md` filter is_matrix_driven_prd に置換、empirical verify: I-205 + I-224 auto-detected ✓ + I-050 (legacy partial-framework umbrella) 自動 skip ✓ + explicit args path retain ✓ + clippy / fmt / lib test 全 pass ✓) | 2026-05-08 | CI merge gate が真に I-205 + I-224 を audit するようになり plan.md claim と実体が一致、命名 convention に依存しない future-proof な audit 対象選定 (= 新 PRD 追加時 CI yml 修正不要)、I-D PRD batch / 別 CI infra PRD 起票候補化 不要 (= 本 session 内 structural fix 完成) |
-| **I-224 T7 完了 (Iteration v12 revise: Spec への逆戻り + harness 側 ESM mode write 実装 + 2-round /check_job)** (`/start` skill prerequisite 調査で **T7 spec wording vs 実体 infra work の乖離** 発見 → `spec-first-prd.md` 「Spec への逆戻り」procedure 発動 → PRD doc Iteration v12 entry 追加 + T7-1/T7-2 spec revise + Sub-commits 一覧 row 17/18 update + plan.md Iteration log + Quality Gate update / **T7-1 実装** = `ESM_PACKAGE_JSON` constant 新設 + `reset_ts_exec_dir` で `package.json {"type":"module"}` unconditional write (= single-file + multi-file 両 path symmetric cover via DRY single source of truth) + 3 NEW lock-in tests (single-file ESM lock-in / multi-file ESM lock-in / top-await tsx empirical end-to-end with `Promise::resolve(42).await` + tsx assert "got 42") / **T7-2 verify** = observe-tsc.sh `--esm` + `--no-auto-main` flag retention 6 references confirmed (line 30/31/44/51/59/167/176)、CI invoke は **N/A** (= spec stage developer tool 性質上 CI runtime path 不参与) / `/check_job` 4-layer review **2 round** pass: 1st-round で **L1-1** (PRD Test Plan section に T7 ESM tests 未 enumerate、Implementation gap、Medium) + **L4-1** (tests/e2e_test.rs file size 3008 行 broken-window、Review insight、Low) 発見 → 即 fix / 2nd-round (deep adversarial) で **L1-2** (PRD doc Iteration v12 で "187 active tests" 数値誤り = e2e_test scope baseline 185 と cross-binary "total active 187" を conflate、Implementation gap、Medium) + **L1-3** (PRD doc T7-1 Completion criteria の "全 270 tests" math error = 187+93=280 + 正しくは 188+93=281、Implementation gap、Low) + **L4-2** (TODO I-180 empirical state update = `cell-b-bang-await.ts` を bare tsx + ESM/non-ESM 両 mode で empirical 確認 → 両 mode 2 lines 出力 = 期待値 byte-exact match、4-line duplication 再現せず、I-224 T5-1 `should_auto_append_main_call` 副作用で I-180 likely resolved、Review insight、Low) 発見 → 即 fix / **計 5 findings 全 fix-in-review** で最終的に Layer 1-4 全 0 findings achieved / Defect Classification 5-category = Implementation gap 3 件 (L1-1/L1-2/L1-3、全 in-review fix) + Review insight 2 件 (L4-1 → I-402 broken-window 追記 / L4-2 → TODO I-180 empirical state update + I-224 T5-1 likely-resolved note + fast-track #[ignore] 解除 verify candidate 化、全 in-review fix)) | 2026-05-08 | cells 14-18/30/32-40 等 top-await fixture 用 prerequisite infra 確立 (= T9 で e2e green-ify する基盤)、e2e_test 185 → 188 active GREEN +3 NEW、93 ignored unchanged、existing 105 .ts fixtures regression 0 (= ESM is strict superset of CJS for normal TS code、empirical verified including multi-file relative `import "./math"` via test_e2e_multi_import_basic_ts_rust_stdout_match GREEN)、tests/e2e_test.rs に 3 NEW tests structural lock-in、observe-tsc.sh `--esm` flag permanent retention verified、I-180 likely resolved finding (= I-224 T5-1 副作用) を TODO record、I-D batch v12-1/v12-2 candidate 追加 (計 25 件累積)、I-402 entry に tests/e2e_test.rs split 必要性 broken-window 追記、T8 chain (top-await synthesis logic) 着手 prerequisite path clean |
-| **I-399 完了 (E2E test isolation defect、universal infra prerequisite for I-224 T9)** (Implementation T1〜T4 全完了: T1 = `tests/e2e_test.rs` per-test content-hash-derived bin design 実装 / T2 N/A re-classify (= autobins=true holding role) / T3 = INV-T1/T2/T3 empirical verify 4 mode × 8 invocations 全 187/0/93 identical / **T4 = /check_job 4-layer review final pass + structural lock-in 完成 + PRD close** = T4-a 1st-round で Critical 1 件 (PRD-mandated `tests/i399_isolation_test.rs` 未実装 = "lock-in" wording 不充足) + High 1 件 (stub doc comment stale) + Low 2 件 + Spec gap 2 件 + Review insight 2 件 発見、T4-b で `tests/i399_isolation_test.rs` 5 named tests 新規実装 (= T1 INV-T1 #[ignore]、T2 INV-T2 #[ignore]、T3 INV-T3 #[ignore]、T4-a content_hash_bin_name_invariants 毎 CI、T4-b per_test_content_hash_isolation 毎 CI for cargo per-bin fingerprint architectural assumption verify) + `tests/i399_runner_mech.rs` shared module 新設 (= e2e_test と i399_isolation_test 双方が `content_hash_bin_name` 参照、DRY) + stub doc comment 整合化、T4-c で I-D batch v11-10/v11-11 candidate 追加 (= self-applied integration)、T4-d で I-400 別 PRD 起票 (= multi-file hash key に modules 含める defensive design + ensure_bin_entry path verify defensive design)、T4-e 2nd-round /check_job で Layer 1-4 全 0 findings re-verify、Completion Criteria 全 9 項目 ✓、Layer 2 empirical post-fix mean **128.77s vs baseline 165.72s = -22%** = PRD T3 claim より良好) | 2026-05-08 | 全 PRD review iteration の e2e empirical verification 信頼性 base が **structural lock-in** 化 = 偽陽性/偽陰性 source 構造的排除、I-224 T9 並列 e2e green-ify の prerequisite block 解消、I-D batch v11-10/v11-11 candidate 追加 (計 23 件累積)、I-400 別 PRD として E2E runner mechanism defensive design improvements を deferred |
-| **I-224 T6a 完了 + adversarial 2nd-round /check_job 反映** (I-154 namespace handoff doc 3-category 拡張 = 1-a labels (4 entries) + 1-b value bindings (`__ts_old`/`__ts_new`/`__ts_recv`、I-205 setter dispatch desugar) + 1-c function rename target (`__ts_main`、I-224 T1、INV-5) + canonical 単一 source of truth pointer (`src/transformer/statements/mod.rs:27-47`) で固定 list duplication 回避 + 1-d lint enforcement 2 axis (label-side 4 sites + module-level identifier-side `scan_for_ts_namespace_collisions`) + 1-e reservation rationale + 1-f CI invariant lock-in section / `scripts/audit-no-pub-fn-init.sh` を `.github/workflows/ci.yml` に CI step "Audit no `pub fn init` (I-224 INV-4 lock-in)" として integrate (PR merge gate、enforced paths = `src/` + `tools/` + `tests/e2e/rust-runner/`、advisory paths = `tests/e2e/scripts/**/*.rs` gitignored working-tree-only artefacts) / `/check_job` 4-layer review **2 round** pass: 1st round で line-ref drift 2 件 (`__ts_main` :130→:133、`__ts_do_while_loop` :346→:356) + `__ts_switch` row line ref 追加 / 2nd round adversarial で 4 件追加 fix = Iteration v11 ambiguity 排除 (1-b header から I-224 v11 と I-205 task ID conflate を解消) + "T8 INV-3" → "I-205 INV-3 source-side single-evaluation contract" 不曖昧化 + 1-f false claim 訂正 (= advisory paths は gitignored working-tree-only、I-224 T5 incomplete latent state ではない) + audit script advisory comment 整合 update (handoff doc と double-source) / Layer 2 empirical (lib 3546 PASS = T5-2 完全一致 / i224_invariants 7 PASS = INV-1〜INV-7 lock-in 維持 / audit-no-pub-fn-init exit=0 / CI yml 15 steps well-formed) / Layer 3 cross-axis (3 reservation categories × 2 lint axes × CI gate axis 全 enumerated、Spec gap 0、emission sites 8 sites all covered) / Layer 4 trade-off (pure addition + broken-window discipline、regression cell 0、structural fix not patch、interim 条件不問) / Defect classification = Implementation gap 6 件 (2 1st-round line-ref + 4 2nd-round factual accuracy) all fixed-in-commit + Review insight 2 件 = (a) **e2e test isolation defect** (= cargo test --test e2e_test で parallel 9 fail / serial 8 fail (異なる cell set)、stale binary leak 由来の test order 依存 = I-180 entry が "I-173 (E2E parallel flakiness)" として 関連 PRD 言及するが I-173 自体未起票、新 TODO I-399 候補、T6a 因果無関係 = code 0 行変更で baseline と一致 = I-172 (bench non-determinism、別 axis) とは別 defect) + (b) doc line-ref drift detection automation (= handoff doc grep `<file>:<line>` を verify する CI step 候補、I-D framework batch 候補) | 2026-05-08 | 全 future PRD で `__ts_*` namespace 拡張時の structural enforcement (canonical doc-first dependency)、INV-4 invariant CI merge gate lock-in (post-T4 0 hits、再混入を merge 段階で block)、advisory paths の gitignored 性質を構造的に文書化 (CI fresh clone = 0 advisory)、handoff doc cohesion 向上 (3 category symmetric coverage、token-level accuracy)、broken-window discipline (line-ref drift fix + factual accuracy fix)、e2e test isolation defect finding を I-399 候補として triage、doc-cross-ref drift detection を I-D framework batch 候補化。詳細 = git log + design-decisions.md `## Switch emission と label hygiene > 1` |
-| **I-224 T5-2 + Iteration v11 (initial fix + deep review structural fix + 2nd review unit tests + /check_problem TODO 起票)** (`UserMainSubstitution` enum + `from_dispatch` constructor DRY 解消 / `UserMainKind` + `UserMainSubstitution` + `detect_user_main` の `user_main.rs` 同居 cohesion 向上 / cells 11/23/75 e2e green-ify (Tier 1 silent-loss fix) / **deep review structural fix** = double-await bug (cells 16/30/36 + nested `await main()` 用 `Transformer::suppress_main_await_wrap` flag + `convert_expr_in_await_context` helper による context-aware suppression、3 entry sites symmetric 適用) / INV-2 拡張 (B1 sync + B2 async + `await main();` patterns 4 sub-cases lock-in) / **2nd review unit tests** (`UserMainSubstitution::from_dispatch` 10-cell decision table + `is_active()` / `is_async()` predicates + cross-predicate invariant `is_async ⇒ is_active` の 4 direct unit tests) / INV-7 invariants test fill-in (subprocess audit + independent grep verifier) / `scripts/audit-no-init-call-site.sh` 新設 / `.claude/rules/file-size-resolution.md` 新設 (= 機械的末尾切り出し禁止 procedure) / PRD doc Iteration v11 entry (改善 candidates v11-1〜v11-4) / TODO `[I-398]` 起票 (out-of-matrix hypothetical scenarios)) | 2026-05-08 | cells 11/23/75 e2e green、cell-77 既存 GREEN 維持、cell-41 + cell-79 Tier 2 lock-in、cells 16/30/36 transpile 単一 `.await` 出力 (e2e は T7-T8 scope)、INV-7 lock-in (post-T4 0 hits)、Hono bench 107/72 (Preservation 0/0 vs T4)、framework 改善 4 件 (file-size-resolution.md NEW + I-D batch v11-1/v11-3/v11-4 candidates 追加)、TODO I-398 起票 = 全 Layer 1〜4 0 findings + /check_problem 0 unresolved。詳細 = PRD doc Iteration v11 |
-| **I-224 T5-1 + /check_job (3 iter) + /check_problem (2 round) cumulative structural fixes** (NonTrigger split / convert_expr passthroughs / per-declarator routing / classify_decl_var_path 削除 / TsAs/TsSatisfies/TsTypeAssertion expected_type propagation / destructuring Tier 2 honest reject / `prd-completion.md` Tier-transition wording 拡張 / TODO I-395-397 起票 / PRD Iteration v10 entry) | 2026-05-08 | i-224 e2e harness 40 fixtures wiring (14 GREEN + 27 ignored)、I-205 cell-09 unblock、INV-1 fill-in、cell-12/24 silent-drop Tier 1 fix、Hono bench 107/72 (Tier-transition Improvement compliance)。詳細 = PRD doc Iteration v9/v10 |
-| **I-224 T1〜T4** (`__ts_main` collision validator / IR enums + helper / fn main synthesis + rename + substitute + Axis B/E probes / transform_module refactor + pub fn init 廃止 + namespace_lint extraction) | 2026-05-06〜07 | INV-2/3/4/5/6 invariants test fill-in、Spec への逆戻り Iteration v8 (T2 完了時 I-228 sub-entries 4 件)、Hono Tier-transition Preservation。詳細 = PRD doc Iteration v8 + git log |
-| **I-205 T13** (B6/B7 corner cells Tier 2 reclassify lock-in + INV-5 Option B audit + 5 NEW integration tests) | 2026-05-01 | INV-5 visibility consistency (Option B、production 0 LOC change)、cargo lib 3358 |
-| **I-205 T12** (Class Method Getter body C1 `.clone()` 自動挿入、Iteration v18 + v19) | 2026-05-01 | Decision Table C 完全 cover、cell 78 NA reclassify、cell 74 fixture rename、T16 + 別 PRD I-D 切り出し |
-| **I-205 T10** (Internal `this.x` dispatch、E2 context、Iteration v16 + v17 deep-deep review) | 2026-05-01 | INV-2 (External/Internal dispatch path symmetry) 構造的達成、`body_requires_mut_self_borrow` recursive walker、TODO I-219〜I-223 起票 |
-| **I-205 T9** (Logical compound `??=` `&&=` `\|\|=` Member target setter dispatch、Iteration v14 + v15) | 2026-04-30 | `ReceiverCalls` enum refactor、TODO I-219〜I-221 起票 |
-| **I-205 T8** (Compound assign Member target setter dispatch + INV-3 1-evaluate compliance + DRY refactor + member_dispatch.rs 6-file split、Iteration v12) | 2026-04-29 | TODO I-217 / I-218 起票 |
+| **[CLOSE] I-224 PRD 完了 (B2 fn main mechanism + Option β cohesive batch + Iteration v13 + post-close 2 round /check_job adversarial review)** | 2026-05-09 | top-level executable script の Rust emission `fn main()` 自動生成 mechanism 完成 (INV-1〜INV-7 structural lock-in)、Option β cohesive batch (top-await Tier 1 + ESM harness + collision detection) 完成、12 C1 cells e2e GREEN-ify + I-180 close 達成、Hono bench Preservation 107/72 維持 (production code 0 LOC change)。**4 度連続 v12-2 pattern empirical lock-in** = framework v12-1/v12-2 + v13-1〜v13-7 = **9 candidates** を I-D PRD batch 起票候補化 (計 **32 件 / 14 rounds adversarial review** 累積)。**詳細** = git log `[CLOSE] I-224 PRD 完了` commit + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 16 sub-sections embed: Option β cohesive batch decision pattern + Axis E orthogonality merge + 25 NA cells unified mutual exclusion + 3-tuple dispatch tree + INV 4-item invariant pattern + 6-category test layout + R-2/R-4 audit methodology + 23 sub-commits decomposition + 9 framework 改善 candidates table + 12 度 v12-2 pattern recurrence chain evidence + Implementation-level structural fixes (Iteration v8〜v11) + structural lock-in artifact 一覧) |
+| **audit-prd-rule10-compliance.py default mode structural fix (= I-224 T7 /check_problem 由来)** | 2026-05-08 | CI merge gate が真に I-205 + I-224 を audit 化 (`## Rule 10 Application` section presence による content-based auto-detect、命名 convention に依存しない future-proof な audit 対象選定)。詳細 = git log |
+| **[CLOSE] I-399 PRD 完了 (E2E test isolation defect、universal infra prerequisite for I-224 T9)** | 2026-05-08 | 全 PRD review iteration の e2e empirical verification 信頼性 base が **structural lock-in** 化 = 偽陽性/偽陰性 source 構造的排除 (per-test content-hash-derived bin design、INV-T1/T2/T3 が `tests/i399_isolation_test.rs` lock-in)。Layer 2 empirical post-fix mean **128.77s vs baseline 165.72s = -22%**。詳細 = git log `[CLOSE] I-399 PRD 完了` commit |
+| **I-205 T13** (B6/B7 corner cells Tier 2 reclassify lock-in + INV-5 Option B audit + 5 NEW integration tests) | 2026-05-01 | INV-5 visibility consistency (Option B、production 0 LOC change) |
+| **I-205 T8〜T12** (Compound assign Member target setter dispatch + Logical compound + Internal `this.x` dispatch + Class Method Getter body C1 `.clone()` 自動挿入) | 2026-04-29〜05-01 | Decision Table A/B/C 完全 cover、INV-2/3/5 等 lock-in、TODO I-217〜I-223 起票 |
 | **環境整備** (4 file 構造的分割 + DRY refactor、行数超過解消) | 2026-04-29 | 4 → 27 file split、TODO I-393 / I-394 起票 |
-| **PRD 2.7 (I-198 + I-199 + I-200 batch)** framework Rule 改修 + TypeResolver coverage extension + ast-variants.md Prop section 追加 + audit scripts CI 化 | 2026-04-27 | framework Rule 3/4/10/11/12 拡張、Implementation Revision 1 (PropOrSpread Grammar gap) + Revision 2 (cell 15 Prop::Assign Spec gap) self-applied integration |
-| **I-184** (CI fresh-clone defect: stale gitignored template files post pool refactor) | 2026-04-27 | `.gitignore` asymmetric handling + Cargo.lock tracked、PRD `Background` に歴史的経緯記録の lesson |
+| **PRD 2.7 (I-198 + I-199 + I-200 batch)** framework Rule 改修 + TypeResolver coverage extension + ast-variants.md Prop section 追加 + audit scripts CI 化 | 2026-04-27 | framework Rule 3/4/10/11/12 拡張 |
+| **I-184** (CI fresh-clone defect: stale gitignored template files post pool refactor) | 2026-04-27 | `.gitignore` asymmetric handling + Cargo.lock tracked |
 | **I-177-E + I-177-B + I-177-F batch** (Plan η Step 1.5 + Step 2 + Step 2.5) | 2026-04-26 | `synthetic fork inheritance` fix + `FileTypeResolution` canonical primitive + arrow/fn-expr `visit_block_stmt` 統一 |
 | **I-177-D** (TypeResolver `narrowed_type` suppression scope refactor、案 C、Plan η Step 1) | 2026-04-26 | trigger-kind-based dispatch refactor、Plan η framework 初実戦投入 |
-| **I-178 + I-183 + Rule corpus optimization batch** | 2026-04-25 | matrix-driven PRD framework 整備 (10-rule checklist + 4-layer review + 5-category defect classification) |
+| **I-178 + I-183 + Rule corpus optimization batch** | 2026-04-25 | matrix-driven PRD framework 整備 (12-rule checklist + 4-layer review + 5-category defect classification) |
 | **I-161 + I-171 batch** (`&&=`/`\|\|=` desugar + Bang truthy emission) | 2026-04-22〜04-25 | I-177 umbrella 起票 (Tier 0 L1) |
 
 ---
 
 ## 次の PRD 着手前の参照ポイント
 
-- **I-224 (次 PRD = T7 chain 再開)**: PRD doc + Iteration v8/v9/v10/v11 entries (Spec への逆戻り audit trail、T6a 完了後の 2nd-round adversarial review は doc/CI structural fix のみで Spec 逆戻り不在 = Iteration log 追加なし)
-- **I-225 / I-162 (次 PRD)**: TODO 内 entry + 案 β chain
-- **I-205 T14-T16 (post case-β-1A)**: `backlog/I-205-getter-setter-dispatch-framework.md` の T11 削除 + 新 PRD I-A/I-B migration 注記
-- **PRD I-D (Framework rule integration cohesive batch)**: I-205 close 後 deferred、I-224 v3〜v12 framework gap candidates + I-399 Spec stage / Implementation candidates を集約 = **計 25 件** (含 T6a 2nd-round v11-5/6/7 + I-399 Spec v11-8/v11-9 + I-399 T4 /check_job v11-10/v11-11 + I-224 Iteration v12 v12-1/v12-2)
-- **I-399 (closed PRD)**: PRD doc は `backlog/` から削除済 (= `backlog-management` skill 準拠)、詳細 audit trail は git log で `[CLOSE] I-399 PRD 完了` commit を参照 (= Spec stage Iteration v1〜v3 + Implementation T1〜T4 + T4 /check_job 4-layer review final pass の history 全保持)。structural lock-in artifact = `tests/i399_isolation_test.rs` (5 named tests = T1/T2/T3 #[ignore] heavyweight + T4-a/T4-b 毎 CI lightweight) + `tests/i399_runner_mech.rs` (= `content_hash_bin_name` 共有モジュール) + `tests/e2e_test.rs::run_with_source` / `run_with_multi_file_sources` (= per-test content-hash-derived bin design)
-- **I-400 / I-401 / I-402 (新 PRD 起票候補)**: I-399 T4 /check_job Review insight 由来の follow-up improvements、test infra cluster sister として I-180 / I-172 / I-397 と batch 化候補
+- **PRD I-D (Framework rule integration cohesive batch、次着手 = 案 γ Phase 0)**: I-205/I-225/I-162 PRD chain prerequisite、32 candidates / 14 rounds adversarial review 累積。**Canonical source** = TODO `[I-D]` entry (32 件全列挙)。**Primary lesson source** = [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 16 sub-sections + 9 candidates I-224-derived chain detailed table + 12 度 v12-2 pattern recurrence chain evidence)。**Cohesive batch boundary** (= 単一 PRD or sub-domain split) は spec stage で確定
+- **I-225 / I-162 (案 γ Phase 1、I-D 完了後着手)**: TODO 内 entry + 案 γ chain
+- **I-205 T14-T16 (案 γ Phase 2、I-225/I-162 完了後着手)**: [`backlog/I-205-getter-setter-dispatch-framework.md`](backlog/I-205-getter-setter-dispatch-framework.md) の T11 削除 + 新 PRD I-A/I-B migration 注記
+- **I-224 / I-399 / I-180 (closed PRDs)**: PRD doc は `backlog/` から削除済、git log audit trail (`[CLOSE] I-224 PRD 完了` / `[CLOSE] I-399 PRD 完了` commit) + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) framework lesson archive section から access
+- **I-400 / I-401 / I-402 (新 PRD 起票候補)**: I-399 T4 /check_job Review insight 由来 follow-up improvements、test infra cluster sister として I-172 / I-397 と batch 化候補
 - **PRD 3 (I-177 本体)**: matrix-driven、案 A (mutation-ref) vs 案 B (writeback) を spec stage で empirical 確定
 - **Phase A Step 5/6/7**: 「開発ロードマップ」section + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)
-- **設計判断 archive**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) (削除禁止 — 過去判断は reference として保持、実装乖離時は最新化)
+- **設計判断 archive**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) (削除禁止 — 過去判断 + closed PRD lessons の primary reference、I-D PRD 等 framework integration PRD 起票時に **I-224 + I-399 lesson source** として参照必須)
 
 ---
 
@@ -275,11 +228,12 @@ Phase A 完了後、Hono ベンチマーク最大カテゴリ (全エラーの 4
 - **Implementation stage 完了 verification**: [`.claude/rules/check-job-review-layers.md`](.claude/rules/check-job-review-layers.md) (4-layer)
 - **設計整合性**: [`.claude/rules/design-integrity.md`](.claude/rules/design-integrity.md) + [`.claude/rules/prd-design-review.md`](.claude/rules/prd-design-review.md)
 - **完了基準**: [`.claude/rules/prd-completion.md`](.claude/rules/prd-completion.md) (Tier-transition compliance wording 含む)
-- **設計判断 archive**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)
+- **設計判断 archive**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) (削除禁止 — 過去判断 + closed PRD lessons の primary reference、I-D PRD 等 framework integration PRD 起票時に **I-224 + I-399 lesson source** として参照必須)
+- **closed PRD lesson archive (I-224)**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 16 sub-sections embed: Option β cohesive batch decision pattern + Axis E orthogonality merge + 25 NA cells unified mutual exclusion + 3-tuple dispatch tree + INV 4-item invariant pattern + 6-category test layout + R-2/R-4 audit methodology + 23 sub-commits decomposition + **9 framework 改善 candidates table** + **計 12 度 v12-2 pattern recurrence chain evidence** + Implementation-level structural fixes (v8〜v11) + structural lock-in artifact 一覧)。**PRD I-D 起票時 mandatory reference**
 - **PRD handoff**: `doc/handoff/*.md`
 - **Grammar reference**: `doc/grammar/{ast-variants,rust-type-variants,emission-contexts}.md`
 - **TODO 全体**: [`TODO`](TODO)
-- **進行中 PRD doc**: [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md)
+- **active PRD docs in `backlog/`**: [`backlog/I-205-getter-setter-dispatch-framework.md`](backlog/I-205-getter-setter-dispatch-framework.md) (= class member access dispatch with getter/setter framework、T14-T16 残、案 γ Phase 2 で再開) + [`backlog/I-050-any-coercion-umbrella.md`](backlog/I-050-any-coercion-umbrella.md) (= legacy partial-framework umbrella、deferred)
 - **ベンチマーク履歴**: `bench-history.jsonl`
 - **エラー分析**: `scripts/inspect-errors.py`
 - **実装調査 report**: `report/*.md`

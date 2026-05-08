@@ -6,10 +6,12 @@
 //      let n = compute_sync(); let v = compute_async().await; println!(...); __ts_main().await; }`
 //   (lit → top-level const preserved; side-effect init + Stmt::Expr captured into fn main body)
 // Empirical (TS, ESM mode): module-load order interleaves all
+// Iteration v13 fixture rewrite (2026-05-08): user-defined `getVal` instead of `Promise.resolve`.
 const LIT_VAL = 100;  // A2-like (lit init), library mode candidate
 function compute(): number { return 42; }
 const n = compute();  // A3 side-effect init
 async function main(): Promise<void> { console.log("from async main"); }
-const value = await Promise.resolve(50);  // A3 with await init (also covers C1)
+async function getVal(n: number): Promise<number> { return n; }
+const value = await getVal(50);  // A3 with await init (also covers C1)
 console.log("got", LIT_VAL, n, value);
 await main();

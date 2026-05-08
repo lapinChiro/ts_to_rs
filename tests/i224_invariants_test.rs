@@ -407,13 +407,15 @@ main();\n";
 /// - **Edge sub-case (Trigger 2 only with sync user main)**: cells 14/34/74 で `#[tokio::main] async fn main` + sync `__ts_main()` 非 await call wrapping
 /// - **Library mode no-fn-main cells (INV-3 scope 外)**: cells 1/7/21/27 = `fn main` 自体 emit しない
 ///
-/// **T2 partial fill-in (C0 cells only)**: verifies that for each in-scope C0
-/// cell, the predicate-derived `is_async_required` flag (= `user_main_kind ==
-/// FnAsync || has_top_level_await`) matches the expected value per INV-3 (c)
-/// sub-case lists (Trigger 1 only / Sync). Trigger 2 and Trigger 1+2 cells
-/// (= the C1 cells 12/14/16/18/32/34/36/38/72/74/76/78) require Implementation
-/// Stage T8's top-level await synthesis logic before they can be fully verified
-/// against IR emission, so they are deferred to T8 fill-in.
+/// **T8-3 full coverage (Iteration v13 fill-in、2026-05-08)**: T2 partial fill-in
+/// (C0 cells only = predicate-level boolean check) を **C1 cells 12 entries +
+/// Edge sub-case 3 entries explicit verification** に拡張、4 sub-case + Edge
+/// sub-case 全 assert で full coverage 達成。本 fill-in は T8-1 / T8-2 production
+/// code が T1-T5-2 累積実装で **既に完成済** (= Iteration v13 で N/A re-classify) を
+/// 前提に、C1 cells も同 `is_async_required` predicate + IR emission level
+/// (`#[tokio::main]` + `async fn main` 出力) verification を実施可能。Edge sub-case
+/// (cells 14/34/74) は sync user main + top-await cohabitation で `__ts_main();`
+/// 非 await call wrapping を IR token-level lock-in。
 ///
 /// **Library mode no-fn-main cells**: cells 1/7/21/27 do not emit a `fn main`
 /// at all (library mode + B0/B3) — INV-3 (a) "fn main の sync/async dispatch"
@@ -422,6 +424,10 @@ main();\n";
 /// `tests/i224_helper_test.rs::test_dispatch_arm_one_to_one_mapping_per_in_scope_cell`.
 #[test]
 fn test_invariant_3_sync_async_dispatch_consistency_4_subcases() {
+    use ts_to_rs::transpile;
+
+    // ========== C0 cells: predicate-level boolean check (T2 partial、retain) ==========
+    //
     // Each entry = (cell #, axis summary, TS source, expected is_async_required).
     //
     // is_async_required = (user_main_kind == FnAsync) || has_top_level_await.
@@ -542,6 +548,353 @@ fn test_invariant_3_sync_async_dispatch_consistency_4_subcases() {
              (user_main_kind={user_main_kind:?}, has_top_level_await={await_flag})"
         );
     }
+
+    // ========== C1 cells: predicate + IR-emission level verification (T8-3 fill-in) ==========
+    //
+    // Each entry = (cell #, axis summary, TS source, expected_substitute_form).
+    //
+    // expected_substitute_form classifies what the synthesized `#[tokio::main] async fn main`
+    // body should contain at the user-main substitute call site:
+    //   - "none"  : B0 (no user main)        — no __ts_main reference
+    //   - "sync"  : B1 (sync user main)      — `__ts_main();` (NO `.await` wrap = Edge sub-case)
+    //   - "async" : B2 (async user main)     — `__ts_main().await` (.await wrap, Trigger 1+2 combined)
+    //   - "non-fn": B3 (non-fn `main` symbol) — no __ts_main reference (no rename, namespace-disjoint)
+    //
+    // All C1 cells: is_async_required = true (Trigger 2 fires async dispatch).
+    // All C1 cells: transpile output must contain `#[tokio::main]` + `async fn main`.
+    //
+    // ---------- IMPORTANT: Cell numbering convention drift (pre-existing across codebase) ----------
+    //
+    // INV-3 entries below use the **PRD I-224 80-cell matrix #** (matrix # 12 / 14 / 16 / ... per
+    // the PRD Problem Space's Axis A × Axis B × Axis C Cartesian product). The e2e fixture
+    // filenames under `tests/e2e/scripts/i-224/` use **sequential filename numbering**
+    // (cell-09 / cell-10 / cell-11 / ... per chronological fixture creation order).
+    //
+    // **The two numbering schemes are INDEPENDENT — same numeric label can refer to different
+    // matrix cells across contexts.** Confirmed pre-existing convention drift in the codebase
+    // (= flagged at /check_job 3rd-party review L1-3 2026-05-09, formal framework rule
+    // strengthening deferred to I-D PRD batch as v13-5 NEW candidate per `TODO`).
+    //
+    // Cross-reference table (C1 in-scope cells, post-T9-1 batch GREEN-ify):
+    //
+    // | matrix # (INV-3 here) | axis | e2e fixture filename                                  |
+    // |-----------------------|------|--------------------------------------------------------|
+    // | 12                    | A1+B0+C1 | cell-14-top-await-no-main.ts                       |
+    // | 14                    | A1+B1+C1 | cell-15-top-await-sync-main.ts (Edge sub-case)     |
+    // | 16                    | A1+B2+C1 | cell-16-top-await-async-main.ts                    |
+    // | 18                    | A1+B3+C1 | cell-17-top-await-non-fn-main.ts                   |
+    // | 20                    | A1+B4+C1 | cell-18-top-await-ts-main-collision.ts (Tier 2 reject = #[ignore]) |
+    // | 32                    | A3+B0+C1 | cell-32-decl-var-await-init-no-main.ts             |
+    // | 34                    | A3+B1+C1 | cell-34-decl-var-await-init-sync-main.ts (Edge sub-case) |
+    // | 36                    | A3+B2+C1 | cell-36-decl-var-await-init-async-main.ts          |
+    // | 38                    | A3+B3+C1 | cell-38-decl-var-await-init-non-fn-main.ts         |
+    // | 40                    | A3+B4+C1 | cell-40-decl-var-await-init-ts-main-collision.ts (Tier 2 reject = #[ignore]) |
+    // | 72                    | A6+B0+C1 | cell-72-mixed-no-main-top-await.ts                 |
+    // | 74                    | A6+B1+C1 | cell-74-mixed-sync-main-top-await.ts (Edge sub-case) |
+    // | 76                    | A6+B2+C1 | cell-30-mixed-top-await-async-main.ts              |
+    // | 78                    | A6+B3+C1 | cell-78-mixed-non-fn-main-top-await.ts             |
+    // | 80                    | A6+B4+C1 | cell-80-mixed-ts-main-collision-top-await.ts (Tier 2 reject = #[ignore]) |
+    //
+    // Mnemonic: "matrix # is INV-3's source-of-truth"; e2e fixture filenames are purely
+    // sequential and may be aliased to any matrix cell. Cross-check via the e2e_test.rs
+    // `test_e2e_cell_i224_<fixture#>_*` test fn — the matrix # reference is preserved in:
+    //   - **IGNORED collision cells (e2e fixture cell-18 / cell-40 / cell-80)**: the
+    //     `#[ignore = "..."]` reason contains explicit `(matrix # N, A?+B4+C1): ...`.
+    //   - **UNIGNORED C1 cells (post-T9-1 GREEN, e2e fixture cell-14 / cell-15 / cell-16 /
+    //     cell-17 / cell-30 / cell-32 / cell-34 / cell-36 / cell-38 / cell-72 / cell-74 /
+    //     cell-78)**: the inline comment immediately above `run_cell_e2e_test(...)` contains
+    //     explicit `matrix # N` reference (the `#[ignore = "..."]` attribute was removed by
+    //     the T9-1 GREEN-ify batch, so the matrix # moved from ignore reason to inline doc).
+    //
+    // Either surface is valid as cross-check source; pick whichever is present per the
+    // cell's current ignore status (= IGNORED → ignore reason, UNIGNORED → inline comment).
+    // ---------- Fixture pattern alignment with e2e fixtures (post /check_problem 2026-05-09) ----------
+    //
+    // All C1 fixtures below use **`async function getVal(n: number): Promise<number> { return n; }`
+    // user-defined async fn pattern** for top-await source (= `await getVal(N)` instead of
+    // `await Promise.resolve(N)`)。**Rationale**: `Promise.resolve(...)` requires the Web API
+    // builtin runtime integration (= `impl Promise<T> { fn resolve }`) which `transpile()` lib API
+    // does NOT load (= 改善 v13-2 candidate deficiency)。e2e fixtures (post-T9-1) all use the
+    // `getVal` pattern; INV-3 fixtures align here for **maintenance hazard 解消** (= future
+    // maintainer modifying these fixtures will see consistent pattern across both INV-3 (substring
+    // match only) and e2e fixtures (full transpile + cargo run + tsx stdout match), avoiding the
+    // Promise builtin runtime gap re-discovery from copy-paste).
+    //
+    // For INV-3 substring matching, `getVal(N)` produces structurally equivalent IR emission to
+    // `Promise.resolve(N)` for the assertion targets (= `#[tokio::main]` / `async fn main()` /
+    // `__ts_main();` / `__ts_main().await` / `fn __ts_main` / `async fn __ts_main`); the awaitee
+    // expression difference is irrelevant to INV-3 dispatch verification.
+    let c1_cases: &[(u32, &str, &str, &str)] = &[
+        // ---- Trigger 2 only (C1 + non-FnAsync) → 9 entries ----
+        // cell 12 (A1+B0+C1): no user main + Stmt::Expr top-await
+        (
+            12,
+            "A1+B0+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             console.log('a');\nawait getVal(1);\nconsole.log('b');\n",
+            "none",
+        ),
+        // cell 14 (A1+B1+C1): sync user main + Stmt::Expr top-await — Edge sub-case
+        (
+            14,
+            "A1+B1+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             function main(): void { console.log('m'); }\nmain();\nawait getVal(1);\n",
+            "sync",
+        ),
+        // cell 18 (A1+B3+C1): non-fn `main` + Stmt::Expr top-await
+        (
+            18,
+            "A1+B3+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             interface main { x: number; }\nawait getVal(1);\n",
+            "non-fn",
+        ),
+        // cell 32 (A3+B0+C1): no user main + Decl::Var await init
+        (
+            32,
+            "A3+B0+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             const v = await getVal(99);\nconsole.log(v);\n",
+            "none",
+        ),
+        // cell 34 (A3+B1+C1): sync user main + Decl::Var await init — Edge sub-case
+        (
+            34,
+            "A3+B1+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             function main(): void { console.log('m'); }\nmain();\n\
+             const v = await getVal(11);\n",
+            "sync",
+        ),
+        // cell 38 (A3+B3+C1): non-fn `main` + Decl::Var await init
+        (
+            38,
+            "A3+B3+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             interface main { x: number; }\nconst v = await getVal(33);\n",
+            "non-fn",
+        ),
+        // cell 72 (A6+B0+C1): mixed + no user main + top-await
+        (
+            72,
+            "A6+B0+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             const X: number = 1;\nfunction f(): number { return 42; }\n\
+             const v = await getVal(72);\nconsole.log(X, v);\n",
+            "none",
+        ),
+        // cell 74 (A6+B1+C1): mixed + sync user main + top-await — Edge sub-case
+        (
+            74,
+            "A6+B1+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             const X: number = 1;\nfunction main(): void { console.log('m'); }\nmain();\n\
+             const v = await getVal(74);\n",
+            "sync",
+        ),
+        // cell 78 (A6+B3+C1): mixed + non-fn `main` + top-await
+        (
+            78,
+            "A6+B3+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             const X: number = 1;\ninterface main { x: number; }\n\
+             const v = await getVal(78);\n",
+            "non-fn",
+        ),
+        // ---- Trigger 1 + 2 combined (B2 + C1) → 3 entries ----
+        // cell 16 (A1+B2+C1): async user main + Stmt::Expr top-await
+        (
+            16,
+            "A1+B2+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             async function main(): Promise<void> { console.log('m'); }\n\
+             await main();\nawait getVal(1);\n",
+            "async",
+        ),
+        // cell 36 (A3+B2+C1): async user main + Decl::Var await init
+        (
+            36,
+            "A3+B2+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             async function main(): Promise<void> { console.log('m'); }\n\
+             await main();\nconst v = await getVal(22);\n",
+            "async",
+        ),
+        // cell 76 (A6+B2+C1): mixed + async user main + top-await
+        (
+            76,
+            "A6+B2+C1",
+            "async function getVal(n: number): Promise<number> { return n; }\n\
+             const X: number = 1;\n\
+             async function main(): Promise<void> { console.log('m'); }\n\
+             await main();\nconst v = await getVal(76);\n",
+            "async",
+        ),
+    ];
+
+    for (cell, axis_summary, src, expected_form) in c1_cases {
+        // (1) Predicate-level: is_async_required must be true for all C1 cells.
+        let module = parse_typescript(src)
+            .unwrap_or_else(|e| panic!("cell #{cell} ({axis_summary}): SWC parse failed: {e}"));
+        let user_main_kind = detect_user_main(&module);
+        let await_flag = has_top_level_await(&module);
+        let is_async_required = matches!(user_main_kind, UserMainKind::FnAsync) || await_flag;
+        assert!(
+            is_async_required,
+            "cell #{cell} ({axis_summary}): C1 cell must derive is_async_required=true \
+             (user_main_kind={user_main_kind:?}, has_top_level_await={await_flag})"
+        );
+        assert!(
+            await_flag,
+            "cell #{cell} ({axis_summary}): C1 cell must have has_top_level_await=true \
+             (got user_main_kind={user_main_kind:?})"
+        );
+
+        // (2) IR-emission level: transpile must succeed and emit
+        //     `#[tokio::main] async fn main` (= Trigger 2 fires async dispatch arm).
+        let rust = transpile(src)
+            .unwrap_or_else(|e| panic!("cell #{cell} ({axis_summary}): transpile failed: {e}"));
+        assert!(
+            rust.contains("#[tokio::main]"),
+            "cell #{cell} ({axis_summary}): expected `#[tokio::main]` attribute on synthesized \
+             fn main (Trigger 2 = top-await must fire async dispatch). Got:\n{rust}"
+        );
+        assert!(
+            rust.contains("async fn main()"),
+            "cell #{cell} ({axis_summary}): expected `async fn main()` synthesized binary entry. \
+             Got:\n{rust}"
+        );
+        // Sanity: single `#[tokio::main]` (Trigger 1 + Trigger 2 must collapse, not duplicate).
+        assert_eq!(
+            rust.matches("#[tokio::main]").count(),
+            1,
+            "cell #{cell} ({axis_summary}): expected exactly 1 `#[tokio::main]` attribute \
+             (Trigger 1 + Trigger 2 OR-collapsing per INV-3 (a)). Got:\n{rust}"
+        );
+
+        // (3) Substitute call site form (depends on B-axis):
+        match *expected_form {
+            "none" => {
+                // B0: no user main → no __ts_main rename.
+                assert!(
+                    !rust.contains("__ts_main"),
+                    "cell #{cell} ({axis_summary}): unexpected `__ts_main` reference in B0 cell \
+                     (no user main → no rename target). Got:\n{rust}"
+                );
+            }
+            "sync" => {
+                // ===== INV-3 (c) Edge sub-case (cells 14/34/74) explicit verification =====
+                //
+                // **Edge sub-case identity**: B1 + C1 = sync user main + top-await
+                // cohabitation across A1/A3/A6. The Edge sub-case is uniquely
+                // characterized by the **3-condition conjunction**:
+                //   (a) async dispatch (= `#[tokio::main]`) fires via Trigger 2
+                //       (top-await) alone — NOTE: Trigger 2 alone also fires for
+                //       B0/B3 + C1 cells (= "none"/"non-fn" branches handled in
+                //       sibling match arms), so condition (a) is **necessary but not
+                //       sufficient** for Edge sub-case identity;
+                //   (b) sync user main rename target exists (= `fn __ts_main`, NOT
+                //       `async fn __ts_main`) — distinguishes from B0/B3/B2 cells;
+                //   (c) substituted call inside async fn main is sync `__ts_main();`
+                //       (NO `.await` wrap) = sync fn invocation from async context,
+                //       valid Rust per INV-3 (c) "sync user main は async fn から非
+                //       await call で invoke 可能".
+                //
+                // The conjunction (a) ∧ (b) ∧ (c) is unique to B1 + C1 cells.
+                //
+                // Sub-checks below (boolean rationale + IR-emission) replace the
+                // separate `edge_cases` block from initial Iteration v13 implementation
+                // (= DRY violation found at /check_job 3rd-party review L1-1, refactored
+                // 2026-05-09): the IR-emission assertions on cells 14/34/74 in the
+                // edge_cases block were duplicate of these sync-branch assertions, and
+                // the boolean rationale assertion is inlined here for cohesion (=
+                // single source of truth for Edge sub-case verification).
+
+                // (a) Boolean rationale: confirm Edge sub-case identity condition (b)
+                //     = sync user main rename target. By UserMainKind enum mutual
+                //     exclusivity (variants None/FnSync/FnAsync/NonFn/Collision are
+                //     disjoint per `src/transformer/main_synthesis/user_main.rs`),
+                //     asserting `FnSync` structurally implies `!FnAsync` → so condition
+                //     (a) = "Trigger 1 / FnAsync OFF" is implied without a separate
+                //     assertion (= dead code if added per /check_job 3rd-party review
+                //     L1-N3 finding 2026-05-09).
+                assert!(
+                    matches!(user_main_kind, UserMainKind::FnSync),
+                    "cell #{cell} ({axis_summary}): Edge sub-case requires \
+                     user_main_kind=FnSync (= sync user main + Trigger 1 / FnAsync \
+                     structurally OFF by UserMainKind enum exhaustiveness), \
+                     got {user_main_kind:?}"
+                );
+
+                // (b) IR-emission: rename target is sync (NOT async fn __ts_main) +
+                //     sync substitute call (NOT `.await` wrapped).
+                assert!(
+                    rust.contains("fn __ts_main") && !rust.contains("async fn __ts_main"),
+                    "cell #{cell} ({axis_summary}): expected sync `fn __ts_main` rename \
+                     target (NOT `async fn __ts_main`) — Edge sub-case mandates sync \
+                     user main preservation. Got:\n{rust}"
+                );
+                assert!(
+                    rust.contains("__ts_main();"),
+                    "cell #{cell} ({axis_summary}): expected `__ts_main();` (sync call, \
+                     NO `.await`) inside async fn main body — INV-3 (c) Edge sub-case \
+                     verification (sync user main + top-await cohabitation). Got:\n{rust}"
+                );
+                assert!(
+                    !rust.contains("__ts_main().await"),
+                    "cell #{cell} ({axis_summary}): unexpected `.await` wrap on sync user \
+                     main substitute (Edge sub-case = `UserMainSubstitution::SyncRename` \
+                     must NOT wrap with `.await` even in async dispatch context). \
+                     Got:\n{rust}"
+                );
+            }
+            "async" => {
+                // B2 + C1 = Trigger 1 + 2 combined (cells 16/36/76): async user main
+                // renamed to `__ts_main`, substituted call is `__ts_main().await`
+                // (= `.await` wrap to avoid silent Future drop, T5-2 Iteration v11 fix).
+                // Single `.await` (NO double await) — `Transformer::suppress_main_await_wrap`
+                // contract.
+                assert!(
+                    rust.contains("async fn __ts_main"),
+                    "cell #{cell} ({axis_summary}): expected `async fn __ts_main` (renamed async \
+                     user main). Got:\n{rust}"
+                );
+                assert!(
+                    rust.contains("__ts_main().await"),
+                    "cell #{cell} ({axis_summary}): expected `__ts_main().await` (= async user \
+                     main `.await` wrap, T5-2 Iteration v11 Tier 1 silent-loss fix). Got:\n{rust}"
+                );
+                assert!(
+                    !rust.contains("__ts_main().await.await"),
+                    "cell #{cell} ({axis_summary}): unexpected DOUBLE `.await` (= \
+                     `__ts_main().await.await`) — `Transformer::suppress_main_await_wrap` \
+                     contract violated. Got:\n{rust}"
+                );
+            }
+            "non-fn" => {
+                // B3: non-fn `main` (interface / type alias / non-fn binding) = name preserved
+                // (Rust namespace は struct/type と fn が disjoint なので collision なし、
+                // rename gate fires しない)。__ts_main reference は不在。
+                assert!(
+                    !rust.contains("__ts_main"),
+                    "cell #{cell} ({axis_summary}): unexpected `__ts_main` reference in B3 cell \
+                     (non-fn `main` symbol → no rename target, Rust namespace disjoint). \
+                     Got:\n{rust}"
+                );
+            }
+            other => unreachable!("unexpected expected_substitute_form: {other:?}"),
+        }
+    }
+
+    // INV-3 (c) Edge sub-case (cells 14/34/74) is verified inline within the
+    // c1_cases loop's `"sync"` branch above (= cells 14/34/74 are exactly the
+    // C1 entries with expected_form="sync"). The previous standalone
+    // `edge_cases` block was removed at /check_job 3rd-party review L1-1
+    // refactor (2026-05-09) — its IR-emission assertions duplicated the
+    // sync-branch assertions, and its boolean rationale assertions
+    // (user_main_kind=FnSync + Trigger 2 alone) are now inlined into the
+    // sync-branch with explicit Edge sub-case identity comments.
 }
 
 /// INV-4: `pub fn init` mechanism 廃止 invariant

@@ -2209,11 +2209,16 @@ fn test_e2e_cell_i171_b_bang_cond() {
     run_cell_e2e_test("i161-i171", "cell-b-bang-cond");
 }
 #[test]
-#[ignore = "I-171 B.1.32 RED — T4 Bang-arm tmp-bind on awaited F64 is correct, but \
-           fixture TS top-level `main();` call produces duplicated stdout under tsx \
-           (4 lines vs fixture's 2). Blocker → I-180 (E2E harness async-main execution \
-           semantics). Bang-arm await dispatch is covered by unit tests."]
 fn test_e2e_cell_i171_b_bang_await() {
+    // I-180 fast-track verify (2026-05-08、I-224 T8 batch): T7 /check_job
+    // deep review L4-2 で empirical state update = `cell-b-bang-await.ts` を
+    // bare tsx + ESM/non-ESM 両 mode で stdout 2 lines 出力 = byte-exact match
+    // 確認 (= 4-line duplication 再現せず)。Likely root cause = I-224 T5-1
+    // `should_auto_append_main_call` が auto-append `main();` を抑制し、
+    // explicit `main();` source-side call との duplication が排除された結果
+    // I-180 が **副作用として resolved**。本 batch で `#[ignore]` 解除 + e2e
+    // green verify で I-180 close 候補化 (= 関連 TODO entry に "resolved" mark
+    // 後 TODO update)。
     run_cell_e2e_test("i161-i171", "cell-b-bang-await");
 }
 #[test]
@@ -2797,37 +2802,40 @@ fn test_e2e_cell_i224_13_stmt_expr_with_ts_main_collision() {
 }
 
 #[test]
-#[ignore = "I-224 cell-14 (matrix # 12, A1+B0+C1 top-level await): T7-T8 \
-            scope (test harness ESM upgrade + top-await synthesis logic). \
-            Unignore after T8."]
 fn test_e2e_cell_i224_14_top_await_no_main() {
+    // T7-T8 (Iteration v12 + v13) cohesive batch GREEN-ify (2026-05-08).
+    // Production code (T2-1〜T5-2 累積) で MainStmt::ExprAwait emission 完成、
+    // T7-1 で harness ESM mode write 拡張、T9-1 で empirical lock-in。
     run_cell_e2e_test("i-224", "cell-14-top-await-no-main");
 }
 
 #[test]
-#[ignore = "I-224 cell-15 (matrix # 14, A1+B1+C1): Axis C1 + B1 sync user \
-            main + top-await mixed wrapping. T7-T8 scope."]
 fn test_e2e_cell_i224_15_top_await_sync_main() {
+    // T7-T8 cohesive batch GREEN-ify: B1 sync user main + Stmt::Expr top-await
+    // mixed wrapping (sync `__ts_main();` 非 await call from async fn main、
+    // INV-3 (c) Edge sub-case の matrix # 14 instance)。
     run_cell_e2e_test("i-224", "cell-15-top-await-sync-main");
 }
 
 #[test]
-#[ignore = "I-224 cell-16 (matrix # 16, A1+B2+C1): Axis C1 + B2 async user \
-            main. T7-T8 scope."]
 fn test_e2e_cell_i224_16_top_await_async_main() {
+    // T7-T8 cohesive batch GREEN-ify: B2 async user main + Stmt::Expr top-await
+    // (Trigger 1 + 2 combined、`__ts_main().await` substitute call site)。
     run_cell_e2e_test("i-224", "cell-16-top-await-async-main");
 }
 
 #[test]
-#[ignore = "I-224 cell-17 (matrix # 18, A1+B3+C1): Axis C1 + B3 non-fn \
-            main. T7-T8 scope."]
 fn test_e2e_cell_i224_17_top_await_non_fn_main() {
+    // T7-T8 cohesive batch GREEN-ify: B3 non-fn `main` + Stmt::Expr top-await
+    // (struct main namespace disjoint、no rename)。
     run_cell_e2e_test("i-224", "cell-17-top-await-non-fn-main");
 }
 
 #[test]
-#[ignore = "I-224 cell-18 (matrix # 20, A1+B4+C1): collision in Axis C1 \
-            context. T7-T8 scope."]
+#[ignore = "I-224 cell-18 (matrix # 20, A1+B4+C1): collision Tier 2 reject \
+            via INV-5 (`__ts_main` reserved for transpiler-internal use). \
+            Harness pattern N/A (transpile errors out); INV-5 lock-in covers \
+            it (= same handling as cell-13 collision)."]
 fn test_e2e_cell_i224_18_top_await_ts_main_collision() {
     run_cell_e2e_test("i-224", "cell-18-top-await-ts-main-collision");
 }
@@ -2901,9 +2909,9 @@ fn test_e2e_cell_i224_29_mixed_with_user_sync_main() {
 }
 
 #[test]
-#[ignore = "I-224 cell-30 (matrix # 76, A6+B2+C1): mixed + async user main \
-            + top-await. T7-T8 cohesive scope."]
 fn test_e2e_cell_i224_30_mixed_top_await_async_main() {
+    // T7-T8 cohesive batch GREEN-ify: A6 mixed + B2 async user main + C1
+    // top-await (Trigger 1 + 2 combined、matrix # 76)。
     run_cell_e2e_test("i-224", "cell-30-mixed-top-await-async-main");
 }
 
@@ -2915,37 +2923,40 @@ fn test_e2e_cell_i224_31_multiple_main_calls() {
 }
 
 #[test]
-#[ignore = "I-224 cell-32 (matrix # 32, A3+B0+C1 await init): T8 \
-            MainStmt::LetAwait emission required. Unignore after T8-2."]
 fn test_e2e_cell_i224_32_decl_var_await_init_no_main() {
+    // T7-T8 cohesive batch GREEN-ify: A3 + B0 + C1 = no user main + Decl::Var
+    // with await init (MainStmt::LetAwait emission、matrix # 32)。
     run_cell_e2e_test("i-224", "cell-32-decl-var-await-init-no-main");
 }
 
 #[test]
-#[ignore = "I-224 cell-34 (matrix # 34, A3+B1+C1): await init + sync user \
-            main + top-await mixed wrapping (INV-3 (c) edge case). T8-2 \
-            scope."]
 fn test_e2e_cell_i224_34_decl_var_await_init_sync_main() {
+    // T7-T8 cohesive batch GREEN-ify: A3 + B1 + C1 = sync user main + Decl::Var
+    // with await init (INV-3 (c) Edge sub-case の matrix # 34 instance、
+    // sync `__ts_main();` 非 await call from async fn main)。
     run_cell_e2e_test("i-224", "cell-34-decl-var-await-init-sync-main");
 }
 
 #[test]
-#[ignore = "I-224 cell-36 (matrix # 36, A3+B2+C1): await init + async user \
-            main. T8 scope."]
 fn test_e2e_cell_i224_36_decl_var_await_init_async_main() {
+    // T7-T8 cohesive batch GREEN-ify: A3 + B2 + C1 = async user main +
+    // Decl::Var with await init (Trigger 1 + 2 combined、`__ts_main().await`、
+    // matrix # 36)。
     run_cell_e2e_test("i-224", "cell-36-decl-var-await-init-async-main");
 }
 
 #[test]
-#[ignore = "I-224 cell-38 (matrix # 38, A3+B3+C1): await init + non-fn \
-            main. T8 scope."]
 fn test_e2e_cell_i224_38_decl_var_await_init_non_fn_main() {
+    // T7-T8 cohesive batch GREEN-ify: A3 + B3 + C1 = non-fn `main` + Decl::Var
+    // with await init (struct main namespace disjoint、matrix # 38)。
     run_cell_e2e_test("i-224", "cell-38-decl-var-await-init-non-fn-main");
 }
 
 #[test]
-#[ignore = "I-224 cell-40 (matrix # 40, A3+B4+C1): await init + collision. \
-            T7-T8 cohesive scope."]
+#[ignore = "I-224 cell-40 (matrix # 40, A3+B4+C1): collision Tier 2 reject \
+            via INV-5 (`__ts_main` reserved for transpiler-internal use). \
+            Harness pattern N/A (transpile errors out); INV-5 lock-in covers \
+            it (= same handling as cell-13 / cell-79 collision)."]
 fn test_e2e_cell_i224_40_decl_var_await_init_ts_main_collision() {
     run_cell_e2e_test("i-224", "cell-40-decl-var-await-init-ts-main-collision");
 }
@@ -2959,16 +2970,17 @@ fn test_e2e_cell_i224_41_control_flow_no_main() {
 }
 
 #[test]
-#[ignore = "I-224 cell-72 (matrix # 72, A6+B0+C1): mixed + top-await. \
-            T7-T8 cohesive scope."]
 fn test_e2e_cell_i224_72_mixed_no_main_top_await() {
+    // T7-T8 cohesive batch GREEN-ify: A6 mixed + B0 no user main + C1 top-await
+    // (matrix # 72)。
     run_cell_e2e_test("i-224", "cell-72-mixed-no-main-top-await");
 }
 
 #[test]
-#[ignore = "I-224 cell-74 (matrix # 74, A6+B1+C1): mixed + sync user main \
-            + top-await (INV-3 (c) edge case)."]
 fn test_e2e_cell_i224_74_mixed_sync_main_top_await() {
+    // T7-T8 cohesive batch GREEN-ify: A6 mixed + B1 sync user main + C1
+    // top-await (INV-3 (c) Edge sub-case の matrix # 74 instance、sync
+    // `__ts_main();` 非 await call from async fn main)。
     run_cell_e2e_test("i-224", "cell-74-mixed-sync-main-top-await");
 }
 
@@ -2987,9 +2999,9 @@ fn test_e2e_cell_i224_77_mixed_non_fn_main_no_top_await() {
 }
 
 #[test]
-#[ignore = "I-224 cell-78 (matrix # 78, A6+B3+C1): mixed + non-fn + \
-            top-await. T7-T8 cohesive scope."]
 fn test_e2e_cell_i224_78_mixed_non_fn_main_top_await() {
+    // T7-T8 cohesive batch GREEN-ify: A6 mixed + B3 non-fn `main` + C1
+    // top-await (struct main namespace disjoint、matrix # 78)。
     run_cell_e2e_test("i-224", "cell-78-mixed-non-fn-main-top-await");
 }
 
@@ -3001,8 +3013,10 @@ fn test_e2e_cell_i224_79_mixed_ts_main_collision_no_top_await() {
 }
 
 #[test]
-#[ignore = "I-224 cell-80 (matrix # 80, A6+B4+C1): mixed + collision in \
-            Axis C1 context. T7-T8 cohesive scope."]
+#[ignore = "I-224 cell-80 (matrix # 80, A6+B4+C1): collision Tier 2 reject \
+            via INV-5 (`__ts_main` reserved for transpiler-internal use). \
+            Harness pattern N/A (transpile errors out); INV-5 lock-in covers \
+            it (= same handling as cell-79 collision)."]
 fn test_e2e_cell_i224_80_mixed_ts_main_collision_top_await() {
     run_cell_e2e_test("i-224", "cell-80-mixed-ts-main-collision-top-await");
 }

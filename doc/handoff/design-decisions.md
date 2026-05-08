@@ -1059,6 +1059,272 @@ PRD 2.7 は Implementation stage で **2 度 Spec への逆戻り** を実施。
 
 ---
 
+## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain (closed 2026-05-09)
+
+PRD I-224 (B2 fn main mechanism + Option β cohesive batch) の close 経緯と、本 PRD で発見した **framework v12-2 candidate (= "Spec wording / claim vs 実体 work cross-check") の empirical recurrence chain** を保存。本 section は I-D PRD batch (= framework rule integration) 起票時の **primary lesson source**。
+
+### Architectural concern statement (本 PRD discovery context、future similar PRD の reference)
+
+**問題**: TS module-load semantics ≠ Rust binary entry の semantic mismatch。TS では module body の top-level statements が module load 時に実行されるが、Rust binary は `fn main()` のみ entry point。ts_to_rs は当初 `function main()` user 定義時のみ Rust `fn main()` emit、それ以外は `pub fn init()` のみ emit (= never called) で **Tier 1 silent semantic change** を発生。
+
+**解決**: 80-cell matrix (Axis A 8 × Axis B 5 × Axis C 2、Axis E orthogonality merge declaration) で全 reachable cell の dispatch を spec、3-tuple match dispatch tree で `(is_executable_mode, user_main_kind, has_top_level_await)` から 13 reachable arms に 1-to-1 mapping (Rule 9 (a) compliance)、`MainStmt` IR + `synthesize_fn_main` で `#[tokio::main] async fn main()` (top-await present) または sync `fn main()` (top-await absent) を emit。
+
+**Future similar PRDs 参考価値**: TS → Rust semantic mismatch を扱う 다른 PRDs (e.g., module-level closure capture、Rust orphan rule との衝突、destructuring pattern lifting 等) で同 architectural concern statement template (= "問題 = TS X semantics ≠ Rust Y、解決 = matrix + dispatch tree + IR enum") が再利用可能。
+
+### Option β cohesive batch decision pattern (= "scope 分離 を理由とした compromise" 排除 mechanism)
+
+**Iteration v2 → v3 で発生した structural decision**:
+
+- **Iteration v2 design**: cells 14-18/30 + 6/7/8 (= top-level await ✗ / NA cells) を「test harness limitation」を理由に新 PRD I-226 (test harness ESM upgrade + top-level await Tier 1 化) へ defer
+- **Third-party review H-2 finding**: `Rule 12 (e-3) Permitted reasons` (= "infra で AST input dimension irrelevant" / "refactor で機能 emission decision なし" / "pure doc 改修") に該当しない **gray zone violation**、**ideal-implementation-primacy 観点で「実装範囲が広い (test harness 跨ぎ)」を defer 理由とする compromise を排除**
+- **Iteration v3 fix**: Option β cohesive batch 採用 (= 本 PRD scope を "Top-level executable script form の Rust emission strategy + verify infrastructure" cohesive concern に拡張)、I-226 起票撤回、TS-5/TS-6 + T7/T8/T9 task 追加
+
+**Lesson (cross-PRD applicable)**: 「test harness / lib API / external dependency limitation を理由に PRD scope を分離する」decision は `feedback_no_dev_cost_judgment.md` 違反 risk = `Rule 12 (e-3)` Permitted reasons に該当するか **explicit verify 必須**。該当しない場合は cohesive batch で本 PRD scope に integrate (= "1 PRD = 1 architectural concern" boundary を architectural concern relevance で再定義、scope 規模ではなく concern boundary で判断)。
+
+### 4-axis Problem Space + Axis E orthogonality merge declaration pattern (= matrix size reduction methodology)
+
+**問題**: 4-axis full Cartesian product = **160 cells** = matrix table が manual review で扱える density limit を超える (cross-reference consistency 維持困難)。
+
+**解決 (Axis E orthogonality merge declaration、Rule 1 (1-4) compliant)**:
+- Axis E (Module export presence E0/E1) を入力次元として明示
+- ただし Axis E は本 PRD architectural concern (= fn main mechanism + executable mode dispatch) の dispatch logic に **直接影響しない** (= Rust binary crate 内 `pub` modifier 有無は library 公開度の concern、execution order の concern と orthogonal)
+- E0/E1 cells は同一 dispatch logic を通過、E1 cells では既存 path で `pub` modifier preserve (= regression lock-in)
+- **matrix sub-axis 化せず**、`## Problem Space > Axis E Orthogonality Probe` sub-section で structural verify (= Implementation Stage T3 で `test_axis_e_export_preserve_symmetric` で probe lock-in)
+
+**結果**: 160 cells → **80 cells** matrix (Axis A 8 × Axis B 5 × Axis C 2)、各 cell ideal output が E0/E1 共通。
+
+**Lesson (cross-PRD applicable)**: 4+ axes Cartesian product を取る PRD で、ある axis が architectural concern dispatch logic に直接影響しない (= regression preserve のみ要求) 場合、`Rule 1 (1-4) Orthogonality merge legitimacy + Spec-stage structural verify` 適用で matrix を 1 axis 分 reduce 可能。条件:
+- (1-4-a) Orthogonality verification statement 明示 (= source cell # 明示)
+- (1-4-b) Spec-stage structural consistency verify (= AST shape level で identical)
+- (1-4-c) Spec-stage referenced cell symmetry probe (= Implementation Stage で unit test 経由 lock-in)
+
+### 25 NA cells unified mutual exclusion reasoning + SWC parser empirical lock-in pattern
+
+**問題**: 80 cells matrix のうち 25 cells (Axis A0/A2/A4/A5a/A5b + C1) が **AST 構造的 mutually exclusive** (= Axis C C1 = top-level await は AST 上 `Stmt::Expr(Expr::Await)` または `Decl::Var` with `Expr::Await` init を要求、これは A0/A2/A4/A5a/A5b 各 partition と空集合)。
+
+**解決 (Rule 3 (3-1/3-2) compliant)**:
+1. **Spec-traceable NA reason 統一**: 25 cells を 1 unified reasoning ("Axis A vs Axis C1 構造的 mutual exclusion") で record (Rule 3 (3-1) `spec-traceable な根拠のみ` compliant)
+2. **SWC parser empirical lock-in test**: `tests/swc_parser_top_level_await_test.rs` 4 tests で structural reasoning を verify (Rule 3 (3-2) `SWC parser empirical observation 必須` compliant):
+   - `test_top_level_bare_await_parses_as_stmt_expr_await_axis_a1` (= A1 partition lock-in)
+   - `test_top_level_var_decl_with_await_init_parses_as_decl_var_axis_a3` (= A3 partition lock-in)
+   - `test_pure_axis_a0_source_contains_no_await_expression` (= A0 partition lock-in)
+   - `test_axis_c1_implies_a1_or_a3_partition_synthesis` (= C1 forms 4 variations → A1/A3 collapse synthesis lock-in)
+
+**Lesson (cross-PRD applicable)**: NA cells が複数 partition で発生する場合、**1 unified mutual exclusion reasoning** + **SWC parser empirical lock-in test 4 件** で structural lock-in 達成可能 (= 25 cells × 個別 NA reason ではなく、1 reasoning + 4 tests で coverage)。Future PRD で similar AST shape vs feature axis の mutual exclusion がある場合、本 pattern を template として採用可能。
+
+### 3-tuple dispatch tree + per-item runtime decision split pattern (= Rule 9 (a) 1-to-1 mapping compliance)
+
+**問題 (Iteration v4 Critical 1 + Medium 1 fix)**: 旧 4-tuple match `(is_executable_mode, user_main_kind, is_async_required, has_lit_top_level_const)` で 2 つの structural defects:
+- **Critical 1 (axis-tuple ↔ definition mismatch)**: Library mode + FnAsync user main arm が `is_async_required=false` を pattern claim、しかし `is_async_required = (FnAsync || has_top_level_await)` 定義より cells #5/#25 は `is_async_required=true` で `unreachable!()` panic に fall-through する logical bug
+- **Medium 1 (1-to-1 mapping violation)**: `has_lit_top_level_const` 次元は A6 (mixed) cells で複数 arm に partition (cells #71/#72 等が 2 arms に double-claim)、Rule 9 (a) 1-to-1 違反
+
+**解決 (Iteration v4 structural fix)**:
+- **3-tuple match に simplify**: `(is_executable_mode, user_main_kind, has_top_level_await)` で 80 cells が **1-to-1 mapping** (各 leaf に matrix # annotation)
+- **`has_lit_top_level_const` を per-item runtime decision に移行**: top-level item iteration 中、各 Decl::Var with Lit init のみ Item::Const として top-level emit、それ以外は MainStmt として fn main capture (= dispatch dimension から分離)
+- **`test_dispatch_arm_one_to_one_mapping_per_in_scope_cell` regression lock-in test** で axis-tuple ↔ definition mismatch を structural detect (= future iteration で同種 bug 混入時 unit test fail で発覚保証)
+
+**Lesson (cross-PRD applicable)**: dispatch tree の axis-tuple 次元数増加は **logical bug + 1-to-1 mapping violation** の risk source。**axis-tuple 次元削減 + per-item runtime decision split** が structural fix pattern。並列 verify として helper test (= `tests/<prd>_helper_test.rs`) で各 cell ↔ dispatch arm の 1-to-1 mapping を assert することで regression lock-in。
+
+### INV-1〜INV-7 4-item invariant pattern (Rule 8 (8-c) compliance、cross-PRD applicable)
+
+本 PRD は 7 invariants を spec、各 invariant は **4-item structure (a)(b)(c)(d)** で記述 (Rule 8 invariant verification の structural completeness 保証):
+
+| Item | Content | 例 (INV-1 source) |
+|------|---------|------------------|
+| (a) Property statement | 1 文で書けるレベルの不変条件 | "Cell A != A0 の全 cell で TS module top-level statements の execution order が Rust fn main body 内で byte-exact preserve" |
+| (b) Justification | なぜこの invariant が必要か (違反でどんな defect class) | "違反すると TS execution stdout と Rust execution stdout が divergent = Tier 1 silent semantic change" |
+| (c) Verification method | 実装後に invariant 成立を verify する具体手順 (probe / test / static analysis) | "Per-cell E2E fixture で TS / Rust stdout の byte-exact match を verify (TS-3 で fixture 作成、T6 で green 化)" |
+| (d) Failure detectability | invariant 違反が compile error / runtime error / silent semantic change のどれで顕在化するか | "silent semantic change (Rust compile pass + runtime stdout divergent)" |
+
+7 invariants spec した dimensions (= future PRD invariant design template):
+- **INV-1**: Source-order preservation (= top-level execution order invariant)
+- **INV-2**: User symbol preservation (= rename + substitute invariant)
+- **INV-3**: Sync/async dispatch consistency (= multi-trigger OR-condition invariant)
+- **INV-4**: Mechanism 廃止 invariant (= legacy code 0-hits structural lock-in)
+- **INV-5**: Namespace reservation extension consistency (= I-154 namespace rule + collision detection)
+- **INV-6**: Layer separation invariant (= 他 pipeline phase に side effect なし)
+- **INV-7**: External API breaking change audit (= reachability empirical 0-confirm)
+
+**Lesson (cross-PRD applicable)**: 7 invariants の dimension coverage (= source-order / symbol / dispatch / mechanism 廃止 / namespace / layer separation / external API audit) は **structural concern を持つ PRDs の invariant design template** として再利用可能。各 invariant に 4-item structure を適用 + `tests/<prd>_invariants_test.rs` に test stub を Spec stage iteration v7 段階で作成 (= "deferred verification = unverified claim" compromise を排除する Spec stage convention、I-205 v1.6 self-applied integration pattern 踏襲)。
+
+### 6-category test layout pattern (matrix-driven PRD test architecture template)
+
+本 PRD で確立した test layout は future matrix-driven PRDs の template として再利用可能:
+
+| Category | Location | Purpose | I-224 example |
+|----------|----------|---------|---------------|
+| **Unit tests** | `src/transformer/main_synthesis/tests.rs` (= module-internal) | Module logic の Equivalence partitioning + Boundary value + Decision Table + AST variant exhaustiveness coverage | 75 unit tests (collect_top_level_executions / synthesize_fn_main / classify_init_kind / detect_user_main / etc.) |
+| **Integration tests** | `tests/<prd>_namespace_test.rs` / `tests/<prd>_decl_var_dual_path_test.rs` 等 (= cross-module integration) | Public API E2E + boundary value | I-224 では namespace + Decl::Var dual-path |
+| **Helper test contracts** | `tests/<prd>_helper_test.rs` (= dispatch arm 1-to-1 mapping verify) | Rule 9 (a) compliance + axis-tuple ↔ definition consistency lock-in | `test_dispatch_arm_one_to_one_mapping_per_in_scope_cell` + `test_axis_b_b1a_b_c_rename_dispatch_symmetric` + `test_axis_e_export_preserve_symmetric` + `test_axis_a5a_compositional_orthogonality_with_b_axis` |
+| **Invariants verification tests** | `tests/<prd>_invariants_test.rs` (= INV-N test stubs from Spec stage iteration v7) | Rule 8 (8-c) helper test contracts NEW + invariant lock-in | INV-1〜INV-7 stubs (Spec stage v7 で `#[ignore]` author + Implementation T1〜T9 で fill in) |
+| **E2E tests** | `tests/e2e/scripts/<prd>/cell-NN-*.{ts,expected}` + `tests/e2e_test.rs::test_e2e_cell_<prd>_<NN>_*` | Per-cell stdout byte-exact match (TS oracle vs cargo run) | 27+ fixtures + `test_e2e_cell_i224_NN_<semantic_name>` per-cell entry |
+| **SWC parser empirical tests** | `tests/swc_parser_<feature>_test.rs` (= Rule 3 (3-2) lock-in、AST shape mutual exclusion) | NA cells の structural reasoning を SWC parser empirical で lock-in | `tests/swc_parser_top_level_await_test.rs` 4 tests (Axis A vs C1 mutual exclusion) |
+
+**Snapshot tests**: 不要 (= IR-level emission concern で snapshot 過剰)。本 PRD は IR token-level assertion を unit/integration tests で cover。
+
+**Lesson (cross-PRD applicable)**: 上記 6 categories で `unit / integration / helper / invariants / e2e / swc-parser-empirical` の coverage を提供 (snapshot は IR-level concern では不要)。Spec stage iteration v7 で全 invariants test stub を `#[ignore]` で author し Implementation Stage で fill in する **Spec stage convention** が "deferred verification = unverified claim" compromise を排除 (= I-205 v1.6 self-applied integration pattern)。
+
+### R-2 / R-4 empirical reachability audit methodology (= breaking change / reserved identifier audit pattern)
+
+本 PRD で確立した audit methodology は future PRDs で再利用可能:
+
+#### R-4 audit methodology (reserved identifier collision audit)
+
+**Method**: `grep -rn '<reserved-identifier>' src/ tests/ tools/`
+
+**Findings classification**:
+- Production source (`src/`): 0 hits 期待 (= 既存 namespace constant のみ)
+- Test infrastructure (`tests/` 配下、本 PRD 自身の test fixtures を除く): 0 hits 期待 (= breaking change reachability 不在 verify)
+- Tools (`tools/`): 0 hits 期待
+- 本 PRD 自身の test fixtures: hits 多数 (= 意図的 collision detection / multi-call substitution test fixture、本 audit の対象外)
+
+**External codebase verify (Hono benchmark target)**: Implementation stage T5 で Hono bench Tier-transition compliance verify 時に同 grep を実施 (= INV-5 prerequisite 等)。
+
+**判定**: 0 reachable user-defined collision in scoped paths → reservation extension は existing user code に breaking change 引き起こさない (Rule 12 e-3 Permitted reason "infra で input dimension irrelevant" 適用可能)。
+
+#### R-2 audit methodology (external API breaking change reachability audit)
+
+**Method**: `grep -rn '\b<api-name>\b' src/ tests/ tools/` (definition site enumerate) + `grep -rn '\b<api-call-pattern>\b' tests/<external-test-runner>/` (call site enumerate)
+
+**Hit type classification**:
+- Definition site (production): 該当 PRD で削除 + doc comment update
+- Definition site reference (test): 該当 PRD で test を新 form に migrate
+- Generated snapshot artefacts: e2e re-run で自動 clear、advisory hits 扱い
+- Call site (production): 0 hits 期待 = breaking change reachable surface 不在 confirm
+- PRD-related comment references: historical reference として keep
+
+**判定**: Call site 0 hits → API 廃止は external API breaking change なし、Implementation Stage 移行 block する reachable surface 不在。
+
+**Lesson (cross-PRD applicable)**: 本 R-2/R-4 audit methodology は any PRD that introduces (a) reserved identifier extensions、(b) public API removals、(c) generated code form changes で再利用可能。Spec stage の TS-N (Pre-Implementation Audit Findings) task として実施し、PRD doc `## Pre-Implementation Audit Findings` section に embed (= Spec stage 移行 block する reachable surface 不在を spec-traceable に確定)。
+
+### Audit script design pattern (`scripts/audit-no-pub-fn-init.sh` template)
+
+本 PRD で新規作成した `scripts/audit-no-pub-fn-init.sh` (+ T5-2 で `scripts/audit-no-init-call-site.sh`) は future PRDs の structural lock-in audit script template:
+
+**Design**:
+- **Enforced paths** (= violation 検出で `exit 1`): `src/`, `tools/`, `tests/e2e/rust-runner/`
+- **Advisory paths** (= advisory print のみ、`exit 0` 影響なし): `tests/e2e/scripts/` (= generated snapshot artefacts、e2e re-run で自動 clear)
+- **Pattern**: `\b<forbidden-identifier-pattern>\b` (Rust source files only、`*.rs` filter)
+- **Pre-fix expected behavior**: `exit=1` with N enforced hits + M advisory hits (= 本 audit 時点 record state)
+- **Post-fix expected behavior**: `exit=0` (= invariant lock-in、helper 削除 + test migrate + e2e re-run で advisory hits 自動 clear)
+- **CI integration target**: `.github/workflows/ci.yml` に integrate、PR merge gate
+
+**Lesson (cross-PRD applicable)**: 本 PRD で確立した "enforced + advisory paths split" pattern は future PRDs の "structural lock-in invariant の CI merge gate 化" で再利用可能。Particularly:
+- Enforced/advisory split で **snapshot artefacts の handling pattern を documentation 化** (= e2e regenerate 待ちの advisory hits を error にしない)
+- Pre/post expected behavior の **explicit declaration** で CI behavior の **regression detection mechanism** を提供
+
+### 23 sub-commits decomposition + Quality gate per commit + /check_job timing pattern
+
+本 PRD Implementation Stage で確立した commit policy (= user 確定 2026-05-01 post-Spec-stage closure):
+
+- **各 T (T1〜T9) を 2-4 sub-commits に decompose**、合計 23 sub-commits で Implementation 完遂
+- **単一焦点 deliverable**: 1 sub-commit = 1 architectural change category (constant 追加 / validator 新規 / IR enum 追加 / dispatch tree 統合 / refactor / e2e green-ify / etc.)
+- **Quality gate per commit**: cargo check + cargo test (該当 scope) + cargo fmt --all --check + cargo clippy --all-targets -- -D warnings 全 pass
+- **Commit message format** (per `incremental-commit.md`):
+  - `[WIP] I-224 T<N>-<sub>: <single-focus deliverable>` (中間 sub-commits)
+  - `[WIP] I-224 T<N> 完了: <T-level summary> + 4-layer review pass` (T-完了 commit、`/check_job` 4-layer review post-fix を含む)
+  - `[CLOSE] I-224 PRD 完了: ...` (T9-2 final commit のみ)
+- **`/check_job` 4-layer review timing**: 各 T 完了 commit (= 各 T の最後の sub-commit) で実施、Layer 1-4 全 0 findings or 全 fix 後に commit
+
+**Lesson (cross-PRD applicable)**: 本 23 sub-commits decomposition pattern は any matrix-driven PRD の Implementation Stage で再利用可能。Particularly:
+- "1 sub-commit = 1 architectural change category" boundary で **commit-level cohesion** を保証
+- Each T-完了 commit に `/check_job` 4-layer review 実施 = **incremental defect detection** + **post-fix re-commit** mechanism (= sub-commit cycle 内で defect resolve、PRD-level review iteration を avoid)
+
+### v12-2 pattern empirical recurrence chain (= self-applied review accuracy gap、本 PRD で empirical lock-in 達成)
+
+**Pattern definition (framework v12-2 candidate)**: PRD spec の wording (= Sub-commits 一覧の completion criteria + T task description) と production code / infra work の actual state、または PRD review の self-applied claim (= "Critical = 0 / High = 0 / Layer 1-4 全 0 findings") と third-party adversarial review が発見する actual findings の **乖離** pattern。Spec stage adversarial review (12-rule checklist) では検出不能 (= self-applied review は claim 内部の整合性しか check しない)、third-party invocation で初めて発覚する pattern。
+
+**Empirical recurrence chain (本 PRD I-224 における 全 occurrence)**:
+
+| Round | 日付 | Self-claim | Third-party finding | Pattern subtype |
+|-------|------|------------|---------------------|------------------|
+| **v2 → v3** | 2026-05-01 | Iteration v2 self-claim "Critical=0/High=0" | Third-party `/check_job` で 21 件 actions (Critical 4 + High 8 + Medium 4 + Review 5) | **A. Self-claim accuracy gap (= 1st occurrence、formal v12-2 naming より前)** |
+| **v3 → v4** | 2026-05-01 | Iteration v3 self-claim ✓ | Adversarial agent re-review 2nd round 5 件 (Critical 1 + High 2 + Medium 2 + Review 4) | A. Self-claim accuracy gap (2nd) |
+| **v4 → v5** | 2026-05-01 | Iteration v4 self-claim ✓ | Adversarial agent re-review 3rd round 13 件 + Compromise audit fix | A. Self-claim accuracy gap (3rd) |
+| **v5 → v6 minor** | 2026-05-01 | Iteration v5 self-claim ✓ | Adversarial agent re-review 4th round 2 件 | A. Self-claim accuracy gap (4th) |
+| **T2 R1 → R2** | 2026-05-07 | T2 R1 self-applied review ✓ → 5 findings | T2 R2 adversarial deep review で 3 NEW findings | A. Self-claim accuracy gap (5th) |
+| **T5-1 /check_job** | 2026-05-08 | T5-1 完了 self-applied | /check_job 3 iteration + /check_problem 2 round 累積 structural fix 5 件 | A. Self-claim accuracy gap (6th-7th) |
+| **T6a /check_job** | 2026-05-08 | T6a 完了 self-applied | 1st round line-ref drift 2 件 → 2nd round adversarial で 4 NEW factual fix | A. Self-claim accuracy gap (8th) |
+| **T7 (Iteration v12)** | 2026-05-08 | T7 spec wording (= rust-runner tokio dep + ESM-mode runner template + observe-tsc.sh CI invoke) | 実体 infra work 乖離 (= harness 側 ESM mode write が必要、tokio dep 既存、observe-tsc.sh は spec stage tool で CI 不参与) | **B. T-task spec wording vs work reality (= 1st occurrence of subtype B)** |
+| **T8 (Iteration v13)** | 2026-05-09 | T8 spec wording (= MainStmt::ExprAwait/LetAwait emission + INV-3 dispatch trigger 拡張) | 実体 production code 乖離 (= T1-T5-2 累積実装で完成済) | B. T-task spec wording vs work reality (2nd) |
+| **v13 self-review 1st-round** | 2026-05-09 | PRD doc Final 4-Layer Review section "Layer 1-4 全 0 findings (Defect category)" | Third-party `/check_job` で 7 distinct findings (L1-1/2/3/4 + L3-1/2/3 + L4 Trade-off #4) | A. Self-claim accuracy gap (9th) |
+| **v13 self-review 2nd-round** | 2026-05-09 | 1st round fix work "structural cohesion 向上" claim | Third-party `/check_job` で 4 NEW findings (L1-N1/N2/N3/N4) + L3-N1 (= /check_job recursion convergence criterion 不在) | A. Self-claim accuracy gap (10th) |
+
+**Pattern subtype A (Self-claim accuracy gap)**: **計 10 度連続 occurrences** (= 真の structural pattern、formal v12-2 naming より遥かに前から発生していた = framework rule 不在の structural gap)
+
+**Pattern subtype B (T-task spec wording vs work reality)**: **計 2 度連続 occurrences** (= subtype A の sub-class、特に Implementation Stage で発生する subtype)
+
+**Combined v12-2 pattern**: subtype A + B = **計 12 度 occurrences across 13 review rounds in I-224 PRD lifecycle**
+
+**真の framework structural gap signal の lock-in**:
+- 1 回 = 事故 / 2 回 = 偶然 / 3 回 = pattern / **5 回以上 = structurally inevitable framework gap**
+- 本 PRD I-224 で **12 度 empirical recurrence** = framework rule の structural integrity 確立に **v12-2 candidate (= self-applied + third-party 二重実施 mandatory) は absolute prerequisite**
+
+### Implementation-level structural fixes (Iteration v8〜v11、cross-PRD applicable lessons)
+
+本 PRD Implementation Stage で発生した複数の Spec への逆戻り + structural fix から抽出した cross-PRD applicable design patterns:
+
+| Iteration | Source defect | Structural fix | Cross-PRD lesson |
+|-----------|---------------|----------------|-------------------|
+| **v8** (2026-05-07、T2 完了時) | `has_top_level_await` AST shape direct interpretation が nested await (`f(await x)` 等) を miss + class super_class outer-context await detection 漏れ + ExportDecl-wrapped Decl::Var with side-effect init を library mode 誤分類 + multi-declarator first-only check 限界 + Lit::Regex inclusion intra-PRD inconsistency (= I-228-a/b/c/d 4 sub-entries) | (a) Recursive walk extension (= AST direct → walker pattern)、(b) ANY-rule for multi-declarator (= first-only → ANY)、(c) ExportDecl unwrapping at module-level scan、(d) Lit::Regex narrow to Lit::Num/Bool/Str/Null/BigInt (= Rust const 適合) | **AST shape direct interpretation は nested cases / multi-declarator / wrapper-decl variants を構造的に miss する pattern** = recursive walker default + ANY-rule for collection + wrapper-decl unwrapping を design template として default 採用。`Lit::Regex` 等の "Rust const 不適合" subtypes を enum variant level で narrow する pattern も同 lesson source |
+| **v9** (2026-05-08、T5-1 着手中) | cells 12/24 で `const v: T = { ... };` (= Object/Array literal init) が executable mode で silently dropped → consumer `console.log(v.x)` が undefined → E0425 downstream | `InitKind` enum を 4 variants (Lit / SideEffect / AwaitInit) → **5 variants (+ NonTriggerDef + NonTriggerData)** に split、Object/Array literal を NonTriggerData として明示分類 + per-declarator routing で fn main body capture | **Silent drop の root cause は enum variant の under-classification = "実行 trigger を含まないが captured されるべき shape" を別 variant に split する pattern**。Future PRD で similar silent-drop 発見時に enum variant split structural fix を default 採用 |
+| **v10** (2026-05-08、T5-1 完了後 /check_job 3 iter + /check_problem 2 round) | TsAs/TsSatisfies/TsTypeAssertion expected_type propagation 非対称 (= 1 wrapper だけ propagation で他 2 wrapper が dropping) + destructuring Tier 2 silent drop + classify_decl_var_path legacy aggregating classifier の dual-classifier maintenance burden + prd-completion.md Tier-transition wording の "Tier 1 silent → Tier 2 honest" classification 不在 | (a) 3 wrapper symmetric path で expected_type propagation extension、(b) destructuring を Tier 2 honest error reject (= silent drop 排除)、(c) legacy classifier 完全削除 + per-declarator classifier に migration、(d) Tier-transition wording に "Improvement (Tier 1 silent → Tier 2 honest)" classification 追加 | **Type wrapper variants (TsAs/TsSatisfies/TsTypeAssertion) は **symmetric pass-through** が default、片方 wrapper だけ extension は asymmetric drop pattern を発生させる** = 3-wrapper symmetric path enumerate を design template として default 採用。Legacy aggregating classifier の存続は dual-classifier maintenance burden = Implementation Stage で migration 後即削除 |
+| **v11** (2026-05-08、T5-2 着手時) | B2 + executable-mode `__ts_main()` substitute call **.await wrap が dropped** → renamed async user main の Future が silently dropped (= cells 11/23/75 で Tier 1 silent semantic loss) + cells 16/30/36 で `convert_expr` substitute-time .await wrap が outer Expr::Await と二重に作用 (= **double-await bug** で `__ts_main().await.await` emission = `()` does not implement Future の compile error) + `transformer/mod.rs` 1005 行 file-size threshold 超過 | (a) `UserMainSubstitution` enum + `from_dispatch` constructor DRY 解消 (= sync/async substitute logic single source of truth) + UserMainKind / UserMainSubstitution / detect_user_main 三者を `user_main.rs` 同居 cohesion 向上、(b) `Transformer::suppress_main_await_wrap` flag + `convert_expr_in_await_context` helper で context-aware suppression structural fix (= 3 entry sites で uniform 適用)、(c) `.claude/rules/file-size-resolution.md` 新設 (= 機械的末尾切り出し禁止 + 周辺ファイル調査 + DRY/凝集度 enumerate + 関連実装も含めた再構成 plan の 4-step procedure) | **(a) Substitute / rewrite logic dispatch arm の symmetric coverage**: sync substitute / async substitute / no substitute の 3 arm 全てが test cell coverage を持つ verify mechanism を Spec stage で確定 (= Rule 9 (a) Dispatch-arm sub-case alignment を substitute logic にも extend)。**(b) Caller-supplied wrap context awareness**: `convert_expr` の substitute-time wrap が source-level wrap と二重に作用する double-wrap bug は Layer 3 直交軸 review 不在で latent 化、Rule 10 axis (i) "AST dispatch hierarchy" に "rewrite / substitute logic の caller-supplied wrap context awareness" を default check axis として追加 (= 改善 v11-3 candidate)。**(c) File size 超過時の機械的末尾切り出し禁止**: 周辺ファイル調査 + DRY/凝集度 enumerate + 関連実装も含めた再構成 plan の 4-step procedure を `file-size-resolution.md` に lock-in (= 改善 v11-2 candidate、本 PRD で NEW rule file 新設) |
+
+**Cross-PRD design pattern summary (v8〜v11 累積)**:
+
+1. **AST recursive walker default + wrapper-decl unwrapping pattern** (v8): `has_top_level_await` 等の "AST に該当 shape が存在するか" predicate で direct interpretation ではなく recursive walker + ExportDecl/TsAs/TsSatisfies/TsTypeAssertion 等 wrapper-decl unwrapping を default 採用
+2. **Enum variant split for silent-drop avoidance** (v9): "実行 trigger 不在だが captured されるべき shape" を別 enum variant に split (= classification under-classification 排除)
+3. **Wrapper variants symmetric pass-through enumerate** (v10): TsAs/TsSatisfies/TsTypeAssertion 等 type wrapper variants で symmetric extension を default、片方だけ拡張は asymmetric drop pattern を発生
+4. **Substitute/rewrite logic dispatch arm symmetric coverage** (v11-1): substitute logic にも Rule 9 (a) Dispatch-arm sub-case alignment を symmetric 適用
+5. **Caller-supplied wrap context awareness** (v11-3): `Transformer::suppress_main_await_wrap` flag pattern = caller-supplied wrap context を flag で suppress する design template
+6. **`file-size-resolution.md` 4-step procedure** (v11-2): 機械的末尾切り出し禁止 + 周辺ファイル調査 + DRY/凝集度 enumerate + 関連実装も含めた再構成 plan
+
+### Framework 改善 candidate (本 PRD I-224 close 時 I-D PRD batch 起票候補、**計 9 件 NEW** = I-224-derived chain v12 + v13 + v13 self-review 1st-round + v13 self-review 2nd-round)
+
+**Note**: 下記 9 candidates は **I-224 PRD chain から derive された subset**。I-D PRD batch 全体の framework 改善 candidates 累積総数 (= I-178/I-183/I-205/I-399 等の earlier PRDs から derive された candidates も含む) は **計 32 件 / 14 rounds adversarial review** (詳細 = TODO `[I-D]` entry 参照)。本 section の 9 candidates は I-224 由来の primary lesson source として archive。**詳細 chain history は前述「v12-2 pattern empirical recurrence chain」table + 後述「4 度連続 v12-2 pattern recurrence」section 参照** (= v2→v3 から始まる subtype A self-claim accuracy gap × 10 度 + subtype B T-task spec wording vs work × 2 度 = 計 12 度 across 13 review rounds)。
+
+| Candidate | Round source | Rule target | Resolution direction |
+|-----------|--------------|-------------|----------------------|
+| **v12-1** | Iteration v12 | `spec-first-prd.md` 「Spec への逆戻り」 procedure | "Implementation stage 着手直前 prerequisite 調査 mandatory" sub-step 追加 (= 各 T task 着手直前に "spec wording / completion criteria が現実と整合するか empirical cross-check" を mandatory step として挿入) |
+| **v12-2** | Iteration v12 | `check-job-review-layers.md` Layer 3 (Structural cross-axis) | "Spec wording と実体 infra work の cross-check" を Layer 3 default check axis に追加 (= Spec stage / Implementation stage transition 時点で spec wording の実体整合性を第三者視点で empirical verify する mechanism) |
+| **v13-1** | Iteration v13 | `spec-first-prd.md` 「Spec への逆戻り」 procedure | v12-1 の structural enforcement strengthening (= manual cross-check 依存だと再発 risk あり、(a) `prd-template` skill / `tdd` skill の Step 0 に automated check 追加 / (b) `audit-prd-rule10-compliance.py` 拡張で auto-detect / (c) 本 PRD I-224 v12+v13 経験を case study として `spec-first-prd.md` に embed) |
+| **v13-2** | Iteration v13 | Web API runtime integration (= 別 architectural concern PRD candidate、I-D batch とは scope 性質異なり) | `transpile_with_builtins()` lib API が `pub struct Promise<T>` 定義のみ load + `impl Promise<T> { fn resolve(value: T) -> ... }` 等 method implementation 不在 → fixture が `Promise.resolve(N)` を含むと compile error E0599。Resolution: 別 PRD で `Promise.resolve` / `Promise.all` / `fetch` / `Response.json` 等 method implementation の load_builtin_types extension |
+| **v13-3** | Iteration v13 | lib / CLI API consistency restoration (= 別 PRD candidate) | `transpile()` lib API は no-builtin、CLI binary は with-builtin が default = lib / CLI 間で fundamental API inconsistency。e2e harness は `transpile()` 経由 (= CLI と異なる pipeline)。Resolution: (a) `transpile()` を builtins-default 化、(b) e2e harness を CLI binary 経由 subprocess invoke、(c) lib API 設計 rationalize |
+| **v13-4** | v13 self-review 1st-round | `check-job-review-layers.md` Layer 4 + `spec-first-prd.md` PRD close procedure | **Self-applied 4-layer review と third-party adversarial review の二重実施 mandatory** at PRD close。Iteration v13 self-review = 3 度連続 v12-2 pattern empirical 補強 source。Resolution: (a) PRD close commit 前の third-party `/check_job` invocation prerequisite 化、(b) self-applied claim "0 findings" を third-party invocation で independent verify、(c) 不一致を framework signal として record |
+| **v13-5** | v13 self-review 1st-round | `spec-stage-adversarial-checklist.md` Rule 9 / Rule 13 | Cell numbering convention single-source-of-truth enforcement。本 PRD で INV-3 = matrix # / e2e fixture filename = sequential 2 surface convention drift で reader confusion 発生 (= 同名 "cell-14" が different matrix cells を表す)。Resolution: framework rule で convention 統一 mandatory + audit script auto-detect |
+| **v13-6** | v13 self-review 1st-round | `spec-first-prd.md` 「Spec への逆戻り」 procedure | "fixture content 変更時の Oracle re-grounding mandatory" sub-step。本 PRD Iteration v13 fixture rewrite (= Promise.resolve → getVal user-defined async fn pattern) で Spec stage artifact #2 (Oracle Observations) を invalidate したが、formal `scripts/observe-tsc.sh` re-run + Oracle re-document 未実施。Resolution: fixture content modification 時に Oracle re-grounding 手順を mandatory 化 |
+| **v13-7 NEW** | v13 self-review 2nd-round (本 round) | `check-job-review-layers.md` Layer 4 + `spec-first-prd.md` PRD close procedure (= v13-4 strengthening) | **`/check_job` recursion convergence criterion**。v13-4 candidate は "self-applied + third-party 二重実施 mandatory" を spec するが **convergence 条件不在** = 1st round → 2nd round で fix work 自体に新 findings 発見 (= meta-finding pattern)、理論的に N round 無限 loop risk。本 round で empirical lock-in (= 1st round 7 findings → fix → 2nd round 4 NEW findings = 1st→2nd round 2 度連続 fix-of-fix pattern)。Resolution direction (4 設計 options を I-D batch 評価): (a) **Convergence criterion**: 0 findings 到達まで recursive invocation、ただし severity classification (Critical/High = continue / Medium/Low = next-PRD-batch defer 可能) / (b) **Max round limit**: e.g., max 3 rounds、3 round で 0 findings 不到達なら remaining findings を I-D batch / new PRD として escalate / (c) **Diminishing returns detection**: round N の findings count が round N-1 と比べて同等以下 + Critical 0 なら convergence と判定 / (d) **Meta-finding tracking**: round N の finding が "round N-1 の fix work 自体に対する finding" (= meta-finding) の場合、別 category として classify (= structurally pure productivity vs perfectionism) |
+
+### 4 度連続 v12-2 pattern recurrence (= v13-4/v13-7 framework strengthening の empirical evidence chain)
+
+本 PRD I-224 chain で **v12-2 pattern (= "Spec wording / claim と actual state の乖離 を self-applied review で検出できない")** が **4 度連続再発** = 真の framework structural gap signal:
+
+1. **Iteration v12** (2026-05-08): T7 spec wording (= rust-runner tokio dep 追加 + ESM-mode runner template 拡張 + observe-tsc.sh CI invoke) **vs** 実体 infra work (= harness 側 ESM mode write、tokio 既存、observe-tsc.sh は spec stage tool で CI runtime 不参与) の **乖離**。Spec への逆戻り procedure 発動で resolve。
+2. **Iteration v13** (2026-05-09): T8 spec wording (= MainStmt::ExprAwait/LetAwait emission を追加 + INV-3 sync/async dispatch trigger 拡張) **vs** 実体 production code (= T1-T5-2 累積実装で完成済) の **乖離**。Spec への逆戻り procedure 発動 + N/A re-classify で resolve。
+3. **v13 self-review 1st-round** (2026-05-09): PRD doc Final 4-Layer Review section "Layer 1-4 全 0 findings" claim **vs** 7 findings reality の **乖離** = third-party `/check_job` で 7 findings (L1-1/2/3/4 + L3-1/2/3 + L4 Trade-off #4) 発見 → in-batch fix 4 件 + I-D batch defer 4 件 (= v13-4/5/6 NEW)。
+4. **v13 self-review 2nd-round** (2026-05-09、本 round): 1st round fix work "structural cohesion 向上" claim **vs** 4 NEW findings reality の **乖離** = third-party `/check_job` で 4 NEW findings (L1-N1 cross-reference table mnemonic factual inaccuracy + L1-N2 sync branch "only" wording factual error + L1-N3 redundant assertion DRY violation + L1-N4 design-decisions.md "5 件 NEW" stale count) + L3-N1 (= /check_job recursion convergence criterion 不在 = meta-finding) 発見 → in-batch fix + v13-7 NEW candidate 起票。
+
+**1 回 = 事故 / 2 回 = 偶然 / 3 回 = pattern / 4 回 = 真の structural framework gap empirical lock-in**。本 4 度連続 chain は I-D PRD batch (= framework rule integration) の v13-4/v13-7 candidates 必須化 evidence。
+
+### 関連実装の structural lock-in artifact (PRD doc 削除後 access path)
+
+PRD doc は `backlog/I-224-top-level-fn-main-mechanism.md` から削除済 (`backlog-management` skill "Completed Item Handling" 規定準拠)。Audit trail は git log で `[CLOSE] I-224 PRD 完了` commit 参照。Structural lock-in artifact:
+
+- `src/transformer/main_synthesis/` (= MainStmt IR + UserMainKind + UserMainSubstitution + classify_dispatch_arm + synthesize_fn_main 全 components)
+- `tests/i224_invariants_test.rs` (INV-1〜INV-7 全 GREEN、特に INV-3 4 sub-case + Edge sub-case full coverage)
+- `tests/i224_helper_test.rs` (Rule 9 (a) 1-to-1 mapping lock-in)
+- `tests/e2e/scripts/i-224/cell-*.ts` (80-cell matrix の in-scope 14 + collision 6 + NA 60 cells 全 verdict locked-in)
+- `scripts/audit-no-pub-fn-init.sh` + `scripts/audit-no-init-call-site.sh` (CI integrated、INV-4 / INV-7 lock-in)
+
+### 参照
+
+- TODO entry `[I-D]` (= 本 5 candidates v13-4/v13-5/v13-6 + 既存 v12-1/v12-2/v13-1/v13-2/v13-3 集約)
+- TODO entry `[I-180]` (= I-224 T9 batch 内 fast-track verify で empirical resolved 2026-05-09、別 PRD 起票不要)
+- git log `[CLOSE] I-224 PRD 完了` commit (= 本 PRD audit trail 全保持)
+
+---
+
 ## 残存 broken window
 
 ### `Item::StructInit::name: String` に display-formatted `"Enum::Variant"` 形式が格納

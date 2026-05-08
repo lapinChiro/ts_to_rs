@@ -1,13 +1,15 @@
 // Cell 74: A6 + B1 + C1 — mixed top-level + sync user main + top-level await
 // Spec: A6 = mixed, B1 = sync `main`, C1 = top-await (INV-3 (c) edge sub-case = sync user main + top-await)
 // Ideal Rust: top-level `const LIT_VAL = 100;` + rename user main → __ts_main + synthesize
-//   `#[tokio::main] async fn main() { let n = compute(); let v = ....await; __ts_main(); println!(...); }`
+//   `#[tokio::main] async fn main() { let n = compute(); let v = getVal(N).await; __ts_main(); println!(...); }`
 //   (sync __ts_main() called non-await from async fn main)
 // Empirical (TS, ESM mode): hoisted main() interleaves with top-await + Stmt::Expr in source order
+// Iteration v13 fixture rewrite (2026-05-08): user-defined `getVal` instead of `Promise.resolve`.
 const LIT_VAL = 100;
 function compute(): number { return 42; }
+async function getVal(n: number): Promise<number> { return n; }
 const n = compute();
 function main(): void { console.log("from sync user main"); }
-const value = await Promise.resolve(74);
+const value = await getVal(74);
 main();
 console.log("got", LIT_VAL, n, value);
