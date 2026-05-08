@@ -123,7 +123,7 @@ I-224 T7 (= ESM upgrade、tokio dependency 追加 + observe-tsc.sh --esm CI flow
    ↓
 ═════ 案 β Phase 1-C: Methodology infra codify ═════
    ↓
-[次] 新 PRD I-D: Framework rule integration cohesive batch (D-1〜D-4 + B2/B3/I-162 lessons + I-224 v3〜v11 framework gap candidates + I-399 Spec stage 2nd-round candidates、計 20 件 = R-1 + R-5 + 改善 v2-1 + v3-4/5/6 + v4-1/2/3 + v5-1/2 + v6-1/2 + v11-1/3/4/5/6/7/8、8 rounds adversarial review 累積)
+[次] 新 PRD I-D: Framework rule integration cohesive batch (D-1〜D-4 + B2/B3/I-162 lessons + I-224 v3〜v11 framework gap candidates + I-399 Spec stage 2nd/3rd-round candidates、計 21 件 = R-1 + R-5 + 改善 v2-1 + v3-4/5/6 + v4-1/2/3 + v5-1/2 + v6-1/2 + v11-1/3/4/5/6/7/8/9、9 rounds adversarial review 累積)
    ↓
 ═════ 案 β Phase 2: L1 Tier 0 priority ═════
    ↓
@@ -165,7 +165,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 | 次優先 2 | L3 | **I-225 (B3)** | Class field の literal-only initializer (annotation 無) で type inference 完成 |
 | 次優先 2 | L3 | **I-162** | Constructor synthesis `Self::new()` for no-explicit-constructor classes |
 | 次優先 3 | L2 | **I-205 T14〜T16** | Class member access dispatch with getter/setter framework 完了 (e2e green-ify + naming refactor) |
-| 次優先 4 (post-I-205 close) | L4 | **I-D Framework rule integration cohesive batch** | task-ID 命名禁止 + Iteration v18 改善 4 件 + T7/T8 framework gap + T5 lessons + Iteration v9/v10/v11 lessons + B2/B3/I-162 lessons + T6a 2nd-round adversarial lessons (3 candidates v11-5/6/7 = handoff doc cross-ref drift detection + double-source consistency axis + Layer 1 factual accuracy semantic check) + I-399 Spec stage 2nd-round candidate (v11-8 = Rule 13 pending verdict severity default = Critical) (cohesive batch、計 20 candidates) |
+| 次優先 4 (post-I-205 close) | L4 | **I-D Framework rule integration cohesive batch** | task-ID 命名禁止 + Iteration v18 改善 4 件 + T7/T8 framework gap + T5 lessons + Iteration v9/v10/v11 lessons + B2/B3/I-162 lessons + T6a 2nd-round adversarial lessons (3 candidates v11-5/6/7 = handoff doc cross-ref drift detection + double-source consistency axis + Layer 1 factual accuracy semantic check) + I-399 Spec stage 2nd-round candidate (v11-8 = Rule 13 pending verdict severity default = Critical) (cohesive batch、計 21 candidates) |
 | L1 Tier 0 | L1 | **PRD 3 (I-177 mutation propagation)** | F1/F3 narrow body 内 mutation の outer Option<T> propagation (silent semantic change 解消) |
 | Class group | L3 | **PRD 2.76 (I-A) + 2.77 (I-B) + 2.8 (I-201-A) + 2.9 (I-202)** | Method static-ness IR field / Class TypeName context detection / AutoAccessor / Object literal getter/setter |
 | L1 silent | L1 | **PRD 7 (I-201-B)** | Decorator framework 完全変換 (TC39 Stage 3) |
@@ -212,7 +212,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 - **I-224 (現 PRD)**: PRD doc + Iteration v8/v9/v10/v11 entries (Spec への逆戻り audit trail、T6a 完了後の 2nd-round adversarial review は doc/CI structural fix のみで Spec 逆戻り不在 = Iteration log 追加なし)
 - **I-225 / I-162 (次 PRD)**: TODO 内 entry + 案 β chain
 - **I-205 T14-T16 (post case-β-1A)**: `backlog/I-205-getter-setter-dispatch-framework.md` の T11 削除 + 新 PRD I-A/I-B migration 注記
-- **PRD I-D (Framework rule integration cohesive batch)**: I-205 close 後 deferred、I-224 v3〜v11 framework gap candidates + I-399 Spec stage 2nd-round candidate を集約 = **計 20 件** (含 T6a 2nd-round v11-5/6/7 + I-399 v11-8)
+- **PRD I-D (Framework rule integration cohesive batch)**: I-205 close 後 deferred、I-224 v3〜v11 framework gap candidates + I-399 Spec stage 2nd-round candidate を集約 = **計 21 件** (含 T6a 2nd-round v11-5/6/7 + I-399 v11-8)
 - **PRD 3 (I-177 本体)**: matrix-driven、案 A (mutation-ref) vs 案 B (writeback) を spec stage で empirical 確定
 - **Phase A Step 5/6/7**: 「開発ロードマップ」section + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)
 - **設計判断 archive**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) (削除禁止 — 過去判断は reference として保持、実装乖離時は最新化)
