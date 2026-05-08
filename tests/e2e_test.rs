@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Condvar, Mutex, OnceLock};
 
 use tempfile::{Builder, TempDir};
@@ -54,18 +55,42 @@ fn runner_instance_paths_for(base_dir: &str, slot: usize) -> RunnerInstancePaths
     }
 }
 
-fn cleanup_generated_runner_sources(src_dir: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(src_dir)?;
-    for entry in fs::read_dir(src_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let is_generated_rs = path.extension().is_some_and(|ext| ext == "rs")
-            && path.file_name().is_some_and(|name| name != "main.rs");
-        if is_generated_rs {
-            fs::remove_file(path)?;
-        }
+/// Computes a deterministic content-hash-derived bin name from Rust source
+/// content. Used by [`E2eRunnerInstance::run_with_source`] and
+/// [`E2eRunnerInstance::run_with_multi_file_sources`] to generate unique
+/// `[[bin]]` names per test source, eliminating the path collision that caused
+/// I-399 stale-binary leak (= different sources sharing `src/main.rs` led to
+/// cargo's per-package fingerprint occasionally reusing stale binaries under
+/// concurrent slot-pool execution).
+///
+/// Uses FNV-1a 64-bit hash (deterministic across processes, no external
+/// dependency, sufficient collision resistance for the ≤1k-test scale of this
+/// suite). The 16-hex-char hash is truncated to 12 and prefixed with `b` to
+/// form a valid Rust identifier (cargo bin names follow Rust ident rules; a
+/// leading digit is forbidden, hence the `b` prefix).
+///
+/// Same content → same bin name → cargo cache reuse (correct binary).
+/// Different content → different bin name → cargo fresh build (no stale
+/// binary risk).
+fn content_hash_bin_name(source: &str) -> String {
+    const FNV_OFFSET: u64 = 14695981039346656037;
+    const FNV_PRIME: u64 = 1099511628211;
+    let mut hash: u64 = FNV_OFFSET;
+    for byte in source.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
     }
-    Ok(())
+    let full = format!("{hash:016x}");
+    format!("b{}", &full[..12])
+}
+
+/// Output of a single `cargo run --bin <hash>` invocation via
+/// [`E2eRunnerInstance::run_with_source`]. Mirrors the relevant fields of
+/// [`std::process::Output`] needed by callers.
+struct RunnerOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    status: ExitStatus,
 }
 
 fn copy_runner_template_file(relative_path: &str, destination_dir: &Path) -> std::io::Result<()> {
@@ -92,28 +117,127 @@ impl E2eRunnerInstance {
         self.manifest_dir.join("ts-exec")
     }
 
-    fn main_rs_path(&self) -> PathBuf {
-        self.src_dir().join("main.rs")
+    fn cargo_toml_path(&self) -> PathBuf {
+        self.manifest_dir.join("Cargo.toml")
     }
 
-    fn reset_single_file_main(&self, rs_source: &str) {
-        cleanup_generated_runner_sources(&self.src_dir())
-            .unwrap_or_else(|e| panic!("failed to cleanup runner src dir: {e}"));
-        fs::write(self.main_rs_path(), rs_source)
-            .unwrap_or_else(|e| panic!("failed to write runner main.rs: {e}"));
+    /// Appends a `[[bin]]` entry to the slot-local `Cargo.toml` if not already
+    /// present. Idempotent: subsequent calls with the same `bin_name` are
+    /// no-ops (= same source content reuses same bin entry, cargo cache hit
+    /// reuses correct binary).
+    ///
+    /// Per-slot manifest_dir means each slot's Cargo.toml accumulates its own
+    /// `[[bin]]` entries over the test session; per-test isolation is preserved
+    /// because each test's source has a unique content-hash-derived bin name.
+    /// Cross-slot is independent (each slot has its own Cargo.toml).
+    fn ensure_bin_entry(&self, bin_name: &str, rs_path_relative: &str) {
+        let toml_path = self.cargo_toml_path();
+        let toml_content = fs::read_to_string(&toml_path)
+            .unwrap_or_else(|e| panic!("failed to read Cargo.toml: {e}"));
+        let marker = format!("name = \"{bin_name}\"");
+        if !toml_content.contains(&marker) {
+            let entry =
+                format!("\n[[bin]]\nname = \"{bin_name}\"\npath = \"{rs_path_relative}\"\n");
+            let mut file = fs::OpenOptions::new()
+                .append(true)
+                .open(&toml_path)
+                .unwrap_or_else(|e| panic!("failed to open Cargo.toml for append: {e}"));
+            file.write_all(entry.as_bytes())
+                .unwrap_or_else(|e| panic!("failed to append Cargo.toml: {e}"));
+        }
     }
 
-    fn reset_multi_file_sources(&self, main_rs: &str, modules: &[(String, String)]) {
-        let src_dir = self.src_dir();
-        cleanup_generated_runner_sources(&src_dir)
-            .unwrap_or_else(|e| panic!("failed to cleanup runner src dir: {e}"));
+    /// Runs a single-file Rust test by writing the source to a content-hash-
+    /// derived path, ensuring a `[[bin]]` entry, and invoking
+    /// `cargo run --bin <hash>`.
+    ///
+    /// Replaces the legacy `reset_single_file_main` + manual `cargo run` chain
+    /// (which shared `src/main.rs` across tests in same slot, exposing I-399
+    /// stale-binary leak under concurrent slot-pool execution).
+    ///
+    /// Source content → SHA-derived (FNV-1a) bin name `b<12-hex>` → unique
+    /// `src/<bin>.rs` path → unique cargo per-bin fingerprint → no path
+    /// collision = no stale binary leak (= H1〜H5 hypothesis 全 bulletproof per
+    /// `report/I-399-root-cause-investigation.md`).
+    fn run_with_source(&self, rs_source: &str, opts: &E2eOptions<'_>) -> RunnerOutput {
+        let bin_name = content_hash_bin_name(rs_source);
+        let rs_filename = format!("{bin_name}.rs");
+        let rs_path = self.src_dir().join(&rs_filename);
+        fs::create_dir_all(self.src_dir())
+            .unwrap_or_else(|e| panic!("failed to create src dir: {e}"));
+        fs::write(&rs_path, rs_source)
+            .unwrap_or_else(|e| panic!("failed to write {}: {e}", rs_path.display()));
+        self.ensure_bin_entry(&bin_name, &format!("src/{rs_filename}"));
+        self.invoke_cargo_run(&bin_name, opts)
+    }
+
+    /// Runs a multi-file Rust test (= a synthesized main with `mod foo;`
+    /// declarations + sibling module files) by writing all sources under a
+    /// content-hash-derived directory `src/<bin>/main.rs` + `src/<bin>/<mod>.rs`,
+    /// ensuring a `[[bin]]` entry pointing at `src/<bin>/main.rs`, and
+    /// invoking `cargo run --bin <hash>`.
+    ///
+    /// Replaces the legacy `reset_multi_file_sources` + manual `cargo run`
+    /// chain. The bin name is derived from the main source content; module
+    /// files share the same bin's directory but their content does not affect
+    /// the bin name (= content-hash uniqueness is keyed on the entry-point
+    /// source, which is sufficient because two distinct test cases produce
+    /// distinct main.rs sources via the `mod` prelude).
+    fn run_with_multi_file_sources(
+        &self,
+        main_rs: &str,
+        modules: &[(String, String)],
+        opts: &E2eOptions<'_>,
+    ) -> RunnerOutput {
+        let bin_name = content_hash_bin_name(main_rs);
+        let bin_dir = self.src_dir().join(&bin_name);
+        fs::create_dir_all(&bin_dir)
+            .unwrap_or_else(|e| panic!("failed to create bin dir {}: {e}", bin_dir.display()));
         for (stem, source) in modules {
-            let mod_path = src_dir.join(format!("{stem}.rs"));
+            let mod_path = bin_dir.join(format!("{stem}.rs"));
             fs::write(&mod_path, source)
                 .unwrap_or_else(|e| panic!("failed to write {}: {e}", mod_path.display()));
         }
-        fs::write(self.main_rs_path(), main_rs)
-            .unwrap_or_else(|e| panic!("failed to write runner main.rs: {e}"));
+        let main_path = bin_dir.join("main.rs");
+        fs::write(&main_path, main_rs)
+            .unwrap_or_else(|e| panic!("failed to write {}: {e}", main_path.display()));
+        self.ensure_bin_entry(&bin_name, &format!("src/{bin_name}/main.rs"));
+        self.invoke_cargo_run(&bin_name, opts)
+    }
+
+    /// Invokes `cargo run --bin <bin_name>` with the slot-local manifest_dir +
+    /// target_dir + opts (env vars, optional stdin), returning the captured
+    /// output. Shared by [`run_with_source`] and [`run_with_multi_file_sources`].
+    fn invoke_cargo_run(&self, bin_name: &str, opts: &E2eOptions<'_>) -> RunnerOutput {
+        let mut cmd = Command::new("cargo");
+        cmd.args(["run", "--quiet", "--bin", bin_name])
+            .current_dir(&self.manifest_dir)
+            .env("CARGO_TARGET_DIR", &self.target_dir);
+        for (k, v) in &opts.env {
+            cmd.env(k, v);
+        }
+        let output = if let Some(stdin_data) = opts.stdin {
+            cmd.stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let mut child = cmd.spawn().expect("failed to spawn cargo run");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(stdin_data.as_bytes())
+                .expect("failed to write stdin");
+            child
+                .wait_with_output()
+                .expect("failed to wait for cargo run")
+        } else {
+            cmd.output().expect("failed to execute cargo run")
+        };
+        RunnerOutput {
+            stdout: output.stdout,
+            stderr: output.stderr,
+            status: output.status,
+        }
     }
 
     fn prepare_single_file_ts_exec(&self, source_path: &Path, ts_source: &str) -> TempFile {
@@ -438,37 +562,10 @@ fn execute_e2e_with_runner(runner: &E2eRunnerLease, name: &str, opts: &E2eOption
         transpile(&ts_source).unwrap_or_else(|e| panic!("transpile failed for '{name}': {e}"));
     let rs_source = strip_internal_use_statements(&rs_source);
 
-    // Step 2: Write Rust source and run in a runner-local manifest/target dir.
-    runner.runner().reset_single_file_main(&rs_source);
-
-    let mut rust_cmd = Command::new("cargo");
-    rust_cmd
-        .args(["run", "--quiet"])
-        .current_dir(&runner.runner().manifest_dir)
-        .env("CARGO_TARGET_DIR", &runner.runner().target_dir);
-    for (k, v) in &opts.env {
-        rust_cmd.env(k, v);
-    }
-    let rust_output = if let Some(stdin_data) = opts.stdin {
-        rust_cmd.stdin(std::process::Stdio::piped());
-        let mut child = rust_cmd
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .expect("failed to spawn cargo run");
-        use std::io::Write;
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(stdin_data.as_bytes())
-            .expect("failed to write stdin");
-        child
-            .wait_with_output()
-            .expect("failed to wait for cargo run")
-    } else {
-        rust_cmd.output().expect("failed to execute cargo run")
-    };
+    // Step 2: Write Rust source to a content-hash-derived bin and run via
+    // `cargo run --bin <hash>` (= I-399 structural fix, eliminates stale-binary
+    // leak from shared `src/main.rs` path).
+    let rust_output = runner.runner().run_with_source(&rs_source, opts);
 
     assert!(
         rust_output.status.success(),
@@ -664,20 +761,42 @@ fn test_runner_instance_paths_are_isolated_per_slot() {
     assert!(p1.manifest_dir.ends_with("runner-1/rust-runner"));
 }
 
+// I-399 structural fix: `cleanup_generated_runner_sources` was removed because
+// per-test content-hash-derived bin names eliminate the path collision that
+// the cleanup was guarding against (= each test's `src/<hash>.rs` is a unique
+// path, no stale module files to clean between tests). Slot-local tempdir
+// cleanup at session end (TempDir Drop) handles cross-session hygiene.
+//
+// The test below replaces `test_cleanup_generated_runner_sources_*` with a
+// direct verification of the content-hash mechanism (= same content yields
+// same bin name, different content yields different bin names, both prefixed
+// with `b` to form valid Rust identifiers).
+
 #[test]
-fn test_cleanup_generated_runner_sources_removes_stale_modules_but_keeps_main() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let src_dir = temp.path().join("src");
-    fs::create_dir_all(&src_dir).expect("create src");
-    fs::write(src_dir.join("main.rs"), "fn main() {}\n").expect("write main");
-    fs::write(src_dir.join("alpha.rs"), "pub fn alpha() {}\n").expect("write alpha");
-    fs::write(src_dir.join("beta.rs"), "pub fn beta() {}\n").expect("write beta");
+fn test_content_hash_bin_name_is_deterministic_for_same_content() {
+    let source = "fn main() { println!(\"hello\"); }";
+    let bin_a = content_hash_bin_name(source);
+    let bin_b = content_hash_bin_name(source);
+    assert_eq!(bin_a, bin_b, "same content must yield identical bin name");
+    assert_eq!(
+        bin_a.len(),
+        13,
+        "bin name format = 'b' prefix + 12 hex chars"
+    );
+    assert!(
+        bin_a.starts_with('b'),
+        "bin name must start with 'b' to ensure valid Rust identifier"
+    );
+}
 
-    cleanup_generated_runner_sources(&src_dir).expect("cleanup generated sources");
-
-    assert!(src_dir.join("main.rs").exists());
-    assert!(!src_dir.join("alpha.rs").exists());
-    assert!(!src_dir.join("beta.rs").exists());
+#[test]
+fn test_content_hash_bin_name_differs_for_distinct_content() {
+    let bin_a = content_hash_bin_name("fn main() { println!(\"a\"); }");
+    let bin_b = content_hash_bin_name("fn main() { println!(\"b\"); }");
+    assert_ne!(
+        bin_a, bin_b,
+        "distinct content must yield distinct bin names (= path collision elimination)"
+    );
 }
 
 #[test]
@@ -849,17 +968,14 @@ fn run_e2e_multi_file_test(name: &str) {
     let mod_decls: String = mod_names.iter().map(|m| format!("mod {m};\n")).collect();
     let full_main = format!("{mod_decls}{main_rs}");
 
-    runner
-        .runner()
-        .reset_multi_file_sources(&full_main, &generated_modules);
-
-    // Run Rust
-    let rust_output = Command::new("cargo")
-        .args(["run", "--quiet"])
-        .current_dir(&runner.runner().manifest_dir)
-        .env("CARGO_TARGET_DIR", &runner.runner().target_dir)
-        .output()
-        .expect("failed to execute cargo run");
+    // Write multi-file Rust sources to a content-hash-derived bin dir and run
+    // via `cargo run --bin <hash>` (= I-399 structural fix, mirror of the
+    // single-file flow with `src/<bin>/main.rs` + `src/<bin>/<mod>.rs` layout).
+    let rust_output = runner.runner().run_with_multi_file_sources(
+        &full_main,
+        &generated_modules,
+        &E2eOptions::default(),
+    );
 
     assert!(
         rust_output.status.success(),
