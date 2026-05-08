@@ -63,3 +63,13 @@ jobs:
 
       - name: Audit PRD Rule 10/11/12 + Rule 4 (4-3) compliance
         run: python3 scripts/audit-prd-rule10-compliance.py
+
+      # I-224 INV-4 invariant: `pub fn init` mechanism (legacy library-mode
+      # emission target) は I-224 T4 で structural fix 完了 (= fn main 統合)。
+      # 本 step は merge gate として src/ / tools/ / tests/e2e/rust-runner/ を
+      # scan、再混入を 0 hits invariant で block。snapshot artefacts
+      # (tests/e2e/scripts/i-205/cell-*.rs) は advisory のみで gate しない (=
+      # e2e suite 再実行で snapshot 自動 refresh)。詳細は doc/handoff/
+      # design-decisions.md `## Switch emission と label hygiene > 1-f` 参照。
+      - name: Audit no `pub fn init` (I-224 INV-4 lock-in)
+        run: ./scripts/audit-no-pub-fn-init.sh

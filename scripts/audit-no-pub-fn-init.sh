@@ -7,9 +7,13 @@
 #
 # Allowed exceptions:
 #   - Backlog / PRD doc files (`backlog/*.md`) — historical references in spec.
-#   - Generated e2e snapshot artefacts (`tests/e2e/scripts/i-205/cell-*.rs`) —
-#     these are regenerated as `fn main` after I-224 T5; the audit checks the
-#     source-of-truth `src/` tree and rejects new generators.
+#   - Generated e2e snapshot artefacts (`tests/e2e/scripts/**/*.rs`) —
+#     gitignored working-tree-only artefacts produced by `cargo run --`;
+#     post-I-224-T4 invocations emit `fn main` while older locally-cached
+#     copies may retain `pub fn init`. CI fresh clones see 0 advisory hits
+#     (= gitignored, never created in clone). Advisory paths are independent
+#     of the enforced 0-hits invariant — audit checks the source-of-truth
+#     `src/` tree (committed) and rejects new generators there.
 #
 # Usage:
 #   ./scripts/audit-no-pub-fn-init.sh

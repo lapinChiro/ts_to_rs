@@ -65,27 +65,66 @@ dead_code lint 発火しない。
 
 ## Switch emission と label hygiene (I-153/I-154)
 
-### 1. `__ts_` prefix namespace reservation
+### 1. `__ts_` prefix namespace reservation (I-153/I-154 + T7 + I-224 T1)
 
-ts_to_rs が emission する全 internal label は `__ts_` prefix で統一:
+ts_to_rs が emission する全 internal identifier は `__ts_` prefix で統一。reservation の **canonical 単一 source of truth** は [`check_ts_internal_label_namespace`](../../src/transformer/statements/mod.rs) (`src/transformer/statements/mod.rs:27-47`) の doc comment — 新規 reservation を追加する際は必ず同 doc を更新する。本 handoff doc は 3 category (labels / value bindings / function rename target) の handoff 説明であり、固定 list の duplication は避ける。
+
+#### 1-a. Labels (statement-level、I-153/I-154 origin)
 
 | Label | 位置 | 用途 |
 |-------|------|------|
-| `'__ts_switch` | `src/transformer/statements/switch.rs` | switch case body 内 nested break の target (conditional wrap 発動時のみ emit) |
+| `'__ts_switch` | `src/transformer/statements/switch.rs:179` (`TS_INTERNAL_SWITCH_LABEL`) | switch case body 内 nested break の target (conditional wrap 発動時のみ emit) |
 | `'__ts_try_block` | `src/transformer/statements/error_handling.rs:125` | try body の throw / break / continue rewrite 先 |
 | `'__ts_do_while` | `src/transformer/statements/loops.rs:360/382` | do-while body 内 continue の rewrite 先 (needs_labeled_block 発動時) |
-| `'__ts_do_while_loop` | `src/transformer/statements/loops.rs:346` | do-while の outer Loop label fallback (user label なしの時) |
+| `'__ts_do_while_loop` | `src/transformer/statements/loops.rs:356` | do-while の outer Loop label fallback (user label なしの時) |
 
-User の `__ts_*` prefix 使用は 3 entry point で lint reject (`check_ts_internal_label_namespace`
-@ `src/transformer/statements/mod.rs`):
-- `convert_stmt::ast::Stmt::Labeled` (宣言)
-- `convert_stmt::ast::Stmt::Break` (labeled break 参照)
-- `convert_stmt::ast::Stmt::Continue` (labeled continue 参照)
-- defense-in-depth: `convert_labeled_stmt` (loops.rs) 内にも同じ check
+#### 1-b. Value bindings (expression-level、setter / UpdateExpr / compound-assign desugar 用、I-205 由来)
 
-**引継ぎ**: 新規 internal label 追加時は必ず `__ts_` prefix を使用する。user label との
-collision は lint で構造的に block される。SWC parser が未定義 label への break を accept
-する挙動 (tsx は reject) にも対応済。変数名 hygiene は別 concern (I-159)。
+| Binding | constant | 位置 | 用途 |
+|---------|----------|------|------|
+| `__ts_old` | `TS_OLD_BINDING` | `src/transformer/expressions/mod.rs:62` | postfix UpdateExpr / compound assign の old-value 保存 (B4 setter dispatch) |
+| `__ts_new` | `TS_NEW_BINDING` | `src/transformer/expressions/mod.rs:75` | prefix UpdateExpr / compound assign の new-value 保存 (B4 setter dispatch) |
+| `__ts_recv` | `TS_RECV_BINDING` | `src/transformer/expressions/mod.rs:103` | side-effect 持ち receiver の 1-evaluate 保証用 IIFE binding (I-205 INV-3 source-side single-evaluation contract) |
+
+#### 1-c. Function rename target (module-level、I-224 T1 で追加、INV-5)
+
+| Identifier | constant | 位置 | 用途 |
+|------------|----------|------|------|
+| `__ts_main` | `TS_MAIN_RENAME` | `src/transformer/expressions/mod.rs:133` | top-level executable script の `fn main` 自動生成時に user-defined `function main` を rename して collision 回避 (I-224 = B2 fn main mechanism)。INV-5 で Tier 2 honest reject |
+
+#### 1-d. Lint enforcement (label-side + module-level identifier-side、symmetric)
+
+User の `__ts_*` prefix 使用は **2 axis × 全 reachable site** で構造的 reject:
+
+- **Label axis** (`check_ts_internal_label_namespace` @ `src/transformer/statements/mod.rs`、3 entry points + defense-in-depth):
+  - `convert_stmt::ast::Stmt::Labeled` (label 宣言)
+  - `convert_stmt::ast::Stmt::Break` (labeled break 参照)
+  - `convert_stmt::ast::Stmt::Continue` (labeled continue 参照)
+  - defense-in-depth: `convert_labeled_stmt` (loops.rs) 内にも同 check
+- **Module-level identifier axis** (`check_ts_internal_fn_name_namespace` @ `src/transformer/statements/mod.rs:88` 経由 `scan_for_ts_namespace_collisions` @ `src/transformer/namespace_lint.rs`、I-224 T1 で追加):
+  - `transform_module` / `transform_module_collecting` 双方が A-axis dispatch (`is_executable_mode` / `detect_user_main` / `try_capture_module_item_into_main_stmts`) の **手前** で全 module-level Decl を walk、Fn / Class / Var (BindingIdent) / Using / TsInterface / TsTypeAlias / TsEnum / TsModule + ExportDecl-wrapped / ExportDefaultDecl の各 variant で `__ts_*` 識別子を Tier 2 honest reject
+  - SWC AST `_` arm 不在 (Rule 11 (d-1) 自己適用準拠、新 variant 追加時は compile error で全 dispatch 強制更新)
+
+#### 1-e. Reservation rationale + INV-5 (I-224 source)
+
+`__ts_` namespace reservation は ts_to_rs の **rename / synthesis mechanism の structural foundation**。reservation 不在では以下の silent collision risk が発生する:
+
+- **Label**: user `__ts_switch:` label が存在すると nested break rewrite が user label を target にする silent semantic change (= I-153/I-154 origin)
+- **Value binding**: user `let __ts_old = ...` と T7 setter dispatch の `__ts_old` 内側 emission が同 scope で重複し semantic shadowing (= T7 origin)
+- **Module-level identifier (I-224 T1 + INV-5)**: user `function __ts_main()` と I-224 synthesize の rename target `__ts_main` が module scope で collision、Rust E0428 duplicate definitions で compile fail。lint で **identifier-level reservation を A-axis structural dispatch より優先** することで synthesis の prerequisite を構造的に保証
+
+INV-5 (I-224 invariant) は本 reservation を `__ts_main` に拡張、reachable B4 cells (matrix # 9 / 19 / 20 / 29 / 39 / 40 / 49 / 59 / 69 / 79 / 80) で全 collision を Tier 2 honest reject する。詳細は [`backlog/I-224-top-level-fn-main-mechanism.md`](../../backlog/I-224-top-level-fn-main-mechanism.md) `## Invariants > INV-5` 参照。
+
+#### 1-f. CI invariant lock-in
+
+`pub fn init` mechanism (旧 library mode emission target) は I-224 T4 で structural fix 完了、CI script `scripts/audit-no-pub-fn-init.sh` (= INV-4 lock-in) が enforced paths (`src/` / `tools/` / `tests/e2e/rust-runner/`) を merge gate として scan、再混入を 0 hits invariant で block する (失敗時は exit 1 で merge block)。
+
+`tests/e2e/scripts/**/*.rs` (cell-by-cell の `cargo run -- <fixture>.ts` 出力 artefact) は `.gitignore` 配下の **working-tree-only artefact** (= committed history に存在せず、各 developer の `cargo run --` 実行履歴に応じて post-I-224-T4 converter 出力 (`fn main`) と pre-I-224-T4 converter 出力 (`pub fn init`、過去 invocation 由来) が混在し得る)。CI fresh clone では生成自体が起きないため audit advisory hits は 0 件 (CI exit code 不影響)、ローカル working tree のみ advisory として表示する設計。advisory mode は **transient working-tree state** を可視化する補助情報であり、enforced paths の 0 hits invariant とは independent な軸。
+
+**引継ぎ**:
+- 新規 `__ts_*` reservation 追加時は **必ず `src/transformer/statements/mod.rs:27-47` の canonical doc** + 該当 constant 定義 + 該当 lint walker (label 側 or module-level 側) を同時更新する。doc-only 追加は禁止 (= reservation の structural enforcement に bypass する route が生まれる)
+- user identifier 衝突は label / module-level 双方で lint reject される。SWC parser が未定義 label への break を accept する挙動 (tsx は reject) にも対応済
+- 変数名 hygiene の history 詳細は I-159 参照 (本 section が現在の単一 source of truth)
 
 ### 2. `rewrite_nested_bare_break_in_stmts` walker 設計パターン
 

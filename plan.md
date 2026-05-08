@@ -11,18 +11,18 @@
 
 ## 現在の状態 (2026-05-08)
 
-**進行中**: PRD α-1 (I-224 = B2 fn main mechanism) Implementation Stage、T5 完了 (T5-1 + T5-2)、T6a 着手前。
+**進行中**: PRD α-1 (I-224 = B2 fn main mechanism) Implementation Stage、T6a 完了 (I-154 doc 拡張 + audit-no-pub-fn-init.sh CI integration)、T7 着手前。
 
-**次着手**: T6a (I-154 namespace doc 更新 + `audit-no-pub-fn-init.sh` CI integration + 4-layer review)。詳細は下記「[/start 再開時の手順](#start-再開時の手順)」参照。
+**次着手**: T7 (Test harness ESM upgrade permanent integration、Option β cohesive batch infra)。詳細は下記「[/start 再開時の手順](#start-再開時の手順)」参照。
 
-### Quality Gate (post T5-2 + Iteration v11 = initial fix + deep review structural fix + 2nd review unit tests + /check_problem TODO 起票)
+### Quality Gate (post T6a = I-154 doc 3-category 拡張 + scripts/audit-no-pub-fn-init.sh CI integration + 4-layer review = pre-existing line-ref drift 2 件 broken-window fix)
 
 | 指標 | 値 |
 |------|-----|
-| cargo test (24 binaries) | lib **3546** (+4 = `UserMainSubstitution::from_dispatch` 10-cell decision table + `is_active`/`is_async` predicates + cross-predicate invariant) / e2e **186** + 93 ignored / integration 122 / compile 3 / i224_invariants 7 / i224_helper 5 / i205_invariants 2 + 5 ignored / i205_helper 4 / 全 green / 0 fail |
-| cargo clippy / fmt / file-line | 0 warnings / 0 diffs / 全 .rs file < 1000 行 (transformer/mod.rs 972 / main_synthesis/mod.rs 989 / expressions/mod.rs 935 / user_main.rs 505) |
-| audit-prd-rule10-compliance.py / audit-no-pub-fn-init.sh / audit-no-init-call-site.sh | PASS / exit=0 (INV-4 + INV-7 lock-in) |
-| Hono bench | clean **107** / errors **72** at SHA-pinned 027e3df (= T4 / T5-1 baseline 107/72 → 0/0 = **Preservation** classification per `prd-completion.md` Tier-transition compliance) |
+| cargo test (24 binaries) | lib **3546** (T5-2 baseline 完全一致、T6a は src/ 無変更) / integration 122 / compile 3 / i224_invariants 7 / i224_helper 5 / i205_invariants 2 + 5 ignored / i205_helper 4 / 全 green。e2e は test infra non-determinism (= 新 I-399 起票、parallel 9 fail / serial 8 fail (異なる cell set)、T6a 因果無関係 = code 0 行変更で baseline と一致、I-180 entry が誤って参照していた未起票 I-173 を I-399 として正式起票完了) のため本 commit では別 PRD scope と認識 |
+| cargo clippy / fmt / file-line | 0 warnings / 0 diffs / 全 .rs file < 1000 行 (transformer/mod.rs 931 / main_synthesis/mod.rs 974 / expressions/mod.rs 935 / user_main.rs 389) |
+| audit-prd-rule10-compliance.py / audit-no-pub-fn-init.sh (CI-integrated post T6a) / audit-no-init-call-site.sh | PASS / exit=0 (INV-4 + INV-7 + CI merge gate lock-in) |
+| Hono bench | clean **107** / errors **72** at SHA-pinned 027e3df (= T6a doc+CI 変更で code 不変、Preservation classification 維持) |
 
 **bench 非決定性**: ±1 clean / ±2 errors の noise variance を [I-172] として記録 (test/bench infra defect、別 PRD)。
 
@@ -36,8 +36,8 @@
 | T4: transform_module refactor + `pub fn init` 廃止 (INV-4 fill-in) | ✓ 完了 | 2026-05-07 |
 | **T5-1**: Existing C0 cells e2e green-ify + I-205 cell-09 unblock + INV-1 fill-in | ✓ 完了 | 2026-05-08 |
 | **T5-2**: NEW C0 fixtures e2e green (cell-77 GREEN + cell-41 / cell-79 Tier 2 lock-in 確認) + B2 .await wrap fix (cells 11/23/75 unblock = Iteration v11 Spec への逆戻り) + INV-7 fill-in + 4-layer review | ✓ 完了 | 2026-05-08 |
-| T6a: I-154 doc + audit script CI integration | **次着手** | — |
-| T7: Test harness ESM upgrade permanent integration | 未着手 | — |
+| **T6a**: I-154 namespace doc 3-category 拡張 (labels + value bindings + fn rename target) + `scripts/audit-no-pub-fn-init.sh` CI integration (PR merge gate) + 4-layer review (Layer 1 で pre-existing line-ref drift 2 件 broken-window fix) | ✓ 完了 | 2026-05-08 |
+| T7: Test harness ESM upgrade permanent integration | **次着手** | — |
 | T8: Top-level await synthesis logic | 未着手 | — |
 | T9: Axis C1 cells e2e green + Hono bench verify + `[CLOSE]` PRD 完了 | 未着手 | — |
 
@@ -60,29 +60,25 @@
 ## /start 再開時の手順
 
 ### Step 1: 状態確認
-1. **本 plan.md** を読む = 現在の状態 + 次着手 = T5-2
+1. **本 plan.md** を読む = 現在の状態 + 次着手 = T7
 2. **PRD doc を読む** = [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) (= 作業 reference doc、全 Iteration log + Task spec + Sub-commits 一覧)
-3. **TODO 確認** = [`TODO`](TODO) (本 PRD scope 外で起票済の I-395 / I-396 / I-397 等の follow-up scope item)
+3. **TODO 確認** = [`TODO`](TODO) (本 PRD scope 外で起票済の I-172 / I-395 / I-396 / I-397 / I-398 / **I-399** 等の follow-up scope item、最新 = I-399 = E2E test isolation defect 2026-05-08 起票)
 
-### Step 2: T6a 着手 (PRD doc § Implementation Stage Tasks > T6a 参照)
+### Step 2: T7 着手 (PRD doc § Implementation Stage Tasks > T7 参照)
 
 **Work**:
-1. I-154 namespace doc (`.claude/rules/` 配下 or 該当 doc) に `__ts_main` 追記 + reservation rationale (= 本 PRD source) 記載
-2. `scripts/audit-no-pub-fn-init.sh` を CI workflow `.github/workflows/ci.yml` に integrate (= PR merge gate)
-3. `/check_job` 4-layer review (Layer 1-4 全 0 findings 達成)
+1. T7-1: `tests/e2e/rust-runner/Cargo.toml` に `tokio = { version = "1", features = ["macros", "rt-multi-thread"] }` 追加 (= `#[tokio::main]` 用) + `tests/e2e_test.rs` runner template を ESM-mode 拡張、representative C1 (cell 12/14 等) で probe pass
+2. T7-2: `scripts/observe-tsc.sh --esm --no-auto-main` を CI workflow から正式 invoke (= Spec stage TS-5 trial の permanent integration) + Axis C1 fixtures が ESM mode で oracle observation 取得 + `/check_job` 4-layer review
 
 **Completion criteria**:
-- I-154 doc update
-- CI step 追加
-- audit-no-pub-fn-init.sh が CI で 0 hits invariant lock-in 動作確認
+- rust-runner build pass + cargo run 成功 (representative C1 cell)
+- CI で Axis C1 fixtures が ESM mode oracle 取得
 - Layer 1-4 全 0 findings
 
-**Commit message**: `[WIP] I-224 T6a 完了: I-154 namespace doc update + scripts/audit-no-pub-fn-init.sh CI integration + 4-layer review pass`
+**Commit message**: `[WIP] I-224 T7 完了: scripts/observe-tsc.sh --esm permanent CI flow + 4-layer review pass`
 
-**Note**: 旧 T6 に含まれていた `audit-prd-rule10-compliance.py` reinforce task は別 PRD I-D scope へ migrate 済 (= R-1〜v6-2 計 13 candidates、Rule 1/12 framework 改善)。
-
-### Step 3: T6a 完了後の chain
-T7 (ESM harness upgrade) → T8 (Top-await synthesis) → T9 (Axis C1 e2e green + `[CLOSE]` PRD 完了)。
+### Step 3: T7 完了後の chain
+T8 (Top-await synthesis logic、INV-3 sync/async dispatch trigger 拡張) → T9 (Axis C1 cells e2e green-ify + Hono bench Tier-transition + `[CLOSE]` PRD 完了)。
 
 ---
 
@@ -98,7 +94,7 @@ T7 (ESM harness upgrade) → T8 (Top-await synthesis) → T9 (Axis C1 e2e green 
    ↓
 ═════ 案 β Phase 1-A: I-205 T14 prerequisite (3 PRD 逐次起票) ═════
    ↓
-[進行中] PRD α-1 = I-224 (B2 fn main mechanism) — T5 完了 2026-05-08 (T5-1 + T5-2 = Iteration v11 B2 .await wrap fix)、T6a 次着手
+[進行中] PRD α-1 = I-224 (B2 fn main mechanism) — T6a 完了 2026-05-08 (I-154 doc 3-category 拡張 + audit-no-pub-fn-init.sh CI integration + Layer 1 broken-window fix)、T7 次着手
    ↓
 [次] PRD α-2 = I-225 (B3 class field literal-only initializer type inference)
    ↓
@@ -114,7 +110,7 @@ T7 (ESM harness upgrade) → T8 (Top-await synthesis) → T9 (Axis C1 e2e green 
    ↓
 ═════ 案 β Phase 1-C: Methodology infra codify ═════
    ↓
-[次] 新 PRD I-D: Framework rule integration cohesive batch (D-1〜D-4 + B2/B3/I-162 lessons + I-224 v3〜v10 framework gap candidates)
+[次] 新 PRD I-D: Framework rule integration cohesive batch (D-1〜D-4 + B2/B3/I-162 lessons + I-224 v3〜v11 framework gap candidates 19 件 = R-1 + R-5 + 改善 v2-1 + v3-4/5/6 + v4-1/2/3 + v5-1/2 + v6-1/2 + v11-1/3/4/5/6/7、7 rounds adversarial review 累積)
    ↓
 ═════ 案 β Phase 2: L1 Tier 0 priority ═════
    ↓
@@ -155,7 +151,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 | 次優先 1 | L3 | **I-225 (B3)** | Class field の literal-only initializer (annotation 無) で type inference 完成 |
 | 次優先 2 | L3 | **I-162** | Constructor synthesis `Self::new()` for no-explicit-constructor classes |
 | 次優先 3 | L2 | **I-205 T14〜T16** | Class member access dispatch with getter/setter framework 完了 (e2e green-ify + naming refactor) |
-| 次優先 4 (post-I-205 close) | L4 | **I-D Framework rule integration cohesive batch** | task-ID 命名禁止 + Iteration v18 改善 4 件 + T7/T8 framework gap + T5 lessons + Iteration v9/v10 lessons + B2/B3/I-162 lessons (cohesive batch) |
+| 次優先 4 (post-I-205 close) | L4 | **I-D Framework rule integration cohesive batch** | task-ID 命名禁止 + Iteration v18 改善 4 件 + T7/T8 framework gap + T5 lessons + Iteration v9/v10/v11 lessons + B2/B3/I-162 lessons + T6a 2nd-round adversarial lessons (3 candidates v11-5/6/7 = handoff doc cross-ref drift detection + double-source consistency axis + Layer 1 factual accuracy semantic check) (cohesive batch、計 19 candidates) |
 | L1 Tier 0 | L1 | **PRD 3 (I-177 mutation propagation)** | F1/F3 narrow body 内 mutation の outer Option<T> propagation (silent semantic change 解消) |
 | Class group | L3 | **PRD 2.76 (I-A) + 2.77 (I-B) + 2.8 (I-201-A) + 2.9 (I-202)** | Method static-ness IR field / Class TypeName context detection / AutoAccessor / Object literal getter/setter |
 | L1 silent | L1 | **PRD 7 (I-201-B)** | Decorator framework 完全変換 (TC39 Stage 3) |
@@ -178,6 +174,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | PRD / Phase | 日付 | 後続への影響 |
 |-------------|------|-------------|
+| **I-224 T6a 完了 + adversarial 2nd-round /check_job 反映** (I-154 namespace handoff doc 3-category 拡張 = 1-a labels (4 entries) + 1-b value bindings (`__ts_old`/`__ts_new`/`__ts_recv`、I-205 setter dispatch desugar) + 1-c function rename target (`__ts_main`、I-224 T1、INV-5) + canonical 単一 source of truth pointer (`src/transformer/statements/mod.rs:27-47`) で固定 list duplication 回避 + 1-d lint enforcement 2 axis (label-side 4 sites + module-level identifier-side `scan_for_ts_namespace_collisions`) + 1-e reservation rationale + 1-f CI invariant lock-in section / `scripts/audit-no-pub-fn-init.sh` を `.github/workflows/ci.yml` に CI step "Audit no `pub fn init` (I-224 INV-4 lock-in)" として integrate (PR merge gate、enforced paths = `src/` + `tools/` + `tests/e2e/rust-runner/`、advisory paths = `tests/e2e/scripts/**/*.rs` gitignored working-tree-only artefacts) / `/check_job` 4-layer review **2 round** pass: 1st round で line-ref drift 2 件 (`__ts_main` :130→:133、`__ts_do_while_loop` :346→:356) + `__ts_switch` row line ref 追加 / 2nd round adversarial で 4 件追加 fix = Iteration v11 ambiguity 排除 (1-b header から I-224 v11 と I-205 task ID conflate を解消) + "T8 INV-3" → "I-205 INV-3 source-side single-evaluation contract" 不曖昧化 + 1-f false claim 訂正 (= advisory paths は gitignored working-tree-only、I-224 T5 incomplete latent state ではない) + audit script advisory comment 整合 update (handoff doc と double-source) / Layer 2 empirical (lib 3546 PASS = T5-2 完全一致 / i224_invariants 7 PASS = INV-1〜INV-7 lock-in 維持 / audit-no-pub-fn-init exit=0 / CI yml 15 steps well-formed) / Layer 3 cross-axis (3 reservation categories × 2 lint axes × CI gate axis 全 enumerated、Spec gap 0、emission sites 8 sites all covered) / Layer 4 trade-off (pure addition + broken-window discipline、regression cell 0、structural fix not patch、interim 条件不問) / Defect classification = Implementation gap 6 件 (2 1st-round line-ref + 4 2nd-round factual accuracy) all fixed-in-commit + Review insight 2 件 = (a) **e2e test isolation defect** (= cargo test --test e2e_test で parallel 9 fail / serial 8 fail (異なる cell set)、stale binary leak 由来の test order 依存 = I-180 entry が "I-173 (E2E parallel flakiness)" として 関連 PRD 言及するが I-173 自体未起票、新 TODO I-399 候補、T6a 因果無関係 = code 0 行変更で baseline と一致 = I-172 (bench non-determinism、別 axis) とは別 defect) + (b) doc line-ref drift detection automation (= handoff doc grep `<file>:<line>` を verify する CI step 候補、I-D framework batch 候補) | 2026-05-08 | 全 future PRD で `__ts_*` namespace 拡張時の structural enforcement (canonical doc-first dependency)、INV-4 invariant CI merge gate lock-in (post-T4 0 hits、再混入を merge 段階で block)、advisory paths の gitignored 性質を構造的に文書化 (CI fresh clone = 0 advisory)、handoff doc cohesion 向上 (3 category symmetric coverage、token-level accuracy)、broken-window discipline (line-ref drift fix + factual accuracy fix)、e2e test isolation defect finding を I-399 候補として triage、doc-cross-ref drift detection を I-D framework batch 候補化。詳細 = git log + design-decisions.md `## Switch emission と label hygiene > 1` |
 | **I-224 T5-2 + Iteration v11 (initial fix + deep review structural fix + 2nd review unit tests + /check_problem TODO 起票)** (`UserMainSubstitution` enum + `from_dispatch` constructor DRY 解消 / `UserMainKind` + `UserMainSubstitution` + `detect_user_main` の `user_main.rs` 同居 cohesion 向上 / cells 11/23/75 e2e green-ify (Tier 1 silent-loss fix) / **deep review structural fix** = double-await bug (cells 16/30/36 + nested `await main()` 用 `Transformer::suppress_main_await_wrap` flag + `convert_expr_in_await_context` helper による context-aware suppression、3 entry sites symmetric 適用) / INV-2 拡張 (B1 sync + B2 async + `await main();` patterns 4 sub-cases lock-in) / **2nd review unit tests** (`UserMainSubstitution::from_dispatch` 10-cell decision table + `is_active()` / `is_async()` predicates + cross-predicate invariant `is_async ⇒ is_active` の 4 direct unit tests) / INV-7 invariants test fill-in (subprocess audit + independent grep verifier) / `scripts/audit-no-init-call-site.sh` 新設 / `.claude/rules/file-size-resolution.md` 新設 (= 機械的末尾切り出し禁止 procedure) / PRD doc Iteration v11 entry (改善 candidates v11-1〜v11-4) / TODO `[I-398]` 起票 (out-of-matrix hypothetical scenarios)) | 2026-05-08 | cells 11/23/75 e2e green、cell-77 既存 GREEN 維持、cell-41 + cell-79 Tier 2 lock-in、cells 16/30/36 transpile 単一 `.await` 出力 (e2e は T7-T8 scope)、INV-7 lock-in (post-T4 0 hits)、Hono bench 107/72 (Preservation 0/0 vs T4)、framework 改善 4 件 (file-size-resolution.md NEW + I-D batch v11-1/v11-3/v11-4 candidates 追加)、TODO I-398 起票 = 全 Layer 1〜4 0 findings + /check_problem 0 unresolved。詳細 = PRD doc Iteration v11 |
 | **I-224 T5-1 + /check_job (3 iter) + /check_problem (2 round) cumulative structural fixes** (NonTrigger split / convert_expr passthroughs / per-declarator routing / classify_decl_var_path 削除 / TsAs/TsSatisfies/TsTypeAssertion expected_type propagation / destructuring Tier 2 honest reject / `prd-completion.md` Tier-transition wording 拡張 / TODO I-395-397 起票 / PRD Iteration v10 entry) | 2026-05-08 | i-224 e2e harness 40 fixtures wiring (14 GREEN + 27 ignored)、I-205 cell-09 unblock、INV-1 fill-in、cell-12/24 silent-drop Tier 1 fix、Hono bench 107/72 (Tier-transition Improvement compliance)。詳細 = PRD doc Iteration v9/v10 |
 | **I-224 T1〜T4** (`__ts_main` collision validator / IR enums + helper / fn main synthesis + rename + substitute + Axis B/E probes / transform_module refactor + pub fn init 廃止 + namespace_lint extraction) | 2026-05-06〜07 | INV-2/3/4/5/6 invariants test fill-in、Spec への逆戻り Iteration v8 (T2 完了時 I-228 sub-entries 4 件)、Hono Tier-transition Preservation。詳細 = PRD doc Iteration v8 + git log |
@@ -198,10 +195,10 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 ## 次の PRD 着手前の参照ポイント
 
-- **I-224 (現 PRD)**: PRD doc + Iteration v8/v9/v10 entries (Spec への逆戻り audit trail)
+- **I-224 (現 PRD)**: PRD doc + Iteration v8/v9/v10/v11 entries (Spec への逆戻り audit trail、T6a 完了後の 2nd-round adversarial review は doc/CI structural fix のみで Spec 逆戻り不在 = Iteration log 追加なし)
 - **I-225 / I-162 (次 PRD)**: TODO 内 entry + 案 β chain
 - **I-205 T14-T16 (post case-β-1A)**: `backlog/I-205-getter-setter-dispatch-framework.md` の T11 削除 + 新 PRD I-A/I-B migration 注記
-- **PRD I-D (Framework rule integration cohesive batch)**: I-205 close 後 deferred、I-224 v3〜v10 framework gap candidates 含む
+- **PRD I-D (Framework rule integration cohesive batch)**: I-205 close 後 deferred、I-224 v3〜v11 framework gap candidates 19 件 (含 T6a 2nd-round v11-5/6/7) を集約
 - **PRD 3 (I-177 本体)**: matrix-driven、案 A (mutation-ref) vs 案 B (writeback) を spec stage で empirical 確定
 - **Phase A Step 5/6/7**: 「開発ロードマップ」section + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)
 - **設計判断 archive**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) (削除禁止 — 過去判断は reference として保持、実装乖離時は最新化)
