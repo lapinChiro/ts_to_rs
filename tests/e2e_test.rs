@@ -24,6 +24,22 @@ const RUST_RUNNER_TEMPLATE_DIR: &str = "tests/e2e/rust-runner";
 /// Path to the locally-installed tsx binary.
 const TSX_BIN: &str = "tests/e2e/node_modules/.bin/tsx";
 
+/// Content written to `<ts_exec_dir>/<scope>/package.json` to force tsx into ESM mode.
+///
+/// I-224 T7-1 (Iteration v12 revise): tsx defaults to the `cjs` output format,
+/// which rejects top-level `await` with `"Top-level await is currently not
+/// supported with the 'cjs' output format"`. Writing this `package.json` into
+/// the per-fixture exec directory switches tsx to the `esm` format so fixtures
+/// like `cell-14-top-await-no-main.ts` (= top-await + no user main) can run.
+///
+/// Applied unconditionally to every prepared exec dir (single-file and
+/// multi-file paths share `reset_ts_exec_dir`). Empirically verified against
+/// the 105 pre-existing TS fixtures: ESM is a strict superset of CJS for the
+/// patterns this harness uses (no `import = require(...)` / `export =` /
+/// runtime `namespace` syntax appear in `tests/e2e/scripts/`), so the
+/// unconditional write is non-breaking.
+const ESM_PACKAGE_JSON: &str = "{\"type\":\"module\"}";
+
 const E2E_RUNNER_POOL_ENV: &str = "TS_TO_RS_E2E_RUNNERS";
 static E2E_RUNNER_POOL: OnceLock<E2eRunnerPool> = OnceLock::new();
 
@@ -259,6 +275,13 @@ impl E2eRunnerInstance {
         )
     }
 
+    /// Resets the per-scope (`single` / `multi`) ts-exec directory and
+    /// installs `package.json` for tsx ESM mode (= I-224 T7-1 Iteration v12).
+    ///
+    /// Both [`prepare_single_file_ts_exec`] and [`prepare_multi_file_ts_exec`]
+    /// delegate dir setup here, so the `package.json` write applies symmetrically
+    /// to single-file and multi-file fixtures (= covers cells 14-18 / 30 / 32-40
+    /// etc. without per-call-site duplication).
     fn reset_ts_exec_dir(&self, scope: &str) -> PathBuf {
         let exec_dir = self.ts_exec_dir().join(scope);
         if exec_dir.exists() {
@@ -268,6 +291,13 @@ impl E2eRunnerInstance {
         }
         fs::create_dir_all(&exec_dir)
             .unwrap_or_else(|e| panic!("failed to create TS exec dir {}: {e}", exec_dir.display()));
+        let package_json = exec_dir.join("package.json");
+        fs::write(&package_json, ESM_PACKAGE_JSON).unwrap_or_else(|e| {
+            panic!(
+                "failed to write {} for tsx ESM mode: {e}",
+                package_json.display()
+            )
+        });
         exec_dir
     }
 }
@@ -791,6 +821,112 @@ fn test_multi_file_ts_exec_copies_fixture_files_to_runner_local_dir() {
     assert!(exec_path.starts_with(runner.manifest_dir.join("ts-exec")));
     assert!(!exec_path.starts_with(&fixture_dir));
     assert!(exec_dir.join("dep.ts").exists());
+}
+
+#[test]
+fn test_single_file_ts_exec_dir_writes_esm_package_json() {
+    // I-224 T7-1 (Iteration v12 revise) lock-in: single-file path delegates to
+    // `reset_ts_exec_dir`, which writes `package.json {"type":"module"}` so
+    // tsx switches into ESM mode (= top-level await fixtures stop failing
+    // with `"Top-level await is currently not supported with the 'cjs' output
+    // format"`).
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture_dir = temp.path().join("fixtures");
+    fs::create_dir_all(&fixture_dir).expect("create fixture dir");
+    fs::write(fixture_dir.join("case.ts"), "function main() {}\n").expect("write fixture");
+    let runner = E2eRunnerInstance {
+        manifest_dir: temp.path().join("runner"),
+        target_dir: temp.path().join("target"),
+    };
+
+    let exec_guard =
+        runner.prepare_single_file_ts_exec(&fixture_dir.join("case.ts"), "function main() {}\n");
+    let exec_dir = Path::new(exec_guard.path()).parent().expect("exec parent");
+
+    let package_json = exec_dir.join("package.json");
+    assert!(
+        package_json.exists(),
+        "package.json missing at {} — single-file path skipped ESM write",
+        package_json.display()
+    );
+    let content = fs::read_to_string(&package_json).expect("read package.json");
+    assert_eq!(content, ESM_PACKAGE_JSON);
+}
+
+#[test]
+fn test_multi_file_ts_exec_dir_writes_esm_package_json() {
+    // I-224 T7-1 (Iteration v12 revise) lock-in: multi-file path shares
+    // `reset_ts_exec_dir` with the single-file path, so the same
+    // `{"type":"module"}` write applies symmetrically. Without symmetric
+    // application a multi-file top-await fixture would silently regress to
+    // tsx cjs format and fail at runtime.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture_dir = temp.path().join("multi").join("case");
+    fs::create_dir_all(&fixture_dir).expect("create fixture dir");
+    fs::write(
+        fixture_dir.join("main.ts"),
+        "import { value } from './dep';\nfunction main() {}\n",
+    )
+    .expect("write main");
+    fs::write(fixture_dir.join("dep.ts"), "export const value = 1;\n").expect("write dep");
+    let runner = E2eRunnerInstance {
+        manifest_dir: temp.path().join("runner"),
+        target_dir: temp.path().join("target"),
+    };
+
+    let exec_guard = runner.prepare_multi_file_ts_exec(&fixture_dir, "function main() {}\n");
+    let exec_dir = Path::new(exec_guard.path()).parent().expect("exec parent");
+
+    let package_json = exec_dir.join("package.json");
+    assert!(
+        package_json.exists(),
+        "package.json missing at {} — multi-file path skipped ESM write",
+        package_json.display()
+    );
+    let content = fs::read_to_string(&package_json).expect("read package.json");
+    assert_eq!(content, ESM_PACKAGE_JSON);
+}
+
+#[test]
+fn test_top_level_await_fixture_runs_via_tsx_after_esm_setup() {
+    // I-224 T7-1 (Iteration v12 revise) empirical lock-in: end-to-end TS-side
+    // probe. The Rust side of cell-14 is gated on T8 (top-await synthesis),
+    // so this test only exercises the harness's ESM setup feeding tsx — it
+    // is the structural complement to the unit assertions above.
+    //
+    // Without `package.json {"type":"module"}` tsx rejects the fixture with
+    // an esbuild "Top-level await is currently not supported with the 'cjs'
+    // output format" error. With ESM mode it prints `got 42`.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture_dir = temp.path().join("fixtures");
+    fs::create_dir_all(&fixture_dir).expect("create fixture dir");
+    let fixture_path = fixture_dir.join("top_await.ts");
+    let ts_source =
+        "const value = await Promise.resolve(42);\nconsole.log(\"got\", value);\n".to_string();
+    fs::write(&fixture_path, &ts_source).expect("write fixture");
+
+    let runner = E2eRunnerInstance {
+        manifest_dir: temp.path().join("runner"),
+        target_dir: temp.path().join("target"),
+    };
+    let exec_guard = runner.prepare_single_file_ts_exec(&fixture_path, &ts_source);
+    let exec_path = Path::new(exec_guard.path()).to_owned();
+
+    let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tsx_bin = project_root.join(TSX_BIN);
+    let mut tsx_cmd = Command::new(&tsx_bin);
+    tsx_cmd.arg(&exec_path);
+    let output = tsx_cmd
+        .output()
+        .expect("failed to spawn tsx — run `npm install` in tests/e2e/");
+
+    assert!(
+        output.status.success(),
+        "tsx failed for top-await probe:\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "got 42");
 }
 
 #[test]

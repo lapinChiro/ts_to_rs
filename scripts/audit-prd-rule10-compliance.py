@@ -10,11 +10,17 @@ PRD doc に対し以下 2 audit を実施:
 Usage:
     python3 scripts/audit-prd-rule10-compliance.py [PRD_PATH ...] [--verbose]
 
-PRD_PATH: 監査対象 PRD doc (markdown)。複数指定可。省略時は backlog/*.md 全 file。
+PRD_PATH: 監査対象 PRD doc (markdown)。複数指定可。省略時は backlog/ 配下で
+**`## Rule 10 Application` section を含む全 PRD doc** (= post-PRD-2.7 framework
+適用 PRD) を auto-detect。File name prefix (`PRD-*` / `I-*`) は判定基準にしない
+(= PRD 2.7 完了後の新 PRD は I-* prefix で命名されているため、prefix-based
+filter では false-skip が発生する。`## Rule 10 Application` section が
+post-PRD-2.7 framework の mandatory marker であることを利用した content-based
+auto-detect が structural な解決)。
 
 Exit code:
     0: audit pass (全 PRD compliance OK)
-    非 0: audit fail (compliance 違反 detected)
+    非 0: audit fail (compliance 違反 detected、または auto-detect で audit 対象 0 件)
 
 Dependencies:
     pip install pyyaml
@@ -32,6 +38,31 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKLOG_DIR = REPO_ROOT / "backlog"
+
+# post-PRD-2.7 framework の mandatory section marker。`## Rule 10 Application`
+# section の存在で matrix-driven (= 本 audit 対象) PRD を判定する (file name prefix
+# ではなく content で判定するための structural marker、`spec-stage-adversarial-checklist.md`
+# Rule 12 (e-5) `## Rule 10 Application` heading 必須 spec を参照)。
+MATRIX_DRIVEN_MARKER = "## Rule 10 Application"
+
+
+def is_matrix_driven_prd(path: Path) -> bool:
+    """Returns True if the PRD doc contains the `## Rule 10 Application` section
+    (= post-PRD-2.7 framework marker).
+
+    Used by the default discovery mode (no PRD_PATH args) to auto-select audit
+    targets from `backlog/`. Legacy partial-framework PRDs (e.g., `I-050`
+    umbrella that uses `## Problem Space` but predates the Rule 12 mandatory
+    section) are skipped because they would unconditionally fail this audit.
+    """
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return any(
+        line.strip() == MATRIX_DRIVEN_MARKER
+        for line in content.splitlines()
+    )
 
 # Q5 確定: matrix 不在 PRD で許容される structural reason (Permitted reasons)
 PERMITTED_REASONS_KEYWORDS = (
@@ -833,10 +864,16 @@ def main() -> int:
     if args.prd_paths:
         prds = args.prd_paths
     else:
-        # Default: 新 framework 適用 PRD (PRD-* prefix) のみ audit。
-        # Legacy PRD (I-* prefix) は本 framework 適用前の historical record として
-        # 別途 archive (本 PRD 2.7 post-completion)、本 audit 対象外。
-        prds = sorted(BACKLOG_DIR.glob("PRD-*.md"))
+        # Default: backlog/ 配下で `## Rule 10 Application` section を含む全 PRD を
+        # 自動検出 (= post-PRD-2.7 framework 適用 PRD)。File name prefix
+        # (`PRD-*` / `I-*`) を判定基準にしない理由: PRD 2.7 完了後の新 PRD (I-205,
+        # I-224 等) は I-* prefix で命名されているため、prefix-based filter では
+        # **false-skip** が発生する (= I-224 T7 /check_problem 由来 2026-05-08
+        # 発覚 issue)。`## Rule 10 Application` section の存在を structural marker
+        # として content-based 検出することで、命名 convention に依存しない
+        # 構造的な audit 対象選定が可能。Legacy partial-framework PRD (= `I-050`
+        # umbrella、本 section 不在) は自動 skip される。
+        prds = sorted(p for p in BACKLOG_DIR.glob("*.md") if is_matrix_driven_prd(p))
 
     if not prds:
         print(f"ERROR: no PRD doc found in {BACKLOG_DIR}", file=sys.stderr)
