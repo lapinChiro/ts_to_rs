@@ -132,31 +132,57 @@ impl<'a> Transformer<'a> {
                     };
                     let args =
                         self.convert_call_args_with_types(&call.args, param_types, has_rest)?;
-                    // I-224 T3-3: substitute `main()` call sites to `__ts_main()`
-                    // when the module is in executable mode + B1/B2. The rename
-                    // is applied **after** all registry / FileTypeResolution
-                    // lookups (which use the original user-source-text `"main"`
-                    // key) so the param-type / has-rest detection above remains
-                    // consistent with the un-renamed signature visible to
-                    // TypeResolver. Substitution at the IR emission boundary
+                    // I-224 T3-3 + T5-2 Iteration v11: substitute `main()` call
+                    // sites to `__ts_main()` when the module is in executable
+                    // mode + B1/B2. The rename is applied **after** all registry
+                    // / FileTypeResolution lookups (which use the original
+                    // user-source-text `"main"` key) so the param-type /
+                    // has-rest detection above remains consistent with the
+                    // un-renamed signature visible to TypeResolver.
+                    // Substitution at the IR emission boundary
                     // (= `target` construction) keeps the rewrite transparent
                     // to upstream resolution while ensuring every IR
                     // `CallTarget::Free` reference targets the renamed user
                     // main (which `convert_fn_decl` / `convert_arrow_var_decl`
                     // emit at `__ts_main`).
                     //
-                    // **Async-await substitute**: T3-3 covers the sync substitute
-                    // (= rewrite the callee identifier only). For async user
-                    // main + executable mode (cells 15 / 35 / 75 / 16 / 36 / 76),
-                    // T8 will additionally wrap the `Expr::FnCall` in
-                    // `Expr::Await` so the synthesized async fn main awaits
-                    // the renamed `__ts_main().await`. Until T8 lands, the
-                    // sync `__ts_main()` call inside a sync synthesized
-                    // fn main works correctly for cells 13 / 33 / 73; async
-                    // cells produce sync `__ts_main()` invocation which T8
-                    // upgrades to `__ts_main().await` for proper async
-                    // dispatch within `#[tokio::main] async fn main`.
-                    let fn_name = if self.user_main_substitution && fn_name == "main" {
+                    // **Async-await substitute (T5-2 Iteration v11 2026-05-08
+                    // Tier 1 silent-loss fix + double-await structural fix)**:
+                    // for `UserMainSubstitution::AsyncRename` (= executable
+                    // mode + B2 async user main, cells 11 / 23 / 75 and their
+                    // C1 counterparts after T8) the substituted call is
+                    // wrapped in `Expr::Await` so the synthesized
+                    // `#[tokio::main] async fn main()` body emits
+                    // `__ts_main().await;` — without the wrap the returned
+                    // `Future` would be silently dropped (= the renamed async
+                    // user main's body never runs and its observable side
+                    // effects, including `console.log` output, are silently
+                    // lost = Tier 1 silent semantic change).
+                    //
+                    // **Context-aware suppression (= the double-await structural
+                    // fix landed by `/check_job` Layer 3 review 2026-05-08)**:
+                    // when the caller has already supplied an outer `Expr::Await`
+                    // wrap (= source-level `await main();` or top-level capture
+                    // of `await main();` / `const x = await main();`), the
+                    // substitute MUST NOT add a second `.await`. Otherwise the
+                    // emission becomes `__ts_main().await.await;` (= compile
+                    // error in cells 16 / 30 / 36 + nested `await main()` inside
+                    // user-defined async fn bodies). The `suppress_main_await_wrap`
+                    // flag on `Transformer` is set by the three `Expr::Await`
+                    // entry sites (`convert_expr` / `try_capture_module_item_into_main_stmts`
+                    // / `capture_var_decl_into_main_stmts`) before recursing
+                    // into the awaitee; we honor it here by skipping the wrap
+                    // when set.
+                    //
+                    // T5-1 deferred this wrap to T8 per a code comment but no
+                    // T8 sub-task captured the work, leaving the silent-loss in
+                    // place across cells 11 / 23 / 75. T5-2 closes this Spec
+                    // gap by routing the substituted call through `Expr::Await`
+                    // when `is_async()` reports `true` AND the caller has not
+                    // already supplied an outer `.await` wrap.
+                    let is_main_substitute =
+                        self.user_main_substitution.is_active() && fn_name == "main";
+                    let fn_name = if is_main_substitute {
                         crate::transformer::expressions::TS_MAIN_RENAME.to_string()
                     } else {
                         fn_name
@@ -178,7 +204,15 @@ impl<'a> Transformer<'a> {
                         }
                         _ => CallTarget::Free(fn_name),
                     };
-                    Ok(Expr::FnCall { target, args })
+                    let call_expr = Expr::FnCall { target, args };
+                    let should_wrap_await = is_main_substitute
+                        && self.user_main_substitution.is_async()
+                        && !self.suppress_main_await_wrap;
+                    if should_wrap_await {
+                        Ok(Expr::Await(Box::new(call_expr)))
+                    } else {
+                        Ok(call_expr)
+                    }
                 }
                 ast::Expr::Member(member) => {
                     let method = match &member.prop {

@@ -16,6 +16,8 @@ pub mod statements;
 mod ts_enum;
 pub(crate) mod type_position;
 
+pub(crate) use main_synthesis::UserMainSubstitution;
+
 pub(crate) use helpers::option_builders::{
     build_option_get_or_insert_with, build_option_or_option, build_option_unwrap_with_default,
 };
@@ -52,15 +54,15 @@ pub(crate) struct Transformer<'a> {
     /// Callable interface marker struct 名の使用済み集合 (INV-1)。
     /// PascalCase collision を検出し、suffix 付与で unique 化する。
     used_marker_names: std::collections::HashSet<String>,
-    /// I-224 user `main` rename + call substitution gate.
+    /// I-224 user `main` rename + call substitution mode.
     ///
-    /// `true` when the module is in **executable mode** AND the user-defined
-    /// `main` symbol is callable (B1 / B2 = `UserMainKind::FnSync` /
-    /// `UserMainKind::FnAsync`). Activated by `transform_module` /
-    /// `transform_module_collecting` after computing the
-    /// (`is_executable_mode`, `user_main_kind`) pair from the module body.
+    /// Set by `transform_module` / `transform_module_collecting` after computing
+    /// `(is_executable_mode, user_main_kind)` from the module body. See
+    /// [`UserMainSubstitution`] for the dispatch table mapping (= `None` /
+    /// `SyncRename` / `AsyncRename`).
     ///
-    /// When set, two transparent rewrites apply during IR conversion:
+    /// When the variant is non-`None`, two transparent rewrites apply during
+    /// IR conversion:
     ///
     /// 1. **Decl emission rename**: `convert_fn_decl` (B1a / B2a function decl)
     ///    and the FnExpr / Arrow init paths in
@@ -75,7 +77,12 @@ pub(crate) struct Transformer<'a> {
     ///    `Expr::Call { callee: Ident("main"), .. }` to `CallTarget::Free("__ts_main")`
     ///    so every `main()` call site (including the multi-call boundary cases
     ///    locked in by INV-2) targets the renamed user main rather than the
-    ///    synthesized binary entry.
+    ///    synthesized binary entry. For [`UserMainSubstitution::AsyncRename`]
+    ///    (B2 + executable mode) the substituted call is additionally wrapped in
+    ///    [`crate::ir::Expr::Await`] so the synthesized
+    ///    `#[tokio::main] async fn main()` awaits the renamed `__ts_main().await`
+    ///    — without this wrap the returned `Future` would be silently dropped
+    ///    (= Iteration v11 2026-05-08 Tier 1 silent-loss fix for cells 11 / 23 / 75).
     ///
     /// **Inheritance to nested scopes**: `spawn_nested_scope` /
     /// `spawn_nested_scope_with_local_synthetic` propagate this flag verbatim
@@ -83,13 +90,49 @@ pub(crate) struct Transformer<'a> {
     /// bodies, class methods, etc.
     ///
     /// **Library mode + B1 / B2 (cells 3 / 5 / 23 / 25)**: this flag stays
-    /// `false` because the user's `main` is the binary entry point directly
-    /// per the `LibraryFnSyncDirect` / `LibraryFnAsyncDirect` arms — no
-    /// rename or substitution required. The dispatch tree's `(false, FnSync,
-    /// false)` and `(false, FnAsync, false)` arms in
-    /// `Transformer::synthesize_fn_main` correspondingly emit nothing,
+    /// [`UserMainSubstitution::None`] because the user's `main` is the binary
+    /// entry point directly per the `LibraryFnSyncDirect` /
+    /// `LibraryFnAsyncDirect` arms — no rename or substitution required. The
+    /// dispatch tree's `(false, FnSync, false)` and `(false, FnAsync, false)`
+    /// arms in `Transformer::synthesize_fn_main` correspondingly emit nothing,
     /// leaving `transform_decl`'s emit as the binary entry.
-    pub(crate) user_main_substitution: bool,
+    pub(crate) user_main_substitution: UserMainSubstitution,
+    /// I-224 T5-2 deep review structural fix (2026-05-08, Iteration v11): suppress the
+    /// substitute-time `.await` wrap when the substituted call is itself wrapped by a
+    /// caller-supplied `Expr::Await` (= source-level `await main();` or top-level capture
+    /// of `await main();` / `const x = await main();`).
+    ///
+    /// **Why this flag exists**: `convert_call_expr` synthesizes a `.await` wrap for B2
+    /// async user main substitute calls so that the renamed `__ts_main()` runs to
+    /// completion (= Iteration v11 Tier 1 silent-loss fix for cells 11 / 23 / 75). When
+    /// the source itself contains `await main();`, the **enclosing context already
+    /// supplies the `.await`** (via the source-level `Expr::Await` arm of `convert_expr`
+    /// or the top-level capture's `Expr::Await` branch in
+    /// `try_capture_module_item_into_main_stmts` / `capture_var_decl_into_main_stmts`).
+    /// Without suppression the substitute would emit an inner `Expr::Await` and the outer
+    /// wrap would emit another, producing the double-`.await` bug
+    /// `__ts_main().await.await;` (= compile error in cells 16 / 30 / 36 fixtures).
+    ///
+    /// **Lifecycle**: the flag is push/pop'd at the three `Expr::Await` entry sites
+    /// (= the three places where the **caller** guarantees a `.await` wrap will be
+    /// emitted around the converted child IR):
+    ///
+    /// 1. `convert_expr`'s `Expr::Await(_)` arm (= source-level `await x;` inside any
+    ///    expression context, e.g. user-defined async fn body).
+    /// 2. `try_capture_module_item_into_main_stmts` Stmt::Expr arm's `Expr::Await(_)`
+    ///    branch (= top-level `await main();`).
+    /// 3. `capture_var_decl_into_main_stmts` `Expr::Await(_)` branch (= top-level
+    ///    `const x = await main();`).
+    ///
+    /// At each entry the flag is set to `true` before recursing into the awaitee, then
+    /// restored on exit. The substitute logic in `convert_call_expr` checks this flag
+    /// and skips the synthesized `.await` wrap when it is set.
+    ///
+    /// **Inheritance to nested scopes**: propagated by `spawn_nested_scope` /
+    /// `spawn_nested_scope_with_local_synthetic` so context-aware suppression survives
+    /// scope boundaries (= an arrow / fn-expr / class-method body inside an `await`
+    /// awaitee position retains the suppression).
+    pub(crate) suppress_main_await_wrap: bool,
 }
 
 impl<'a> Transformer<'a> {
@@ -103,7 +146,8 @@ impl<'a> Transformer<'a> {
             synthetic,
             mut_method_names: std::collections::HashSet::new(),
             used_marker_names: std::collections::HashSet::new(),
-            user_main_substitution: false,
+            user_main_substitution: UserMainSubstitution::None,
+            suppress_main_await_wrap: false,
         }
     }
 
@@ -118,6 +162,7 @@ impl<'a> Transformer<'a> {
             mut_method_names: self.mut_method_names.clone(),
             used_marker_names: std::collections::HashSet::new(),
             user_main_substitution: self.user_main_substitution,
+            suppress_main_await_wrap: self.suppress_main_await_wrap,
         }
     }
 
@@ -137,6 +182,7 @@ impl<'a> Transformer<'a> {
             mut_method_names: self.mut_method_names.clone(),
             used_marker_names: std::collections::HashSet::new(),
             user_main_substitution: self.user_main_substitution,
+            suppress_main_await_wrap: self.suppress_main_await_wrap,
         }
     }
 
@@ -363,11 +409,8 @@ impl<'a> Transformer<'a> {
         let exec_mode = main_synthesis::is_executable_mode(module);
         let user_main_kind = main_synthesis::detect_user_main(module);
         let has_top_level_await_flag = main_synthesis::has_top_level_await(module);
-        self.user_main_substitution = exec_mode
-            && matches!(
-                user_main_kind,
-                main_synthesis::UserMainKind::FnSync | main_synthesis::UserMainKind::FnAsync
-            );
+        self.user_main_substitution =
+            UserMainSubstitution::from_dispatch(exec_mode, user_main_kind);
 
         // Pre-scan: collect class info for inheritance resolution. Must precede
         // both the capture pass (`try_capture_module_item_into_main_stmts` →
@@ -448,11 +491,8 @@ impl<'a> Transformer<'a> {
         let exec_mode = main_synthesis::is_executable_mode(module);
         let user_main_kind = main_synthesis::detect_user_main(module);
         let has_top_level_await_flag = main_synthesis::has_top_level_await(module);
-        self.user_main_substitution = exec_mode
-            && matches!(
-                user_main_kind,
-                main_synthesis::UserMainKind::FnSync | main_synthesis::UserMainKind::FnAsync
-            );
+        self.user_main_substitution =
+            UserMainSubstitution::from_dispatch(exec_mode, user_main_kind);
 
         let class_map = self.pre_scan_classes(module);
         let iface_methods = classes::pre_scan_interface_methods(module);

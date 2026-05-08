@@ -14,7 +14,8 @@ fn test_convert_expr_postfix_increment_returns_old_value() {
         synthetic: &mut SyntheticTypeRegistry::new(),
         mut_method_names: std::collections::HashSet::new(),
         used_marker_names: std::collections::HashSet::new(),
-        user_main_substitution: false,
+        user_main_substitution: UserMainSubstitution::None,
+        suppress_main_await_wrap: false,
     }
     .convert_expr(&expr)
     .unwrap();
@@ -42,7 +43,8 @@ fn test_convert_expr_prefix_increment_returns_new_value() {
         synthetic: &mut SyntheticTypeRegistry::new(),
         mut_method_names: std::collections::HashSet::new(),
         used_marker_names: std::collections::HashSet::new(),
-        user_main_substitution: false,
+        user_main_substitution: UserMainSubstitution::None,
+        suppress_main_await_wrap: false,
     }
     .convert_expr(&expr)
     .unwrap();
@@ -70,7 +72,8 @@ fn test_convert_expr_postfix_decrement_returns_old_value() {
         synthetic: &mut SyntheticTypeRegistry::new(),
         mut_method_names: std::collections::HashSet::new(),
         used_marker_names: std::collections::HashSet::new(),
-        user_main_substitution: false,
+        user_main_substitution: UserMainSubstitution::None,
+        suppress_main_await_wrap: false,
     }
     .convert_expr(&expr)
     .unwrap();
@@ -97,7 +100,8 @@ fn test_convert_expr_prefix_decrement_returns_new_value() {
         synthetic: &mut SyntheticTypeRegistry::new(),
         mut_method_names: std::collections::HashSet::new(),
         used_marker_names: std::collections::HashSet::new(),
-        user_main_substitution: false,
+        user_main_substitution: UserMainSubstitution::None,
+        suppress_main_await_wrap: false,
     }
     .convert_expr(&expr)
     .unwrap();

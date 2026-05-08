@@ -169,6 +169,14 @@ fn test_invariant_1_ts_rust_execution_order_byte_exact() {
 /// user `main()` call site が `__ts_main()` (or `__ts_main().await`) に substitute される
 /// ことを fixture probe + IR token-level test で verify。
 ///
+/// **Async-await substitute (T5-2 Iteration v11 fill-in 2026-05-08)**: B2 cells
+/// (15 / 35 / 75 in C0 partition) wrap the substituted call in `Expr::Await` so
+/// the synthesized `#[tokio::main] async fn main()` body emits
+/// `__ts_main().await;` — without this wrap the renamed async user main's
+/// `Future` would be silently dropped (= Tier 1 silent semantic loss). The
+/// per-cell assertion below splits B1 (sync, plain `__ts_main();`) and B2
+/// (async, `__ts_main().await`) substitute forms to lock in the dispatch.
+///
 /// **Multi-call boundary value sub-case (H-7 Fix B)**: cell-31 fixture (A1+B1+C0 with
 /// `main(); main();` form) を cell #13 boundary value test fixture として keep、user main
 /// の multiple call sites が全 `__ts_main()` に substitute されることを probe。
@@ -176,33 +184,26 @@ fn test_invariant_1_ts_rust_execution_order_byte_exact() {
 fn test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase() {
     // INV-2 (B1/B2 cells): the user-defined `main` symbol must be renamed
     // to `__ts_main` AND every user-source `main()` call must be substituted
-    // to `__ts_main()`. Verified at the IR-text level (= post-transpile
-    // Rust string) for the in-scope B1/B2 cells in the C0 partition.
+    // to `__ts_main()` (B1, sync) or `__ts_main().await` (B2, async).
+    // Verified at the IR-text level (= post-transpile Rust string) for the
+    // in-scope B1/B2 cells in the C0 partition.
     //
-    // **Async substitute (cells 15/16/35/36/75/76)**: T3-3 implements the
-    // sync substitute (= rewrite the callee identifier). Async-await
-    // wrapping (= adding `.await` after the substituted `__ts_main()`) is
-    // T8 work; until then, B2 cells produce `__ts_main()` invocation
-    // without `.await`, which compiles correctly inside the synthesized
-    // `fn main()` body (T4-1 ExecFnSyncRename / ExecFnAsyncRename arm) but
-    // will need T8 to upgrade once `#[tokio::main] async fn main` synthesis
-    // lands the `.await` wrapping for B2 cells. This test asserts the
-    // **identifier substitution** invariant only — IR shape of the await
-    // wrapping is tested separately in T8's INV-3 full-coverage extension.
-    //
-    // Each entry = (cell #, axis summary, TS source).
-    let cells: &[(u32, &str, &str)] = &[
+    // Each entry = (cell #, axis summary, TS source, expected_substitute_form).
+    // `expected_substitute_form` is `"sync"` for B1 cells (substitute is a
+    // bare `__ts_main();` call) or `"async"` for B2 cells (substitute is
+    // `__ts_main().await;` per the T5-2 Iteration v11 fix).
+    let cells: &[(u32, &str, &str, &str)] = &[
         // ===== Executable A1 + B1 sync user main + C0 =====
-        (13, "A1+B1+C0", "function main(): void { }\nmain();\n"),
-        (33, "A3+B1+C0", "declare function f(): number;\nfunction main(): void { }\nconst c = f();\nmain();\n"),
-        (73, "A6+B1+C0", "const X: number = 1;\nfunction main(): void { }\nmain();\nconsole.log(X);\n"),
-        // ===== Executable + B2 async user main + C0 (sync substitute baseline) =====
-        (15, "A1+B2+C0", "async function main(): Promise<void> { }\nmain();\n"),
-        (35, "A3+B2+C0", "declare function f(): number;\nasync function main(): Promise<void> { }\nconst c = f();\nmain();\n"),
-        (75, "A6+B2+C0", "const X: number = 1;\nasync function main(): Promise<void> { }\nmain();\nconsole.log(X);\n"),
+        (13, "A1+B1+C0", "function main(): void { }\nmain();\n", "sync"),
+        (33, "A3+B1+C0", "declare function f(): number;\nfunction main(): void { }\nconst c = f();\nmain();\n", "sync"),
+        (73, "A6+B1+C0", "const X: number = 1;\nfunction main(): void { }\nmain();\nconsole.log(X);\n", "sync"),
+        // ===== Executable + B2 async user main + C0 (.await wrap = T5-2 Iteration v11 fix) =====
+        (15, "A1+B2+C0", "async function main(): Promise<void> { }\nmain();\n", "async"),
+        (35, "A3+B2+C0", "declare function f(): number;\nasync function main(): Promise<void> { }\nconst c = f();\nmain();\n", "async"),
+        (75, "A6+B2+C0", "const X: number = 1;\nasync function main(): Promise<void> { }\nmain();\nconsole.log(X);\n", "async"),
     ];
 
-    for (cell, axis_summary, src) in cells {
+    for (cell, axis_summary, src, expected_form) in cells {
         let rust = transpile(src)
             .unwrap_or_else(|e| panic!("cell #{cell} ({axis_summary}): transpile failed: {e}"));
         // 1. User main is renamed at the declaration site AND a synthesized
@@ -212,8 +213,8 @@ fn test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase() {
         //      captured top-level `main();` call as `__ts_main();`.
         //    - async B2 (cells 15 / 35 / 75): `async fn __ts_main` exists;
         //      the synthesized `#[tokio::main] async fn main()` wraps the
-        //      captured top-level call as `__ts_main();` (T8 will upgrade to
-        //      `__ts_main().await` once async wrapping lands).
+        //      captured top-level call as `__ts_main().await;` (T5-2
+        //      Iteration v11 fix).
         //    Both: the renamed user main must be present AND the synthesized
         //    binary entry must be present (= INV-1 source-order + dispatch
         //    arm structural compliance).
@@ -226,16 +227,45 @@ fn test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase() {
             "cell #{cell} ({axis_summary}): expected synthesized `fn main()` binary \
              entry (T4-1 ExecFnSyncRename / ExecFnAsyncRename arm), got:\n{rust}"
         );
-        // 2. Every user-source `main()` call is substituted to `__ts_main()`.
-        //    The TS source contains a single `main();` call — the IR must
-        //    contain a `__ts_main()` invocation reference. (The original
-        //    user-source `main();` call is removed by the substitution; if
-        //    a bare `main()` reference leaked through, that would indicate
-        //    the substitution gate failed to fire.)
-        assert!(
-            rust.contains("__ts_main()"),
-            "cell #{cell} ({axis_summary}): expected substituted `__ts_main()` call site, got:\n{rust}"
-        );
+        // 2. The substituted call site form depends on B-axis:
+        //    - B1 sync: `__ts_main();` (bare call).
+        //    - B2 async: `__ts_main().await;` (`Expr::Await` wrap = T5-2
+        //      Iteration v11 Tier 1 silent-loss fix). Without `.await` the
+        //      renamed user main's `Future` would be silently dropped and its
+        //      observable side effects (e.g. `console.log` output) lost — a
+        //      Tier 1 silent semantic change.
+        match *expected_form {
+            "sync" => {
+                assert!(
+                    rust.contains("__ts_main();"),
+                    "cell #{cell} ({axis_summary}): expected sync `__ts_main();` substitute \
+                     call, got:\n{rust}"
+                );
+                assert!(
+                    !rust.contains("__ts_main().await"),
+                    "cell #{cell} ({axis_summary}): unexpected async `.await` wrap on sync \
+                     B1 substitute — UserMainSubstitution::SyncRename must NOT wrap, got:\n{rust}"
+                );
+            }
+            "async" => {
+                assert!(
+                    rust.contains("__ts_main().await"),
+                    "cell #{cell} ({axis_summary}): expected async `__ts_main().await` substitute \
+                     (= T5-2 Iteration v11 Tier 1 silent-loss fix); without the `.await` wrap \
+                     the renamed async user main's Future is silently dropped. Got:\n{rust}"
+                );
+                // Sanity: every `__ts_main()` call site must carry `.await`
+                // for B2. A bare `__ts_main();` (no `.await`) would indicate a
+                // dispatch leak in `UserMainSubstitution::AsyncRename`.
+                assert!(
+                    !rust.contains("    __ts_main();\n"),
+                    "cell #{cell} ({axis_summary}): bare `__ts_main();` call leaked inside \
+                     async fn main body — UserMainSubstitution::AsyncRename must wrap with \
+                     `.await`. Got:\n{rust}"
+                );
+            }
+            other => unreachable!("unexpected expected_substitute_form: {other:?}"),
+        }
         // Cross-axis sanity: TypeResolver / TypeRegistry layer must classify
         // the user main correctly so the rename gate fires only for B1/B2.
         let module = parse_typescript(src)
@@ -250,6 +280,72 @@ fn test_invariant_2_user_main_symbol_preservation_with_multi_call_subcase() {
         assert!(
             !has_top_level_await(&module),
             "cell #{cell} ({axis_summary}): unexpected top-level await — fixture corruption"
+        );
+    }
+
+    // ===== Double-await structural lock-in (T5-2 Iteration v11 deep review
+    // 2026-05-08, cells 16 / 30 / 36 Spec gap fix): for source-level explicit
+    // `await main();` patterns in B2 + executable + C1, the substituted call
+    // must produce **single** `.await` (= `__ts_main().await;`), not double
+    // (= `__ts_main().await.await;` which compile-errors because `()` does
+    // not implement `Future`).
+    //
+    // Pre-fix bug: convert_expr substitute always wrapped with `.await` for
+    // FnAsync, then the outer `Expr::Await` arm wrapped again, producing
+    // double await. Fix: context-aware suppression via
+    // `Transformer::suppress_main_await_wrap` flag set at the three
+    // `Expr::Await` entry sites (= convert_expr / try_capture / capture_var_decl).
+    //
+    // Lock-in cells (paired with cells 11/23/75 above for full B2 coverage):
+    // - matrix #16 (A1+B2+C1): `await main();` Stmt::Expr top-level
+    // - matrix #36 (A3+B2+C1): `const x = await Promise.resolve(N); await main();`
+    //
+    // The probe verifies (a) `__ts_main().await` is present (= async substitute
+    // landed) and (b) `__ts_main().await.await` is NOT present (= double-wrap
+    // structurally suppressed). Full e2e verification is deferred to T7-T8 due
+    // to other top-await emission requirements (e.g., Promise.resolve), but
+    // the IR-text-level lock-in here ensures the substitute layer produces
+    // correct single-await emission for any future T8 work.
+    let await_main_cells: &[(u32, &str, &str)] = &[
+        // matrix #16: A1+B2+C1
+        (
+            16,
+            "A1+B2+C1 (await main() Stmt::Expr top-level)",
+            "async function main(): Promise<void> { console.log('a'); }\n\
+             await main();\n",
+        ),
+        // matrix #36: A3+B2+C1 (await main() with prior top-await Decl::Var)
+        (
+            36,
+            "A3+B2+C1 (top-await Decl::Var + await main() Stmt::Expr)",
+            "declare const p: Promise<number>;\n\
+             async function main(): Promise<void> { console.log('a'); }\n\
+             const value = await p;\n\
+             await main();\n",
+        ),
+    ];
+    for (cell, axis_summary, src) in await_main_cells {
+        let rust = transpile(src).unwrap_or_else(|e| {
+            panic!(
+                "cell #{cell} ({axis_summary}): transpile failed (= double-await suppression \
+                    must allow these to transpile cleanly): {e}"
+            )
+        });
+        // (a) Single `.await` emitted on the substituted call.
+        assert!(
+            rust.contains("__ts_main().await"),
+            "cell #{cell} ({axis_summary}): expected `__ts_main().await` in transpile output, \
+             got:\n{rust}"
+        );
+        // (b) NO double `.await` (= the substituted call must not be wrapped
+        // with a synthesized `.await` when the source already supplies one).
+        assert!(
+            !rust.contains("__ts_main().await.await"),
+            "cell #{cell} ({axis_summary}): unexpected DOUBLE `.await` (= \
+             `__ts_main().await.await`) — `Transformer::suppress_main_await_wrap` \
+             contract violated. The substitute layer is wrapping with `.await` despite \
+             an outer caller-supplied `Expr::Await` wrap, which produces a compile error \
+             (`()` does not implement `Future`). Got:\n{rust}"
         );
     }
 
@@ -902,30 +998,152 @@ fn test_invariant_6_type_resolver_layer_unaffected() {
 /// 既存 e2e test 全体で `init()` call site の empirical audit を完了し、breaking change
 /// の実 reachability を 0 件に確定。
 ///
-/// **Verification (c)**:
-/// - Codebase grep: `grep -rn '\binit\s*(' src/ tests/ tools/` で ts_to_rs side の
-///   `init()` call site enumerate (TS-7 で実施済 = 0 件)
-/// - Hono codebase grep: `grep -rn '\binit\s*(' /tmp/hono*` で 3rd party `init()` call site
-///   enumerate (Implementation Stage T5 で Hono bench Tier-transition compliance verify
-///   時に 0 件 confirm 予定)
-/// - e2e test runner: `tests/e2e_test.rs` 内で generated Rust の `init()` を expect する
-///   logic 検出 (= 0 件、TS-7 で確認済)
+/// **Verification (c)** (T5-2 fill-in 2026-05-08):
+/// - **(c-1) Codebase audit**: `scripts/audit-no-init-call-site.sh` を subprocess invoke、
+///   exit=0 を assert (script は free-function `init()` call site pattern
+///   `(^|[^a-zA-Z0-9_:.])init\s*\(` で match、method calls / associated calls / comment
+///   lines / 既知 inline TS-source string fixture を filter out して production paths
+///   = `src/`, `tools/`, `tests/e2e/rust-runner/` に対して 0 hits を verify)
+/// - **(c-2) Independent grep verifier**: subprocess `grep` を直接 invoke、enforced
+///   paths を walk して同 pattern hits を audit script independent に再確認 (audit
+///   script 側 bug / disable / 削除 が起きても、独立 grep が invariant violation を
+///   捕捉する。逆も同様 — INV-4 と symmetric two-verifier 設計)
+/// - **(c-3) Hono bench Tier-transition compliance** (= manual T5-2 acceptance criterion):
+///   Hono codebase + e2e test runner generated Rust に対する INV-7 reachability は
+///   T5-2 commit 直前に `./scripts/hono-bench.sh` を run して `bench-history.jsonl`
+///   末尾 entry が `Improvement` (silent → honest) or `Preservation` 分類であることを
+///   verify (= post-T4 state で `pub fn init` 廃止が新 break を導入していない empirical
+///   confirmation)。本 test code level では verify せず、PRD doc Iteration v11 entry
+///   に Hono bench result を record する (= `prd-completion.md` Tier-transition
+///   compliance wording 適用)
 ///
-/// **Pre-Implementation Audit Findings (TS-7、本 PRD doc embed 済)**: codebase + Hono
-/// grep で 0 hits = INV-7 reachability prerequisite 満たす。本 stub は Implementation T5
-/// で post-T4 state での再確認 (= `pub fn init` 廃止後も新 break が発生していないこと)
-/// を fill-in 時に assert。
+/// **Pre-Implementation Audit Findings (TS-7、PRD doc embed 済)**: codebase + Hono
+/// grep で 0 hits = INV-7 reachability prerequisite 満たす。
+///
+/// **T5-2 fill-in (post-T4 state lock-in)**: T4-1 retired `build_init_fn` helper +
+/// T4-3 INV-4 fill-in locked in 0 declarations of `pub fn init`. INV-7 (= the symmetric
+/// **call-site reachability** verification) is filled in here by subprocess invoking
+/// the audit script + an independent grep verifier.
 #[test]
-#[ignore = "I-224 INV-7 verification stub: Implementation Stage T5 で fill in \
-            (post-T4 state で `init()` call site 0 件 + Hono bench Tier-transition compliance \
-            confirm)"]
 fn test_invariant_7_pub_fn_init_external_api_audit_post_t4() {
-    let _ = transpile;
-    unimplemented!(
-        "Spec stage stub、Implementation Stage T5 で fill in: \
-         post-T4 state (= build_init_fn helper 削除済 + e2e snapshots regenerated) で \
-         `grep -rn '\\binit\\s*(' tests/e2e/rust-runner/ src/ tools/` 0 hits を \
-         subprocess で assert + Hono bench Tier-transition compliance result classification \
-         が `Improvement` or `Preservation` であることを Hono bench output 経由で verify"
+    use std::process::Command;
+
+    let workspace_root = env!("CARGO_MANIFEST_DIR");
+
+    // === Verifier 1: audit script subprocess invoke ===
+    let audit_script = format!("{workspace_root}/scripts/audit-no-init-call-site.sh");
+    let audit_output = Command::new(&audit_script)
+        .current_dir(workspace_root)
+        .output()
+        .unwrap_or_else(|e| panic!("INV-7: failed to spawn audit script `{audit_script}`: {e}"));
+    let stdout = String::from_utf8_lossy(&audit_output.stdout);
+    let stderr = String::from_utf8_lossy(&audit_output.stderr);
+    assert!(
+        audit_output.status.success(),
+        "INV-7: `audit-no-init-call-site.sh` returned non-zero exit (= free-function \
+         `init()` call site detected in production paths post-T4 = breaking change \
+         reachability > 0). Status: {:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        audit_output.status,
+    );
+    assert!(
+        stdout.contains("OK: 0 free-function `init()` call sites in enforced paths"),
+        "INV-7: audit script success status but expected `OK: 0 ...` summary line was \
+         not found. stdout:\n{stdout}",
+    );
+
+    // === Verifier 2: independent grep (= structural redundancy) ===
+    //
+    // Walk the enforced paths and search for free-function `init(` call sites
+    // using a structural pattern that matches realistic call vectors at line
+    // scope while excluding method calls / associated calls / comment lines.
+    // Maintains a small list of known false positives (= TS-7 audit empirical
+    // inventory) for inline TS-source strings inside Rust multi-line string
+    // literals.
+    let enforced_paths = ["src", "tools", "tests/e2e/rust-runner"];
+    // Pattern matches `init(` not preceded by `.`, `:`, or word character —
+    // captures the realistic call vectors:
+    //   `init();`            (statement form)
+    //   `let x = init(...);` (assignment)
+    //   `= init(...)`        (RHS of assignment / let-binding)
+    let pattern = r"(^|[^a-zA-Z0-9_:.])init\s*\(";
+
+    // Known false positives — inline TS-source string fixtures inside Rust
+    // multi-line string literals (= test fixture content, not Rust call sites).
+    // Each entry is matched as a substring of the grep hit line; line numbers
+    // are excluded from the substring so the test stays robust across edits.
+    let known_false_positive_substrings: &[&str] = &[
+        // I-205 internal `this.x` dispatch test fixture — TS class with an
+        // `init(): void { ... }` method inside a Rust multi-line string literal.
+        "init(): void { this.value ??= 42; } }\";",
+    ];
+
+    let mut violations = Vec::new();
+    for path in &enforced_paths {
+        let abs = format!("{workspace_root}/{path}");
+        if !std::path::Path::new(&abs).exists() {
+            continue;
+        }
+        let grep = Command::new("grep")
+            .args(["-rPn", "--include=*.rs", pattern, &abs])
+            .output()
+            .unwrap_or_else(|e| panic!("INV-7: failed to spawn grep for `{abs}`: {e}"));
+        let hits = String::from_utf8_lossy(&grep.stdout);
+        match grep.status.code() {
+            Some(0) => {
+                // Hits found — filter against:
+                //   (a) Pure-comment lines (= `///` / `//` doc / regular
+                //       comments referring to the historic mechanism textually,
+                //       not a Rust call site).
+                //   (b) Known false-positive substrings (= multi-line string
+                //       literals containing TS-source fixtures).
+                for line in hits.lines() {
+                    if line.is_empty() {
+                        continue;
+                    }
+                    // grep -n format: `<file>:<lineno>:<content>`. Extract
+                    // content (3rd colon-separated chunk).
+                    let content = match line.splitn(3, ':').nth(2) {
+                        Some(c) => c,
+                        None => {
+                            // Unexpected format — keep as a violation so the
+                            // test fails loudly (filter cannot prove the line
+                            // is benign).
+                            violations.push(line.to_string());
+                            continue;
+                        }
+                    };
+                    let content_trimmed = content.trim_start();
+                    // (a) Skip pure-comment lines (= textual documentation
+                    // mentioning the historic `pub fn init()` mechanism).
+                    if content_trimmed.starts_with("//") {
+                        continue;
+                    }
+                    // (b) Skip known false-positive substrings.
+                    if known_false_positive_substrings
+                        .iter()
+                        .any(|fp| line.contains(fp))
+                    {
+                        continue;
+                    }
+                    violations.push(line.to_string());
+                }
+            }
+            Some(1) => { /* no matches — invariant holds for this path */ }
+            other => panic!(
+                "INV-7: grep returned unexpected status {other:?} for `{abs}`. \
+                 stdout:\n{hits}\nstderr:\n{}",
+                String::from_utf8_lossy(&grep.stderr)
+            ),
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "INV-7: independent grep found unexpected free-function `init()` call site(s) \
+         after T4-1 removed `pub fn init` mechanism. Each violation indicates either (a) \
+         a new free function `init()` call introduced (= breaking change reachability), \
+         or (b) a new comment / TS-source-string false positive that needs to be added \
+         to the `known_false_positive_substrings` list AND `audit-no-init-call-site.sh`'s \
+         `KNOWN_FALSE_POSITIVES` array. Hits:\n{}",
+        violations.join("\n")
     );
 }

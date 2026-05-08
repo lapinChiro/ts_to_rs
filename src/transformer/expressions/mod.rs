@@ -140,6 +140,34 @@ impl<'a> Transformer<'a> {
         self.convert_expr_with_expected(expr, None)
     }
 
+    /// Converts `expr` with [`Transformer::suppress_main_await_wrap`] set to
+    /// `true` for the duration of the conversion, restoring the previous flag
+    /// value on completion (panic-safe via explicit save / restore — `Result`
+    /// short-circuit `?` is intentionally **not** used inside the body so the
+    /// flag is always restored).
+    ///
+    /// Use this helper at every `Expr::Await` entry site (= source-level
+    /// `await x;` arm of `convert_expr`, top-level capture's `Expr::Await`
+    /// branches in `try_capture_module_item_into_main_stmts` /
+    /// `capture_var_decl_into_main_stmts`) where the **caller** guarantees a
+    /// `.await` wrap will be emitted around the converted child IR. The
+    /// substitute layer in `convert_call_expr` honors the suppression flag
+    /// and skips its synthesized `.await` wrap, preventing the double-`.await`
+    /// emission (= the I-224 T5-2 Iteration v11 deep review structural fix
+    /// for cells 16 / 30 / 36 fixtures + nested `await main()` inside
+    /// user-defined async fn bodies).
+    ///
+    /// **DRY**: single source of truth for the suppress lifecycle; replaces
+    /// the duplicated 5-line save / set / call / restore / unwrap pattern at
+    /// the three entry sites (= `.claude/rules/file-size-resolution.md`
+    /// applied to T5-2 deep review).
+    pub(crate) fn convert_expr_in_await_context(&mut self, expr: &ast::Expr) -> Result<Expr> {
+        let prev = std::mem::replace(&mut self.suppress_main_await_wrap, true);
+        let result = self.convert_expr(expr);
+        self.suppress_main_await_wrap = prev;
+        result
+    }
+
     /// Converts an expression with an explicit expected type override.
     ///
     /// Callers:
@@ -266,7 +294,13 @@ impl<'a> Transformer<'a> {
             }
             ast::Expr::OptChain(opt_chain) => self.convert_opt_chain_expr(opt_chain),
             ast::Expr::Await(await_expr) => {
-                let inner = self.convert_expr(&await_expr.arg)?;
+                // I-224 T5-2 Iteration v11 double-await structural fix
+                // (2026-05-08): the outer `Expr::Await` here is the **only**
+                // `.await` to be emitted; the substitute-time wrap on the
+                // awaitee must be suppressed. See
+                // `convert_expr_in_await_context` for the helper (= DRY
+                // single source of truth for the suppress lifecycle).
+                let inner = self.convert_expr_in_await_context(&await_expr.arg)?;
                 Ok(Expr::Await(Box::new(inner)))
             }
             ast::Expr::TsNonNull(ts_non_null) => self.convert_expr(&ts_non_null.expr),

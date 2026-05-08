@@ -123,6 +123,7 @@ Coverage threshold ratchet: when measured coverage exceeds threshold by 2+ point
 - **Type fallback safety**: 型 fallback (Any / wider union / HashMap) 導入 PRD は 3-step safety analysis で silent semantic change 不在を verify — see `.claude/rules/type-fallback-safety.md`
 - **Pipeline integrity**: IR は構造化データで保持、transformer → generator の pipeline 方向を逆流させない。詳細は `.claude/rules/pipeline-integrity.md`
 - **Design integrity**: 設計時は higher-level consistency / DRY / orthogonality / coupling の 4 観点で第三者視点 review — see `.claude/rules/design-integrity.md`
+- **File-size threshold resolution**: `./scripts/check-file-lines.sh` で 1000 行超過を発見したとき、機械的な末尾切り出しは禁止。周辺ファイル調査 → DRY/凝集度の問題点 enumerate → 関連実装も含めた再構成 plan の選択 → 検証 の 4-step procedure を必須適用 — see `.claude/rules/file-size-resolution.md`
 - **Cargo dependencies**: Cargo.toml 編集時は最新 version を verify、`=` pinning 禁止 — see `.claude/rules/dependencies.md`
 - **Debugging**: Hypothesize root cause before next fix attempt. Never repeat the same fix twice
 - **Deferred recording**: Record out-of-scope issues in `TODO` — see `.claude/rules/todo-entry-standards.md`

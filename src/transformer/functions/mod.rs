@@ -242,7 +242,7 @@ impl<'a> Transformer<'a> {
         // (the synthesized `fn main` synthesized by `synthesize_fn_main`
         // remains private per Rust binary entry-point convention; the
         // user's exec semantics flow through `__ts_main()` invocation).
-        let renamed = self.user_main_substitution && name == "main";
+        let renamed = self.user_main_substitution.is_active() && name == "main";
         let name = if renamed {
             crate::transformer::expressions::TS_MAIN_RENAME.to_string()
         } else {

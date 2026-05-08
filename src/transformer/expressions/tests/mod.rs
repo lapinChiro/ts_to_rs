@@ -33,7 +33,7 @@ use crate::transformer::expressions::member_access::{
     build_safe_index_expr_unwrapped, convert_index_to_usize,
 };
 use crate::transformer::test_fixtures::TctxFixture;
-use crate::transformer::Transformer;
+use crate::transformer::{Transformer, UserMainSubstitution};
 use swc_ecma_ast::{Decl, ModuleItem, Stmt};
 
 /// Helper: parse a TS expression statement and return the SWC Expr.

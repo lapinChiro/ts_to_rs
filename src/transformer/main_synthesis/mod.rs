@@ -61,12 +61,18 @@ use crate::transformer::Transformer;
 mod await_walker;
 use await_walker::{class_contains_await_recursive, expr_contains_await_recursive};
 
-// User `main` detection sub-module (B-axis classification + ambient filter +
-// `__ts_main` collision precedence). Extracted from mod.rs for the same
-// file-line reason as await_walker.
+// User `main` detection + substitution dispatch state sub-module (B-axis
+// classification, ambient filter, `__ts_main` collision precedence,
+// substitution gate enum). Houses both the input dimension type
+// (`UserMainKind`) and the derived output state type (`UserMainSubstitution`)
+// so the cohesive halves of the I-224 user main concern (= classification +
+// dispatch derivation + detection) live together. Extracted from mod.rs for
+// file-line headroom while raising cohesion (see
+// `.claude/rules/file-size-resolution.md`).
 mod user_main;
-#[doc(hidden)] // I-224 internal predicate, exposed for external integration tests.
-pub use user_main::detect_user_main;
+pub(crate) use user_main::UserMainSubstitution;
+#[doc(hidden)] // I-224 internal types, exposed for external integration tests.
+pub use user_main::{detect_user_main, UserMainKind};
 
 // Decl::Var initializer classification (`InitKind` / `DeclVarPath` enums +
 // `classify_init_kind` / `has_side_effect_init` / `classify_per_decl_path` /
@@ -123,38 +129,11 @@ pub(crate) enum MainStmt {
     LetAwait { name: String, init: IrExpr },
 }
 
-/// User-defined `main` symbol classification (Axis B of the PRD problem space).
-///
-/// Public to support `tests/i224_helper_test.rs::test_dispatch_arm_one_to_one_mapping_per_in_scope_cell`,
-/// which composes [`is_executable_mode`] / [`detect_user_main`] / [`has_top_level_await`]
-/// with [`classify_dispatch_arm`] to lock in the Rule 9 (a) 1-to-1 mapping invariant.
-///
-/// Detected by [`detect_user_main`] from a single pass over the module body.
-/// Determines the `user_main_kind` dimension of the dispatch tree (Design section #2).
-///
-/// **Collision precedence**: when multiple module items introduce names matching either
-/// `main` or `__ts_main`, [`UserMainKind::Collision`] takes precedence over all other
-/// kinds (= INV-5 priority arm at the dispatch level — independent of, and complementary
-/// to, the namespace-lint rejection performed by `scan_for_ts_namespace_collisions`
-/// in `transformer/mod.rs`).
-#[doc(hidden)]
-// I-224 internal classification, exposed publicly only for external
-// integration tests; not part of the documented public API.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UserMainKind {
-    /// B0: no user-defined `main` symbol.
-    None,
-    /// B1: synchronous `function main` / sync arrow init / sync fn-expr init.
-    FnSync,
-    /// B2: async `function main` / async arrow init / async fn-expr init.
-    FnAsync,
-    /// B3: non-callable `main` symbol — `class main` / `interface main` /
-    /// `type main = ...` / `enum main` / `namespace main` / `const main = <non-callable>`.
-    NonFn,
-    /// B4: user-defined `__ts_main` identifier — collides with the synthesized rename
-    /// target [`crate::transformer::expressions::TS_MAIN_RENAME`].
-    Collision,
-}
+// `UserMainKind` and `UserMainSubstitution` live next to `detect_user_main` in
+// the `user_main` sub-module — colocating the B-axis classification type with
+// its detection logic and the derived substitution dispatch state keeps the
+// related knowledge together (cohesion) and lets the parent module stay under
+// the 1000-line file-line check threshold.
 
 /// Identifier of the dispatch tree leaf (PRD Design section #2) selected by a
 /// `(is_executable_mode, user_main_kind, has_top_level_await)` 3-tuple.
@@ -583,7 +562,13 @@ impl<'a> Transformer<'a> {
                 // convert_expr and rendered as `.await` within the async fn main
                 // context).
                 if let Expr::Await(await_expr) = &*expr_stmt.expr {
-                    let inner = self.convert_expr(&await_expr.arg)?;
+                    // I-224 T5-2 Iteration v11 double-await structural fix
+                    // (2026-05-08): synthesis-side wraps with `.await` at
+                    // `main_stmts_to_ir_stmts` (`MainStmt::ExprAwait` →
+                    // `IrExpr::Await(inner)`), so the inner conversion must
+                    // NOT pre-wrap. The helper sets / restores
+                    // `suppress_main_await_wrap`.
+                    let inner = self.convert_expr_in_await_context(&await_expr.arg)?;
                     main_stmts.push(MainStmt::ExprAwait(inner));
                 } else {
                     let converted = self.convert_expr(&expr_stmt.expr)?;
@@ -778,9 +763,17 @@ impl<'a> Transformer<'a> {
                 continue;
             };
             if let Expr::Await(await_expr) = init_expr {
-                // Bare-Await init: extract awaitee, emit LetAwait (T3 applies
-                // `.await` based on the variant tag).
-                let inner = self.convert_expr(&await_expr.arg)?;
+                // Bare-Await init: extract awaitee, emit LetAwait (synthesis
+                // applies `.await` based on the variant tag).
+                //
+                // I-224 T5-2 Iteration v11 double-await structural fix
+                // (2026-05-08): synthesis-side wraps with `.await` at
+                // `main_stmts_to_ir_stmts` (`MainStmt::LetAwait` →
+                // `IrExpr::Await(init)`), so the inner conversion must NOT
+                // pre-wrap (= `const c = await main();` would otherwise
+                // emit `let c = __ts_main().await.await;` in cell 36).
+                // The helper sets / restores `suppress_main_await_wrap`.
+                let inner = self.convert_expr_in_await_context(&await_expr.arg)?;
                 main_stmts.push(MainStmt::LetAwait { name, init: inner });
             } else {
                 // All other capture-bound init shapes (NonTriggerData /

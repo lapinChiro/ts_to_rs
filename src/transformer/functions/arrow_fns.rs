@@ -125,7 +125,7 @@ impl<'a> Transformer<'a> {
         // (B1a) and the B1c synthetic-FnDecl path flowing through it —
         // locks in 3-form orthogonality across cells 13 / 14 / 15 / 16 /
         // 33 / 34 / 35 / 36 / 73 / 74 / 75 / 76.
-        let renamed = self.user_main_substitution && name == "main";
+        let renamed = self.user_main_substitution.is_active() && name == "main";
         let name = if renamed {
             crate::transformer::expressions::TS_MAIN_RENAME.to_string()
         } else {

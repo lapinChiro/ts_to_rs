@@ -40,5 +40,6 @@ When existing code issues are found during the check:
 |------|----------|
 | [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則 (本ルールが subordinate)。Decision Criteria の base |
 | [prd-design-review.md](prd-design-review.md) | PRD 設計セクション作成後の review (cohesion / 責務分離 / DRY)、本ルールと相補 |
+| [file-size-resolution.md](file-size-resolution.md) | 1000 行超過時の周辺ファイル調査 + 凝集度向上 + DRY 解消 procedure (本ルールと相補) |
 | [problem-space-analysis.md](problem-space-analysis.md) | 設計対象の問題空間 enumerate methodology |
 | [pipeline-integrity.md](pipeline-integrity.md) | Pipeline 整合性 (parser → transformer → generator) の制約 |

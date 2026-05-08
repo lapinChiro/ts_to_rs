@@ -264,7 +264,8 @@ fn test_convert_bin_expr_no_expected_numeric_add() {
         synthetic: &mut SyntheticTypeRegistry::new(),
         mut_method_names: std::collections::HashSet::new(),
         used_marker_names: std::collections::HashSet::new(),
-        user_main_substitution: false,
+        user_main_substitution: UserMainSubstitution::None,
+        suppress_main_await_wrap: false,
     }
     .convert_expr(&swc_expr)
     .unwrap();

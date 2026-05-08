@@ -2569,13 +2569,14 @@ fn test_e2e_cell_i224_10_stmt_expr_with_user_sync_main() {
 }
 
 #[test]
-#[ignore = "I-224 cell-11 (matrix # 15, A1+B2+C0): async user main \
-            __ts_main() substitute call inside #[tokio::main] async fn \
-            main body. T3-3 implements identifier substitute (sync); T8 \
-            adds .await wrapping. Until T8 the call drops the Future and \
-            the user 'from async main' line is silently lost. Unignore \
-            after T8."]
 fn test_e2e_cell_i224_11_stmt_expr_with_user_async_main() {
+    // T5-2 Iteration v11 2026-05-08 Tier 1 silent-loss fix: async user main
+    // substitute call now wraps with `.await` (= `__ts_main().await`) inside
+    // the synthesized `#[tokio::main] async fn main()` body, so the renamed
+    // user main runs to completion and its observable side effects (including
+    // `console.log("from async main")`) are preserved. See
+    // `UserMainSubstitution::AsyncRename` and the substitute logic in
+    // `src/transformer/expressions/calls.rs`.
     run_cell_e2e_test("i-224", "cell-11-stmt-expr-with-user-async-main");
 }
 
@@ -2653,10 +2654,9 @@ fn test_e2e_cell_i224_22_decl_var_with_user_sync_main() {
 }
 
 #[test]
-#[ignore = "I-224 cell-23 (matrix # 35, A3+B2+C0): SideEffect + async user \
-            main. Same async substitute issue as cell-11; T8 .await \
-            wrapping required."]
 fn test_e2e_cell_i224_23_decl_var_with_user_async_main() {
+    // T5-2 Iteration v11 2026-05-08 Tier 1 silent-loss fix counterpart to
+    // cell-11 (= shared `UserMainSubstitution::AsyncRename` substitute path).
     run_cell_e2e_test("i-224", "cell-23-decl-var-with-user-async-main");
 }
 
@@ -2771,10 +2771,10 @@ fn test_e2e_cell_i224_74_mixed_sync_main_top_await() {
 }
 
 #[test]
-#[ignore = "I-224 cell-75 (matrix # 75, A6+B2+C0): mixed + async user main, \
-            no top-await. Same async substitute issue as cell-11/cell-23; \
-            T8 .await wrapping required."]
 fn test_e2e_cell_i224_75_mixed_async_main_no_top_await() {
+    // T5-2 Iteration v11 2026-05-08 Tier 1 silent-loss fix counterpart to
+    // cell-11 / cell-23 (= shared `UserMainSubstitution::AsyncRename` substitute
+    // path). NEW C0 fixture from iteration v3 + T5-2 e2e green-ify target.
     run_cell_e2e_test("i-224", "cell-75-mixed-async-main-no-top-await");
 }
 
