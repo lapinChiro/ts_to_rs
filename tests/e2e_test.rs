@@ -11,6 +11,10 @@ use ts_to_rs::transpile;
 mod test_helpers;
 use test_helpers::{strip_internal_use_statements, TempFile};
 
+#[path = "i399_runner_mech.rs"]
+mod i399_runner_mech;
+use i399_runner_mech::content_hash_bin_name;
+
 /// Path to the E2E scripts directory.
 const SCRIPTS_DIR: &str = "tests/e2e/scripts";
 
@@ -53,35 +57,6 @@ fn runner_instance_paths_for(base_dir: &str, slot: usize) -> RunnerInstancePaths
         manifest_dir: slot_root.join("rust-runner").display().to_string(),
         target_dir: slot_root.join("target").display().to_string(),
     }
-}
-
-/// Computes a deterministic content-hash-derived bin name from Rust source
-/// content. Used by [`E2eRunnerInstance::run_with_source`] and
-/// [`E2eRunnerInstance::run_with_multi_file_sources`] to generate unique
-/// `[[bin]]` names per test source, eliminating the path collision that caused
-/// I-399 stale-binary leak (= different sources sharing `src/main.rs` led to
-/// cargo's per-package fingerprint occasionally reusing stale binaries under
-/// concurrent slot-pool execution).
-///
-/// Uses FNV-1a 64-bit hash (deterministic across processes, no external
-/// dependency, sufficient collision resistance for the ≤1k-test scale of this
-/// suite). The 16-hex-char hash is truncated to 12 and prefixed with `b` to
-/// form a valid Rust identifier (cargo bin names follow Rust ident rules; a
-/// leading digit is forbidden, hence the `b` prefix).
-///
-/// Same content → same bin name → cargo cache reuse (correct binary).
-/// Different content → different bin name → cargo fresh build (no stale
-/// binary risk).
-fn content_hash_bin_name(source: &str) -> String {
-    const FNV_OFFSET: u64 = 14695981039346656037;
-    const FNV_PRIME: u64 = 1099511628211;
-    let mut hash: u64 = FNV_OFFSET;
-    for byte in source.bytes() {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    let full = format!("{hash:016x}");
-    format!("b{}", &full[..12])
 }
 
 /// Output of a single `cargo run --bin <hash>` invocation via
@@ -767,37 +742,12 @@ fn test_runner_instance_paths_are_isolated_per_slot() {
 // path, no stale module files to clean between tests). Slot-local tempdir
 // cleanup at session end (TempDir Drop) handles cross-session hygiene.
 //
-// The test below replaces `test_cleanup_generated_runner_sources_*` with a
-// direct verification of the content-hash mechanism (= same content yields
-// same bin name, different content yields different bin names, both prefixed
-// with `b` to form valid Rust identifiers).
-
-#[test]
-fn test_content_hash_bin_name_is_deterministic_for_same_content() {
-    let source = "fn main() { println!(\"hello\"); }";
-    let bin_a = content_hash_bin_name(source);
-    let bin_b = content_hash_bin_name(source);
-    assert_eq!(bin_a, bin_b, "same content must yield identical bin name");
-    assert_eq!(
-        bin_a.len(),
-        13,
-        "bin name format = 'b' prefix + 12 hex chars"
-    );
-    assert!(
-        bin_a.starts_with('b'),
-        "bin name must start with 'b' to ensure valid Rust identifier"
-    );
-}
-
-#[test]
-fn test_content_hash_bin_name_differs_for_distinct_content() {
-    let bin_a = content_hash_bin_name("fn main() { println!(\"a\"); }");
-    let bin_b = content_hash_bin_name("fn main() { println!(\"b\"); }");
-    assert_ne!(
-        bin_a, bin_b,
-        "distinct content must yield distinct bin names (= path collision elimination)"
-    );
-}
+// The structural lock-in for `content_hash_bin_name` (determinism,
+// distinctness, format, distribution at production scale) and for the cargo
+// per-bin fingerprint behavior that the I-399 fix relies on lives in
+// `tests/i399_isolation_test.rs` (= dedicated I-399 invariants binary).
+// Reused via the shared `tests/i399_runner_mech.rs` module so that
+// `e2e_test` and `i399_isolation_test` exercise the same hash function.
 
 #[test]
 fn test_single_file_ts_exec_path_is_runner_local() {

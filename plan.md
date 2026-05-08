@@ -11,33 +11,30 @@
 
 ## 現在の状態 (2026-05-08)
 
-**進行中**: PRD α-0-prerequisite = **I-399 (E2E test isolation defect) Implementation Stage**。Spec stage Iteration v3 で genuine convergence 達成、Implementation T1 (= per-test content-hash-derived bin 実装) + T3 (= INV-T1/T2/T3 全 lock-in 達成) **完了**、T2 N/A re-classify、T4 (= /check_job 4-layer review + PRD close) 残。
+**進行中**: 案 β Phase 1-A = **I-224 (B2 fn main mechanism) T7 chain 再開**。I-399 (universal infra prerequisite for I-224 T9 = E2E test isolation defect) は PRD close 完了 (= `backlog/` から削除済、`backlog-management` skill "Completed Item Handling" 規定準拠、commit `[CLOSE] I-399 PRD 完了` で git history 参照)、INV-T1/T2/T3 が `tests/i399_isolation_test.rs` 経由 structural lock-in 化、e2e empirical verification 信頼性 base が確立済。
 
-**次着手**: I-399 T4 = `/check_job` 4-layer review (= matrix-driven 適用外なので Layer 1 + Layer 4 必須、Layer 2-3 optional だが推奨) → 発見 findings 全 resolve → /backlog-management or /end で I-399 PRD close → 案 β Phase 1-A の I-224 T7 chain 再開 (T7 = ESM upgrade、tokio dependency 追加 + observe-tsc.sh --esm CI flow)。
+**次着手**: I-224 T7-1 (= tokio dependency empirical verify、`tests/e2e/rust-runner/Cargo.toml` 内 tokio 既存確認 → N/A re-classify 候補) → T7-2 (`tests/e2e_test.rs` runner template ESM-mode 拡張) → T7-3 (`scripts/observe-tsc.sh --esm` permanent CI flow) → T8 (top-await synthesis logic) → T9 (Axis C1 cells e2e green-ify + Hono bench Tier-transition compliance verify + `[CLOSE]` I-224 PRD 完了)。`backlog/I-224-top-level-fn-main-mechanism.md` Sub-commits 一覧 row #17 (T7-1) 着手前 markup 適用済。
 
-**I-399 Implementation T1 + T3 達成 summary (前 session 2026-05-08 commit)**:
-- `tests/e2e_test.rs` 新 API: `content_hash_bin_name` (FNV-1a 12-char + "b" prefix) / `RunnerOutput` / `run_with_source` (single-file) / `run_with_multi_file_sources` (src/<bin>/main.rs + sibling modules) / `ensure_bin_entry` (idempotent Cargo.toml [[bin]] append) / `invoke_cargo_run` (shared cargo run、stdin/env support)
-- 旧 API 削除: `reset_single_file_main` / `reset_multi_file_sources` / `cleanup_generated_runner_sources` + 対応 unit test
-- 新 unit tests: `test_content_hash_bin_name_is_deterministic_for_same_content` + `test_content_hash_bin_name_differs_for_distinct_content`
-- INV-T1 (determinism): 5 rounds parallel default + 1 round each serial / CARGO_INCREMENTAL=0 / thread-count=8 = **8 invocations × 4 modes 全 187 passed / 0 failed / 93 ignored = 完全 identical** = stale-binary leak 構造的解消 verified
-- INV-T2 (cross-mode invariance): 4 modes 全 identical result = test 実行順序 / concurrency mode によらず deterministic
-- INV-T3 (performance regression bound): Pre-fix mean 165.72s vs Post-fix mean (warm-up 除外 4 samples) **159.88s = -3.5% (post-fix slightly faster)** = ±10% bound GREEN
-- Quality gate: lib 3546 / i224_invariants 7 / i205/integration/cli/compile 全 preservation、clippy/fmt/file-line 全 PASS、audit PASS
+**I-399 PRD 完了 summary** (詳細は § 直近の完了作業 table + git log の `[CLOSE] I-399 PRD 完了` commit):
 
-I-399 PRD doc = `backlog/I-399-e2e-test-isolation-defect.md` (Implementation T1+T3 完了 status embed、T4 進行中 mark)。
+- T1 = per-test content-hash-derived bin design 実装 (`tests/e2e_test.rs` 新 API = `content_hash_bin_name` / `RunnerOutput` / `run_with_source` / `run_with_multi_file_sources` 等)
+- T2 = N/A re-classify
+- T3 = INV-T1/T2/T3 empirical verify (4 mode × 8 invocations 全 187/0/93 identical、INV-T3 post-fix mean 159.88s vs baseline 165.72s = -3.5%)
+- T4 = /check_job 4-layer review final pass (1st-round で Critical 1 + High 1 + Low 2 + Spec gap 2 + Review insight 2 発見 → T4-b で `tests/i399_isolation_test.rs` 5 named tests + `tests/i399_runner_mech.rs` shared module 新設で全 fix → T4-c/d で Spec gap → I-D batch v11-10/11、Review insight → I-400/401/402 TODO 起票 → T4-e 2nd-round で Layer 1-4 全 0 findings)
+- Layer 2 empirical post-fix mean **128.77s vs baseline 165.72s = -22%** (PRD T3 claim より良好)
 
-### Quality Gate (post T6a = I-154 doc 3-category 拡張 + scripts/audit-no-pub-fn-init.sh CI integration + 4-layer review = pre-existing line-ref drift 2 件 broken-window fix)
+### Quality Gate (post I-399 close、2026-05-08)
 
 | 指標 | 値 |
 |------|-----|
-| cargo test (24 binaries) | lib **3546** (T5-2 baseline 完全一致、T6a は src/ 無変更) / integration 122 / compile 3 / i224_invariants 7 / i224_helper 5 / i205_invariants 2 + 5 ignored / i205_helper 4 / 全 green。e2e は test infra non-determinism (= 新 I-399 起票、parallel 9 fail / serial 8 fail (異なる cell set)、T6a 因果無関係 = code 0 行変更で baseline と一致、I-180 entry が誤って参照していた未起票 I-173 を I-399 として正式起票完了) のため本 commit では別 PRD scope と認識 |
+| cargo test (25 binaries) | lib **3546** / integration 122 / compile 3 / i224_invariants 7 / i224_helper 5 / i205_invariants 2 + 5 ignored / i205_helper 4 / e2e_test **185 active + 93 ignored** / **i399_isolation_test 2 active (T4-a/T4-b 毎 CI) + 3 ignored (T1/T2/T3 heavyweight #[ignore])** / 全 green。**total active 187** (= pre-I-399-close baseline と同一、preservation 達成)。e2e_test post-fix mean 128.77s vs baseline 165.72s = -22%、INV-T1/T2/T3 全 GREEN structural lock-in 達成 |
 | cargo clippy / fmt / file-line | 0 warnings / 0 diffs / 全 .rs file < 1000 行 (transformer/mod.rs 931 / main_synthesis/mod.rs 974 / expressions/mod.rs 935 / user_main.rs 389) |
-| audit-prd-rule10-compliance.py / audit-no-pub-fn-init.sh (CI-integrated post T6a) / audit-no-init-call-site.sh | PASS / exit=0 (INV-4 + INV-7 + CI merge gate lock-in) |
-| Hono bench | clean **107** / errors **72** at SHA-pinned 027e3df (= T6a doc+CI 変更で code 不変、Preservation classification 維持) |
+| audit-prd-rule10-compliance.py (= I-205 + I-224 active PRDs) / audit-no-pub-fn-init.sh (CI-integrated post T6a) / audit-no-init-call-site.sh | PASS / exit=0 (INV-4 + INV-7 + CI merge gate lock-in) |
+| Hono bench | clean **107** / errors **72** at SHA-pinned 027e3df (= I-399 で production code 0 LOC change、Preservation classification 維持) |
 
 **bench 非決定性**: ±1 clean / ±2 errors の noise variance を [I-172] として記録 (test/bench infra defect、別 PRD)。
 
-### Implementation Stage 進捗 (T1〜T9 sub-commits 一覧)
+### I-224 PRD: Implementation Stage 進捗 (T1〜T9 sub-commits 一覧)
 
 | Phase | Status | 完了日 |
 |-------|--------|--------|
@@ -54,7 +51,7 @@ I-399 PRD doc = `backlog/I-399-e2e-test-isolation-defect.md` (Implementation T1+
 
 各 T の詳細 task spec + completion criteria は [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) Sub-commits 一覧 table 参照。
 
-### Spec への逆戻り Iteration log (PRD doc Iteration v1〜v10 = audit trail)
+### I-224 PRD: Spec への逆戻り Iteration log (audit trail summary)
 
 | Iteration | 日付 | 概要 |
 |-----------|------|------|
@@ -71,34 +68,29 @@ I-399 PRD doc = `backlog/I-399-e2e-test-isolation-defect.md` (Implementation T1+
 ## /start 再開時の手順
 
 ### Step 1: 状態確認
-1. **本 plan.md** を読む = 現在の状態 + 次着手 = **I-399 T4 (= /check_job 4-layer review + PRD close)**
-2. **I-399 PRD doc を読む** = [`backlog/I-399-e2e-test-isolation-defect.md`](backlog/I-399-e2e-test-isolation-defect.md) (= 進行中 PRD、Spec stage Iteration v3 approved、Implementation T1 + T3 完了、T2 N/A、T4 進行中 mark)
-3. **TS-1 root cause investigation report** = [`report/I-399-root-cause-investigation.md`](report/I-399-root-cause-investigation.md) (= empirical investigation deliverable)
-4. **I-224 PRD doc を参照** = [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) (= I-399 完了後再開 PRD、T7-T9 待機)
-5. **TODO 確認** = [`TODO`](TODO) (関連 entries: I-172 / I-180 / I-395-398 / **I-399 (Implementation 進行中)**、I-D batch v11-1〜v11-9 framework gap candidates 計 21 件)
+1. **本 plan.md** を読む = 現在の状態 + 次着手 = **I-224 T7 chain 再開** (I-399 PRD close 完了)
+2. **I-224 PRD doc を読む** = [`backlog/I-224-top-level-fn-main-mechanism.md`](backlog/I-224-top-level-fn-main-mechanism.md) (= 再開 PRD、T7-T9 待機、I-399 完了で structural lock-in 確立)
+3. **I-399 完了 (= closed PRD)**: PRD doc は `backlog/` から削除済 (`backlog-management` skill 準拠)、詳細は git log で `[CLOSE] I-399 PRD 完了` commit を参照
+4. **TS-1 root cause investigation report** = [`report/I-399-root-cause-investigation.md`](report/I-399-root-cause-investigation.md) (= empirical investigation deliverable、historical reference)
+5. **TODO 確認** = [`TODO`](TODO) (関連 entries: I-172 / I-180 / I-395 / I-396 / I-397 / I-398 + **I-399 follow-up 3 件**: I-400 (E2E runner mechanism defensive design = multi-file hash key + ensure_bin_entry path verify) / I-401 (CI scheduled workflow for heavyweight invariants) / I-402 (project-wide test layout subdirectory pattern migration)、I-D batch v11-1〜v11-11 framework gap candidates 計 23 件)
 
-### Step 2: I-399 T4 = /check_job 4-layer review + PRD close (次着手)
+### Step 2: I-224 T7 chain 再開 (次着手)
 
-**Pre-requisite verify** (前 session で達成済、本 session では再 check):
-- I-399 PRD doc Implementation T1 + T3 完了 status embed (= `backlog/I-399-e2e-test-isolation-defect.md` § Implementation Stage Tasks)
-- INV-T1/T2/T3 全 GREEN (= PRD doc 内 Implementation T3 entry の "## Completion criteria (= 達成)" rows 参照)
-- e2e_test.rs 実装 (= commit log で確認、`tests/e2e_test.rs` の `content_hash_bin_name` / `run_with_source` / `run_with_multi_file_sources` 等の存在確認)
-- Quality gate: cargo test (lib 3546 / i224_invariants 7 / etc 全 pass) / cargo clippy 0 warnings / cargo fmt 0 diffs / audit-prd-rule10-compliance.py PASS
+**Pre-requisite verify** (= I-399 完了で達成済):
+- I-399 PRD close (= `tests/i399_isolation_test.rs` で INV-T1/T2/T3 structural lock-in 化)
+- e2e empirical verification 信頼性 (= 全 PRD review iteration の偽陽性/偽陰性 source 構造的排除済)
+- Quality gate: cargo test 全 pass / cargo clippy 0 warnings / cargo fmt 0 diffs / 全 audit PASS
 
-**Work**:
-1. **T4-a (/check_job 4-layer review)**: `/check_job` skill invoke、本 PRD は **non-matrix-driven** (= test infra defect、Rule 10 Application yaml で `Matrix-driven: no` 明示済) なので Layer 1 + Layer 4 必須、Layer 2-3 optional。第三者 adversarial 視点で全 layer pass を verify、発見 findings は post-implementation-defect-classification.md 5 category 分類 + 全 resolve
-2. **T4-b (plan.md / TODO update)**: I-399 PRD close 反映 (= 「直近の完了作業」table に I-399 row 追加 + I-399 entry 削除 from TODO + I-D batch entry の v11-1〜v11-9 framework gap candidates 累積 confirm + 案 β Phase 1-A の I-224 T7 chain 再開 markup)
-3. **T4-c (PRD close)**: `/backlog-management` skill or `/end` command で I-399 PRD close handling (= TODO entry 削除 + plan.md update + backlog file archive marker)
-4. **T4-d (I-224 T7 chain 再開準備)**: 案 β Phase 1-A 順序 update (= I-399 完了 → I-224 T7 着手)、I-224 PRD doc Sub-commits 一覧 row #17 (T7-1) 着手前 markup
+**Work** (= I-224 PRD doc Sub-commits 一覧 row #17 から):
+1. **T7-1 (tokio runtime dependency 確認)**: `tests/e2e/rust-runner/Cargo.toml` 内 tokio 既存 (= `features = ["full"]` で含まれる)、T7-1 work は empirical verify のみ (= 冗長の可能性、実装不要なら N/A re-classify)
+2. **T7-2 (`tests/e2e_test.rs` runner template ESM-mode 拡張)**: `--esm` mode の TS fixture 実行 path 追加
+3. **T7-3 (`scripts/observe-tsc.sh --esm` permanent CI flow)**: TS fixture observation を `.mjs` / `--esm` flag で永続 CI integrate
+4. **T8 (top-await synthesis logic)**: INV-3 sync/async dispatch trigger 拡張、`fn main` synthesis に top-await detection logic 追加
+5. **T9 (Axis C1 cells e2e green-ify + Hono bench Tier-transition compliance verify + `[CLOSE]` I-224 PRD 完了)**: Axis C1 fixtures 全 GREEN + 「直近の完了作業」更新 + I-224 PRD close
 
 **Completion criteria**:
-- /check_job 4-layer review で Layer 1 + Layer 4 全 0 findings、Layer 2-3 (optional) も pass
-- I-399 PRD doc に T4 完了 status embed
-- plan.md / TODO update 完了
-- 次 session /start で I-224 T7 chain 再開 path が clean に開く
-
-### Step 3: I-399 完了後の chain (= I-224 T7-T9 再開)
-I-224 T7 (= ESM upgrade、`tests/e2e/rust-runner/Cargo.toml` への tokio runtime dependency 確認 (既に `features = ["full"]` で含まれる、T7-1 work は冗長の可能性 = empirical verify) + `tests/e2e_test.rs` runner template の ESM-mode 拡張 + `scripts/observe-tsc.sh --esm` permanent CI flow) → T8 (top-await synthesis logic、INV-3 sync/async dispatch trigger 拡張) → T9 (Axis C1 cells e2e green-ify + Hono bench Tier-transition compliance verify + `[CLOSE]` I-224 PRD 完了)。
+- I-224 T7-T9 全完了 + Hono bench Tier-transition compliance (= broken-fix PRD wording、`prd-completion.md` 参照)
+- 次 chain (= I-225 / I-162 / I-205 T14-T16) の prerequisite path clean
 
 ---
 
@@ -114,9 +106,9 @@ I-224 T7 (= ESM upgrade、`tests/e2e/rust-runner/Cargo.toml` への tokio runtim
    ↓
 ═════ 案 β Phase 1-A: I-205 T14 prerequisite (3 PRD 逐次起票 + I-399 prerequisite block) ═════
    ↓
-[進行中] PRD α-0-prerequisite = **I-399 (E2E test isolation defect)** — Spec stage v1 draft 2026-05-08、TS-0〜TS-4 未済 (= I-224 T9 並列 e2e green-ify の universal infra prerequisite、user 承認 2026-05-08 Option A)
+[完了] PRD α-0-prerequisite = **I-399 (E2E test isolation defect)** — 2026-05-08 Implementation T1〜T4 全完了、universal infra prerequisite for I-224 T9 確立 (= INV-T1/T2/T3 が `tests/i399_isolation_test.rs` 経由 structural lock-in)
    ↓
-[待機中] PRD α-1 = I-224 (B2 fn main mechanism) — T6a 完了 2026-05-08 (commit 80d9df1)、I-399 完了後 T7 chain 再開
+[次] PRD α-1 = I-224 (B2 fn main mechanism) — T6a 完了 2026-05-08 (commit 80d9df1)、I-399 完了で T7 chain 再開可能
    ↓
 [次] PRD α-2 = I-225 (B3 class field literal-only initializer type inference)
    ↓
@@ -132,7 +124,7 @@ I-224 T7 (= ESM upgrade、`tests/e2e/rust-runner/Cargo.toml` への tokio runtim
    ↓
 ═════ 案 β Phase 1-C: Methodology infra codify ═════
    ↓
-[次] 新 PRD I-D: Framework rule integration cohesive batch (D-1〜D-4 + B2/B3/I-162 lessons + I-224 v3〜v11 framework gap candidates + I-399 Spec stage 2nd/3rd-round candidates、計 21 件 = R-1 + R-5 + 改善 v2-1 + v3-4/5/6 + v4-1/2/3 + v5-1/2 + v6-1/2 + v11-1/3/4/5/6/7/8/9、9 rounds adversarial review 累積)
+[次] 新 PRD I-D: Framework rule integration cohesive batch (D-1〜D-4 + B2/B3/I-162 lessons + I-224 v3〜v11 framework gap candidates + I-399 Spec stage 2nd/3rd-round candidates + I-399 Implementation T4 /check_job candidates、計 23 件 = R-1 + R-5 + 改善 v2-1 + v3-4/5/6 + v4-1/2/3 + v5-1/2 + v6-1/2 + v11-1/3/4/5/6/7/8/9/10/11、10 rounds adversarial review 累積)
    ↓
 ═════ 案 β Phase 2: L1 Tier 0 priority ═════
    ↓
@@ -169,12 +161,11 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | 優先度 | レベル | PRD | architectural concern (= 1 PRD = 1 concern) |
 |--------|-------|-----|---------------------------------------------|
-| **進行中** | L3 (universal infra prerequisite に promote) | **I-399 (E2E test isolation defect)** Spec → Implementation | `cargo test --test e2e_test` の test 実行順序 / concurrency mode によらない deterministic test result 保証 (= per-test content-hash-derived bin による cargo cache collision 構造的排除) |
-| 次優先 1 (I-399 完了後) | L3 | **I-224 (B2 fn main mechanism)** T7〜T9 | top-level executable script の Rust emission で `fn main()` 自動生成 + Option β (top-await Tier 1 + ESM harness) cohesive batch |
+| **次着手** | L3 | **I-224 (B2 fn main mechanism)** T7〜T9 | top-level executable script の Rust emission で `fn main()` 自動生成 + Option β (top-await Tier 1 + ESM harness) cohesive batch |
 | 次優先 2 | L3 | **I-225 (B3)** | Class field の literal-only initializer (annotation 無) で type inference 完成 |
 | 次優先 2 | L3 | **I-162** | Constructor synthesis `Self::new()` for no-explicit-constructor classes |
 | 次優先 3 | L2 | **I-205 T14〜T16** | Class member access dispatch with getter/setter framework 完了 (e2e green-ify + naming refactor) |
-| 次優先 4 (post-I-205 close) | L4 | **I-D Framework rule integration cohesive batch** | task-ID 命名禁止 + Iteration v18 改善 4 件 + T7/T8 framework gap + T5 lessons + Iteration v9/v10/v11 lessons + B2/B3/I-162 lessons + T6a 2nd-round adversarial lessons (3 candidates v11-5/6/7 = handoff doc cross-ref drift detection + double-source consistency axis + Layer 1 factual accuracy semantic check) + I-399 Spec stage 2nd-round candidate (v11-8 = Rule 13 pending verdict severity default = Critical) (cohesive batch、計 21 candidates) |
+| 次優先 4 (post-I-205 close) | L4 | **I-D Framework rule integration cohesive batch** | task-ID 命名禁止 + Iteration v18 改善 4 件 + T7/T8 framework gap + T5 lessons + Iteration v9/v10/v11 lessons + B2/B3/I-162 lessons + T6a 2nd-round adversarial lessons (3 candidates v11-5/6/7) + I-399 Spec stage 2nd-round candidate (v11-8) + I-399 v3 transition candidate (v11-9) + **I-399 T4 /check_job candidates (v11-10 = Rule 8 (c) per-flow prototype probe coverage / v11-11 = Rule 10 default check axis に test infra-specific cargo profile + rustc variance enumerate)** (cohesive batch、計 23 candidates) |
 | L1 Tier 0 | L1 | **PRD 3 (I-177 mutation propagation)** | F1/F3 narrow body 内 mutation の outer Option<T> propagation (silent semantic change 解消) |
 | Class group | L3 | **PRD 2.76 (I-A) + 2.77 (I-B) + 2.8 (I-201-A) + 2.9 (I-202)** | Method static-ness IR field / Class TypeName context detection / AutoAccessor / Object literal getter/setter |
 | L1 silent | L1 | **PRD 7 (I-201-B)** | Decorator framework 完全変換 (TC39 Stage 3) |
@@ -188,6 +179,9 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 - **I-395** = Class expression conversion (anonymous class lifting、I-201-A / I-201-B 系 cohesive batch 候補)
 - **I-396** = Module-level destructuring pattern proper conversion (I-016 silent drop family、5-axis matrix-driven PRD 候補)
 - **I-397** = e2e harness `should_auto_append_main_call` detection edge cases (low priority infra)
+- **I-400** = E2E runner mechanism defensive design improvements (= I-399 T4 /check_job Review insight 由来、(a) `run_with_multi_file_sources` の hash 入力に modules content も含める structural collision-resistance 強化 + (b) `ensure_bin_entry` の idempotent check に path 一致 verify を追加、empirical 非問題だが structural defensive design として ideal、low priority infra)
+- **I-401** = I-399 heavyweight invariants の CI scheduled workflow 配置 (= I-399 T4 /check_job 2nd-round Review insight 由来、`tests/i399_isolation_test.rs` の `#[ignore]` gated heavyweight tests を週次 cron で `--ignored` opt-in 自動実行、INV-T1/T2/T3 の periodic CI monitoring 確立、I-400 と batch 化候補)
+- **I-402** = `tests/` 共有 module の subdirectory pattern migration (= project-wide test layout refactor、I-399 T4 /check_job 2nd-round Review insight 由来、`tests/test_helpers.rs` + `tests/i399_runner_mech.rs` を `tests/common/<name>/mod.rs` に migrate して cargo auto-discover empty test binary 回避、I-176 と batch 化候補)
 
 ---
 
@@ -197,6 +191,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | PRD / Phase | 日付 | 後続への影響 |
 |-------------|------|-------------|
+| **I-399 完了 (E2E test isolation defect、universal infra prerequisite for I-224 T9)** (Implementation T1〜T4 全完了: T1 = `tests/e2e_test.rs` per-test content-hash-derived bin design 実装 / T2 N/A re-classify (= autobins=true holding role) / T3 = INV-T1/T2/T3 empirical verify 4 mode × 8 invocations 全 187/0/93 identical / **T4 = /check_job 4-layer review final pass + structural lock-in 完成 + PRD close** = T4-a 1st-round で Critical 1 件 (PRD-mandated `tests/i399_isolation_test.rs` 未実装 = "lock-in" wording 不充足) + High 1 件 (stub doc comment stale) + Low 2 件 + Spec gap 2 件 + Review insight 2 件 発見、T4-b で `tests/i399_isolation_test.rs` 5 named tests 新規実装 (= T1 INV-T1 #[ignore]、T2 INV-T2 #[ignore]、T3 INV-T3 #[ignore]、T4-a content_hash_bin_name_invariants 毎 CI、T4-b per_test_content_hash_isolation 毎 CI for cargo per-bin fingerprint architectural assumption verify) + `tests/i399_runner_mech.rs` shared module 新設 (= e2e_test と i399_isolation_test 双方が `content_hash_bin_name` 参照、DRY) + stub doc comment 整合化、T4-c で I-D batch v11-10/v11-11 candidate 追加 (= self-applied integration)、T4-d で I-400 別 PRD 起票 (= multi-file hash key に modules 含める defensive design + ensure_bin_entry path verify defensive design)、T4-e 2nd-round /check_job で Layer 1-4 全 0 findings re-verify、Completion Criteria 全 9 項目 ✓、Layer 2 empirical post-fix mean **128.77s vs baseline 165.72s = -22%** = PRD T3 claim より良好) | 2026-05-08 | 全 PRD review iteration の e2e empirical verification 信頼性 base が **structural lock-in** 化 = 偽陽性/偽陰性 source 構造的排除、I-224 T9 並列 e2e green-ify の prerequisite block 解消、I-D batch v11-10/v11-11 candidate 追加 (計 23 件累積)、I-400 別 PRD として E2E runner mechanism defensive design improvements を deferred |
 | **I-224 T6a 完了 + adversarial 2nd-round /check_job 反映** (I-154 namespace handoff doc 3-category 拡張 = 1-a labels (4 entries) + 1-b value bindings (`__ts_old`/`__ts_new`/`__ts_recv`、I-205 setter dispatch desugar) + 1-c function rename target (`__ts_main`、I-224 T1、INV-5) + canonical 単一 source of truth pointer (`src/transformer/statements/mod.rs:27-47`) で固定 list duplication 回避 + 1-d lint enforcement 2 axis (label-side 4 sites + module-level identifier-side `scan_for_ts_namespace_collisions`) + 1-e reservation rationale + 1-f CI invariant lock-in section / `scripts/audit-no-pub-fn-init.sh` を `.github/workflows/ci.yml` に CI step "Audit no `pub fn init` (I-224 INV-4 lock-in)" として integrate (PR merge gate、enforced paths = `src/` + `tools/` + `tests/e2e/rust-runner/`、advisory paths = `tests/e2e/scripts/**/*.rs` gitignored working-tree-only artefacts) / `/check_job` 4-layer review **2 round** pass: 1st round で line-ref drift 2 件 (`__ts_main` :130→:133、`__ts_do_while_loop` :346→:356) + `__ts_switch` row line ref 追加 / 2nd round adversarial で 4 件追加 fix = Iteration v11 ambiguity 排除 (1-b header から I-224 v11 と I-205 task ID conflate を解消) + "T8 INV-3" → "I-205 INV-3 source-side single-evaluation contract" 不曖昧化 + 1-f false claim 訂正 (= advisory paths は gitignored working-tree-only、I-224 T5 incomplete latent state ではない) + audit script advisory comment 整合 update (handoff doc と double-source) / Layer 2 empirical (lib 3546 PASS = T5-2 完全一致 / i224_invariants 7 PASS = INV-1〜INV-7 lock-in 維持 / audit-no-pub-fn-init exit=0 / CI yml 15 steps well-formed) / Layer 3 cross-axis (3 reservation categories × 2 lint axes × CI gate axis 全 enumerated、Spec gap 0、emission sites 8 sites all covered) / Layer 4 trade-off (pure addition + broken-window discipline、regression cell 0、structural fix not patch、interim 条件不問) / Defect classification = Implementation gap 6 件 (2 1st-round line-ref + 4 2nd-round factual accuracy) all fixed-in-commit + Review insight 2 件 = (a) **e2e test isolation defect** (= cargo test --test e2e_test で parallel 9 fail / serial 8 fail (異なる cell set)、stale binary leak 由来の test order 依存 = I-180 entry が "I-173 (E2E parallel flakiness)" として 関連 PRD 言及するが I-173 自体未起票、新 TODO I-399 候補、T6a 因果無関係 = code 0 行変更で baseline と一致 = I-172 (bench non-determinism、別 axis) とは別 defect) + (b) doc line-ref drift detection automation (= handoff doc grep `<file>:<line>` を verify する CI step 候補、I-D framework batch 候補) | 2026-05-08 | 全 future PRD で `__ts_*` namespace 拡張時の structural enforcement (canonical doc-first dependency)、INV-4 invariant CI merge gate lock-in (post-T4 0 hits、再混入を merge 段階で block)、advisory paths の gitignored 性質を構造的に文書化 (CI fresh clone = 0 advisory)、handoff doc cohesion 向上 (3 category symmetric coverage、token-level accuracy)、broken-window discipline (line-ref drift fix + factual accuracy fix)、e2e test isolation defect finding を I-399 候補として triage、doc-cross-ref drift detection を I-D framework batch 候補化。詳細 = git log + design-decisions.md `## Switch emission と label hygiene > 1` |
 | **I-224 T5-2 + Iteration v11 (initial fix + deep review structural fix + 2nd review unit tests + /check_problem TODO 起票)** (`UserMainSubstitution` enum + `from_dispatch` constructor DRY 解消 / `UserMainKind` + `UserMainSubstitution` + `detect_user_main` の `user_main.rs` 同居 cohesion 向上 / cells 11/23/75 e2e green-ify (Tier 1 silent-loss fix) / **deep review structural fix** = double-await bug (cells 16/30/36 + nested `await main()` 用 `Transformer::suppress_main_await_wrap` flag + `convert_expr_in_await_context` helper による context-aware suppression、3 entry sites symmetric 適用) / INV-2 拡張 (B1 sync + B2 async + `await main();` patterns 4 sub-cases lock-in) / **2nd review unit tests** (`UserMainSubstitution::from_dispatch` 10-cell decision table + `is_active()` / `is_async()` predicates + cross-predicate invariant `is_async ⇒ is_active` の 4 direct unit tests) / INV-7 invariants test fill-in (subprocess audit + independent grep verifier) / `scripts/audit-no-init-call-site.sh` 新設 / `.claude/rules/file-size-resolution.md` 新設 (= 機械的末尾切り出し禁止 procedure) / PRD doc Iteration v11 entry (改善 candidates v11-1〜v11-4) / TODO `[I-398]` 起票 (out-of-matrix hypothetical scenarios)) | 2026-05-08 | cells 11/23/75 e2e green、cell-77 既存 GREEN 維持、cell-41 + cell-79 Tier 2 lock-in、cells 16/30/36 transpile 単一 `.await` 出力 (e2e は T7-T8 scope)、INV-7 lock-in (post-T4 0 hits)、Hono bench 107/72 (Preservation 0/0 vs T4)、framework 改善 4 件 (file-size-resolution.md NEW + I-D batch v11-1/v11-3/v11-4 candidates 追加)、TODO I-398 起票 = 全 Layer 1〜4 0 findings + /check_problem 0 unresolved。詳細 = PRD doc Iteration v11 |
 | **I-224 T5-1 + /check_job (3 iter) + /check_problem (2 round) cumulative structural fixes** (NonTrigger split / convert_expr passthroughs / per-declarator routing / classify_decl_var_path 削除 / TsAs/TsSatisfies/TsTypeAssertion expected_type propagation / destructuring Tier 2 honest reject / `prd-completion.md` Tier-transition wording 拡張 / TODO I-395-397 起票 / PRD Iteration v10 entry) | 2026-05-08 | i-224 e2e harness 40 fixtures wiring (14 GREEN + 27 ignored)、I-205 cell-09 unblock、INV-1 fill-in、cell-12/24 silent-drop Tier 1 fix、Hono bench 107/72 (Tier-transition Improvement compliance)。詳細 = PRD doc Iteration v9/v10 |
@@ -218,10 +213,12 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 ## 次の PRD 着手前の参照ポイント
 
-- **I-224 (現 PRD)**: PRD doc + Iteration v8/v9/v10/v11 entries (Spec への逆戻り audit trail、T6a 完了後の 2nd-round adversarial review は doc/CI structural fix のみで Spec 逆戻り不在 = Iteration log 追加なし)
+- **I-224 (次 PRD = T7 chain 再開)**: PRD doc + Iteration v8/v9/v10/v11 entries (Spec への逆戻り audit trail、T6a 完了後の 2nd-round adversarial review は doc/CI structural fix のみで Spec 逆戻り不在 = Iteration log 追加なし)
 - **I-225 / I-162 (次 PRD)**: TODO 内 entry + 案 β chain
 - **I-205 T14-T16 (post case-β-1A)**: `backlog/I-205-getter-setter-dispatch-framework.md` の T11 削除 + 新 PRD I-A/I-B migration 注記
-- **PRD I-D (Framework rule integration cohesive batch)**: I-205 close 後 deferred、I-224 v3〜v11 framework gap candidates + I-399 Spec stage 2nd-round candidate を集約 = **計 21 件** (含 T6a 2nd-round v11-5/6/7 + I-399 v11-8)
+- **PRD I-D (Framework rule integration cohesive batch)**: I-205 close 後 deferred、I-224 v3〜v11 framework gap candidates + I-399 Spec stage / Implementation candidates を集約 = **計 23 件** (含 T6a 2nd-round v11-5/6/7 + I-399 Spec v11-8/v11-9 + I-399 T4 /check_job v11-10/v11-11)
+- **I-399 (closed PRD)**: PRD doc は `backlog/` から削除済 (= `backlog-management` skill 準拠)、詳細 audit trail は git log で `[CLOSE] I-399 PRD 完了` commit を参照 (= Spec stage Iteration v1〜v3 + Implementation T1〜T4 + T4 /check_job 4-layer review final pass の history 全保持)。structural lock-in artifact = `tests/i399_isolation_test.rs` (5 named tests = T1/T2/T3 #[ignore] heavyweight + T4-a/T4-b 毎 CI lightweight) + `tests/i399_runner_mech.rs` (= `content_hash_bin_name` 共有モジュール) + `tests/e2e_test.rs::run_with_source` / `run_with_multi_file_sources` (= per-test content-hash-derived bin design)
+- **I-400 / I-401 / I-402 (新 PRD 起票候補)**: I-399 T4 /check_job Review insight 由来の follow-up improvements、test infra cluster sister として I-180 / I-172 / I-397 と batch 化候補
 - **PRD 3 (I-177 本体)**: matrix-driven、案 A (mutation-ref) vs 案 B (writeback) を spec stage で empirical 確定
 - **Phase A Step 5/6/7**: 「開発ロードマップ」section + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)
 - **設計判断 archive**: [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) (削除禁止 — 過去判断は reference として保持、実装乖離時は最新化)
