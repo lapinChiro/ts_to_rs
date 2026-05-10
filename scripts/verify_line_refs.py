@@ -1,28 +1,61 @@
 #!/usr/bin/env python3
-"""verify_line_refs.py
+"""verify_line_refs.py — Method A formal lock-in utility (PRD I-D-pre Cell 4 v11-7)
 
-Method A bootstrap utility for PRD I-D Spec stage convergence (Iteration v11 → v12 transition).
+================================================================================
+Formal lock-in metadata (PRD I-D-pre Cell 4 / v11-7、Path B split adoption 2026-05-11)
+================================================================================
 
-Bootstrap implementation of Cell 19 (v11-7 = Layer 1 factual accuracy semantic check) audit
-auto-verify mechanism: detect line-ref drift in PRD doc by extracting all "line N" / "lines N-M"
-claims and verifying that the referenced lines actually contain content matching the textual
-context that introduces the reference.
+**Status**: Formal regression-tested utility lock-in via PRD I-D-pre Implementation
+Phase 2 T1-pre-5 (= Path B split 2026-05-11、Iteration v12 bootstrap origin promoted to
+formal utility status)。
 
-Heuristic: for each match like "<context phrase> line N", check whether line N (and ±2 lines)
-contains the noun phrase from the context. Heading references are the most reliable check,
-since "## Foo" or "### Foo" headings have a distinct lexical form.
+**Purpose**: Detect line-ref drift in PRD doc by extracting "line N" / "lines N-M" claims
+and verifying that referenced lines actually contain content matching the textual context.
+Heading-based detection (= "## Foo" / "### Foo") is the most reliable check class.
 
-Usage:
+**Coverage scope (regression-tested)**:
+- Heading-based line-ref drift detection (= primary coverage class)
+- Historical preservation policy (= "v8 当時 line X" 等の historical claims excluded
+  via `is_historical_claim` predicate、本 PRD I-D parent Iteration v12 で formal 確定 policy)
+- Out of scope: code-level line refs (= `<file>:<line>` references in handoff docs are
+  covered by sibling utility `scripts/audit-handoff-doc-line-refs.py` = PRD I-D-pre Cell 3)
+
+**PRD I-D-pre binding**:
+- Cell 4 (v11-7): Layer 1 factual accuracy semantic check rule wording 追加
+  (`.claude/rules/check-job-review-layers.md` Layer 1 sub-step) + Method A audit utility
+  formal lock-in
+- Test contract: `tests/i_d_pre_method_a_test.rs::test_method_a_line_ref_drift_detection`
+  + `test_method_a_utility_metadata_header_embed`
+
+**Origin (= bootstrap chain history)**:
+- Iteration v12 (2026-05-10): Bootstrap implementation as Method A utility for PRD I-D
+  Spec stage convergence (= Cell 19 v11-7 audit auto-verify mechanism early implementation)
+- Iteration v17 (2026-05-10): Empirical proof for line-ref drift class complete absorption
+  (= verify_line_refs.py drift detection vs Iteration v17 third-party review findings)
+- Path B split adoption (2026-05-11): formal regression-tested utility lock-in via PRD
+  I-D-pre Cell 4 (= bootstrapping circularity 構造的解消 base、Iteration v17 plateau
+  bootstrap utility correctness ceiling resolution)
+
+================================================================================
+Usage
+================================================================================
+
     python3 scripts/verify_line_refs.py <prd_path>
 
 Output: list of detected drifts (= claim line N → actual heading at line M, suggested fix).
 
-Limitations:
+================================================================================
+Limitations (= known structural false-positive class、preservation policy 適用)
+================================================================================
+
 - Heuristic noun phrase extraction; may miss novel phrasings
 - Does not auto-fix; reports drifts for human review
 - False positives possible for intentionally-historical refs (= "v8 当時 line X claim was wrong")
   → such claims are typically wrapped in quotes / phrases like "旧 X" / "当時"; flagged but
-    annotated for human triage
+    annotated for human triage (= `is_historical_claim` predicate filters)
+- Iteration log entries (= `### Iteration vN` headings 直下) は historical preservation policy
+  対象 = drift detected でも本 PRD I-D-pre 完了基準には含めない (= PRD I-D-main で Spec
+  Review Iteration Log preservation policy formal lock-in 後 cross-PRD invariant)
 """
 
 from __future__ import annotations
