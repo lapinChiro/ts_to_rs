@@ -9,15 +9,106 @@
 
 ---
 
-## 現在の状態 (2026-05-09)
+## 現在の状態 (2026-05-10)
 
-**進行中**: 案 γ Phase 0 = **PRD I-D (Framework rule integration cohesive batch) 着手予定**。
+**進行中**: 案 γ Phase 0 = **PRD I-D Spec Stage Iteration v17 floor break** (= 8 third-party rounds 経過、trajectory v15:11 → v17:9 = -18% 初の floor 突破、user 方針相談 mandatory pending)。
 
-**最新の完了**: I-224 (B2 fn main mechanism、Option β cohesive batch) close (2026-05-09)。詳細 = § 直近の完了作業 + git log `[CLOSE] I-224 PRD 完了` commit + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 16 sub-sections、12 度 v12-2 pattern recurrence chain evidence、9 framework 改善 candidates table embed)。
+**最新の完了**: I-224 (B2 fn main mechanism、Option β cohesive batch) close (2026-05-09)。詳細 = § 直近の完了作業 + git log `[CLOSE] I-224 PRD 完了` commit + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section。
 
-**開発順序の見直し (2026-05-09 user 確定)**: 旧案 β (= I-225 → I-162 → I-205 T14-T16 → I-D) を **案 γ (= I-D first → I-225 → I-162 → I-205 T14-T16)** に再設計。Rationale = framework quality first principle (= "PRD作成 / ワークフロー品質 を上げる対応から着手")、4 度連続 v12-2 pattern empirical lock-in を踏まえ I-D framework 整備を I-225/I-162/I-205 T14-T16 の prerequisite に位置付け、後続 PRDs の spec stage iteration cost を構造的削減。
+**開発順序**: 案 γ (= I-D first → I-225 → I-162 → I-205 T14-T16)。詳細 = 下記「実行順序」section。
 
-**次着手**: PRD I-D = Framework rule integration cohesive batch (32 candidates / 14 rounds adversarial review 累積、`doc/handoff/design-decisions.md` framework lesson archive section + TODO `[I-D]` entry を primary reference)。
+---
+
+## PRD I-D Spec Stage 進捗 (2026-05-10 single session 累積)
+
+**PRD doc**: [`backlog/I-D-framework-rule-integration-cohesive-batch.md`](backlog/I-D-framework-rule-integration-cohesive-batch.md) (1494 LOC、Iteration v1〜v17 history record 完了)
+
+### Iteration trajectory (8 third-party rounds + 9 fix iterations)
+
+| Round | Findings | Critical | High | Meta% | Convergence (C-1〜C-4) | Note |
+|------:|---------:|---------:|-----:|------:|-----------------------|------|
+| v3 | 17 | 6 | 5 | — | 0/4 FAIL | initial baseline |
+| v5 | 9 | 1 | 4 | 56% | 0/4 FAIL | Phase 1 reduction -47% |
+| v7 | 9 | 2 | 3 | 44% | 2/4 (C-3/C-4 PASS) | plateau |
+| v9 | 11 | 3 | 5 | 45% | 0/4 FAIL | Phase 2 regression |
+| v11 | 14 | 3 | 5 | 64% | 0/4 FAIL | regression peak |
+| v13 | 11 | 3 | 4 | 27% | 2/4 PASS | **Method A reset** (Cell 19 bootstrap) |
+| v15 | 11 | 2 | 4 | 27% | 2/4 PASS | plateau (NEW class emerge) |
+| **v17** | **9** | **1** | **4** | **22%** | **2/4 PASS** | **Path E floor break** (Cell 10/17 + partial 6+8/28) |
+
+**Trajectory shape**: v3-v7 rapid reduction → v9-v11 regression peak → v13-v15 Method A reset plateau → **v17 Path E floor break**。
+3 round 連続 (v13/v15/v17) で 2/4 PASS = C-3 (trajectory diminishing) + C-4 (meta ratio ≤ 50%) PASS、C-1 (Critical=0) + C-2 (High=0) FAIL。
+
+### Bootstrap utilities created in this session
+
+| Utility | LOC | Cell coverage | Purpose |
+|---------|----:|---------------|---------|
+| [`scripts/verify_line_refs.py`](scripts/verify_line_refs.py) | 264 | Cell 19 (v11-7 line-ref factual accuracy) | Method A、Iteration v12 新設、heading-based line-ref drift detection |
+| [`scripts/verify_prd_self_audits.py`](scripts/verify_prd_self_audits.py) | 368 | Cell 10/6+8/17/28 (multi-axis) | Path E、Iteration v16 新設、4 axes audit (cross-reference consistency / status pending verdict / label namespace collision / external file drift) |
+| **Total bootstrap utilities** | **632** | **5/30 cells (Cell 19 ✓ + Cell 17 ✓ + Cell 10/6+8/28 partial)** | post-v16 multi-axis structural absorption |
+
+### Cell coverage status (= 30 candidates のうち bootstrap 済 vs 未)
+
+| Cell | Candidate | Bootstrap status | Coverage 度 |
+|------|-----------|-----------------|-----------|
+| 19 | v11-7 line-ref factual accuracy | ✓ | `verify_line_refs.py` で完全 absorption |
+| 17 | v11-5 external file drift | ✓ | `verify_prd_self_audits.py` Axis 4 |
+| 10 | v5-1 cross-reference cell consistency | ⚠ partial | Axis 1 threshold "5" arbitrary heuristic = under-detection (v17 F6) |
+| 6+8 | v3-6/v4-2 status pending verdict | ⚠ partial | Axis 2 TS-X over-exclusion = under-detection (v17 F7) |
+| 28 | v13-5 single-source-of-truth | ⚠ partial | Axis 3 R-x focus only、cell-slot vocabulary fork 未 cover |
+| 残 25 cells | various rule wording / skill / command | ✗ 未 | Implementation stage T1-T8 lock-in 待ち |
+
+### Audit state (post-v17)
+
+- `audit-prd-rule10-compliance.py` PRD I-D doc: PASS exit 0 ✓
+- `verify_prd_self_audits.py` PRD I-D doc: 0 CURRENT spec drifts across all 4 axes ✓
+- INV-4 baseline 3-tuple preserved (I-050 FAIL pre-existing / I-205 PASS / I-D PASS) ✓
+
+### 次着手 = user 方針相談 mandatory (3 path options pending、user clarification 中断)
+
+v17 NOT-CONVERGED + 2/4 PASS (3 round 連続) のため user 指示 2026-05-10 v15 directive 再適用 = 独断 path 選択禁止、user 確認待ち:
+
+#### **Path E+** (recommended) — Method A coverage extension 継続 + utility self-correctness 強化
+
+- **Work**:
+  - F6 fix: Path E Axis 1 threshold "5" arbitrary heuristic を spec-traceable allow-list に置換
+  - F7 fix: Path E Axis 2 TS-X over-exclusion を post-v15 wording presence 要求に refine
+  - Axis 5 (NEW): Layer 1-4 cross-cutting wording semantic verify (F1 class)
+  - Axis 6 (NEW): triangulate spec wording staleness (F4 class)
+  - Axis 7 (NEW): trajectory placeholder freshness (F5 class)
+  - 9 v17 findings manual sweep + utilities re-run + v19 third-party review
+- **期待 trajectory**: v17:9 → v19:5-7 → v21:0-3 = 2-4 rounds で convergence、1-2 時間
+- **Pros**: proven bootstrap pattern、structural fix、I-D scope 内維持
+- **Cons**: utility correctness ceiling = v19+ で plateau possibility 否定不能、+500-700 LOC accumulated
+
+#### **Path B** — PRD I-D split into I-D-pre + I-D-main
+
+- **Work**:
+  - I-D-pre = 5 bootstrap cells (Cell 19 + 10 + 6+8 + 17 + 28) + audit utility extension = small-scope spec stage
+  - I-D-main = 残 25 candidates (post-bootstrap framework full leverage 状態)
+- **期待**: I-D-pre は ~3-5 cells、minimal cross-reference surface で convergence guaranteed
+- **Pros**: 構造的に最 cohesive、bootstrapping problem 完全解消
+- **Cons**: PRD 起票 1 件追加、cohesive batch boundary (user 確定 2026-05-10 = "30 candidates 単一 PRD") 再確認 mandatory、開発期間延伸
+
+#### **Path F** — Convergence criterion 工学的 re-design (asymptotic floor acknowledgment)
+
+- **Work**: Hybrid 4-条件 を asymptotic floor 込みで re-design (例: "Critical ≤ 1 + High ≤ 4 + 連続 3 round non-regression + meta-ratio < 25%")
+- **判定**: 現 v17 状態で satisfy = 即時 Spec stage close 可能
+- **Pros**: 即時 Implementation stage 着手可能、framework rules lock-in 後 v15 plateau 実態解消
+- **Cons**: convergence criterion 緩和 = ideal-implementation-primacy 観点で user 判断必須 (= 妥協扱い?「asymptotic 数学的事実」受容?)
+
+### 3rd-order pattern observation (= bootstrap utility correctness ceiling)
+
+各 bootstrap utility が **次 round の dominant defect class を自ら生成** = utility-correctness ceiling = 各 utility は次 utility で audit する必要 = 無限 chain 構造。Path E+ で structural fix 続行 vs Path B で完全境界分離 vs Path F で数学的事実受容、いずれも user 判断必要。
+
+### Resume instructions (新 session で /start)
+
+1. **本 plan.md の本 section 「PRD I-D Spec Stage 進捗」確認** = trajectory + bootstrap utilities + 3 path options 把握
+2. **`backlog/I-D-framework-rule-integration-cohesive-batch.md` Iteration v17 entry 確認** (= 最新 third-party review 9 findings detail + path options recommendation)
+3. **user に方針確認**: Path E+ (recommended) / Path B (PRD split) / Path F (criterion re-design) / Other
+4. user 確認後、採用 path で v18+ 実施 OR Spec stage close OR PRD split 起票
+5. PRD doc + utilities (`verify_line_refs.py` + `verify_prd_self_audits.py`) + audit script (`audit-prd-rule10-compliance.py`) は本 session 内 modify、git status で確認可能 (un-commit)
+6. 工数見積: Path E+ = 1-2 時間 / Path B = 数日 (PRD 起票 + 別 spec stage) / Path F = 30 分 (criterion 改訂)
 
 ### Quality Gate (post I-224 PRD close、2026-05-09)
 
@@ -32,28 +123,49 @@
 
 ---
 
-## /start 再開時の手順
+## /start 再開時の手順 (= PRD I-D Spec Stage Iteration v17 plateau からの resumption)
 
 ### Step 1: 状態確認
-1. **本 plan.md** を読む = 現在の状態 + 次着手 = **PRD I-D (Framework rule integration cohesive batch)** 着手 (案 γ Phase 0)
-2. **TODO `[I-D]` entry** を読む = 32 framework 改善 candidates 全列挙 (R-1 + R-5 + 改善 v2-1〜v13-7、14 rounds adversarial review 累積)
-3. **[`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section** を読む = 16 sub-sections の cross-PRD applicable design patterns + 4 度連続 v12-2 pattern recurrence chain evidence + 9 candidates I-224-derived chain detailed table = I-D PRD 起票時の **primary lesson source**
-4. **closed PRDs**: I-224 / I-399 / I-180 は `backlog/` から削除済、git log audit trail + design-decisions.md framework lesson archive から access
+1. **本 plan.md「PRD I-D Spec Stage 進捗」section** = trajectory + bootstrap utilities + 3 path options 把握 (上記 § PRD I-D Spec Stage 進捗 参照)
+2. **[`backlog/I-D-framework-rule-integration-cohesive-batch.md`](backlog/I-D-framework-rule-integration-cohesive-batch.md) Iteration v17 entry** = 最新 third-party review 9 findings detail + 3 path options recommendation 確認
+3. **`scripts/verify_line_refs.py` + `scripts/verify_prd_self_audits.py`** = bootstrap utilities (Method A + Path E)、本 session で新設、git untracked
+4. **TODO `[I-D]` entry** = 30 framework 改善 candidates 全列挙 (= 本 PRD scope 内 cells 1-30)
+5. **closed PRDs** (I-224 / I-399 / I-180): `backlog/` から削除済、git log + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) からアクセス
 
-### Step 2: PRD I-D 着手 (次着手)
+### Step 2: User 方針確認 (= mandatory before v18+)
 
-**Pre-requisite verify** (= I-224 完了で達成済):
-- I-224 PRD close (= INV-1〜INV-7 全 GREEN structural lock-in、e2e empirical verification 信頼性 base 確立 by I-399)
-- Quality gate: cargo test 全 pass / cargo clippy 0 warnings / cargo fmt 0 diffs / 全 audit PASS
-- 32 framework candidates が 14 rounds adversarial review を経て累積、design-decisions.md に primary lesson source embed 済
+PRD I-D Spec stage は **Iteration v17 で NOT-CONVERGED + 2/4 PASS (3 round 連続)**。User 指示 2026-05-10 v15 directive 再適用 = **独断 path 選択禁止、user 方針確認後採用**。
 
-**Work**: TODO `[I-D]` entry + design-decisions.md framework lesson archive を参照、Discovery → spec stage matrix (`prd-template` skill 適用) → cohesive batch boundary 確定 (= 32 candidates の sub-domain split or 単一 PRD の判断、spec stage で確定) → Implementation stage TDD。
+3 path options 提示:
 
-**Completion criteria**:
-- 32 candidates の rule target / resolution direction を spec で確定 (Spec stage)
-- framework rule files (`spec-stage-adversarial-checklist.md` / `check-job-review-layers.md` / `spec-first-prd.md` / `prd-completion.md` 等) + audit scripts (`audit-prd-rule10-compliance.py` 等) の改修実装 (Implementation stage)
-- self-applied integration: 本 PRD I-D 自身が新 framework rules で structural compliance verify (= v12-2 pattern 5 度連続再発防止 empirical lock-in)
-- 後続 PRDs (I-225 / I-162 / I-205 T14-T16) prerequisite path clean
+- **Path E+** (recommended): Method A coverage extension 継続 + utility self-correctness 強化 (F6/F7 fix + Axis 5/6/7 追加) + 9 findings manual sweep + v19 verify。期待 convergence: 2-4 rounds (1-2 時間)
+- **Path B**: PRD I-D split into I-D-pre (= 5 bootstrap cells) + I-D-main (= 残 25 cells)。bootstrapping problem 完全構造的解消、cohesive batch boundary 再確認 mandatory
+- **Path F**: Convergence criterion 工学的 re-design (asymptotic floor acknowledgment)。現 v17 状態で satisfy = 即時 Spec stage close 可能、user 判断 (妥協扱いか asymptotic 数学的事実受容か)
+
+### Step 3: 採用 path で実施
+
+#### Path E+ 採用時:
+1. `scripts/verify_prd_self_audits.py` の F6/F7 fix + Axis 5/6/7 追加 (~100-150 LOC)
+2. PRD doc に対し utilities re-run、検出 drifts auto-fix
+3. v17 9 findings (F1〜F9) manual sweep with Method G discipline
+4. Iteration v18 fix log + Iteration v19 third-party adversarial review dispatch
+5. v19 結果評価: convergence なら Spec stage close、未達なら user 再相談
+
+#### Path B 採用時:
+1. cohesive batch boundary 再確認 (= 5 bootstrap cells で I-D-pre split の妥当性 user 確認)
+2. PRD I-D-pre 新規起票 (= bootstrap cells のみ、small-scope spec stage)
+3. 現 PRD I-D を I-D-main に rename + scope reduce (= 残 25 candidates)
+4. I-D-pre spec stage → Implementation stage で utilities formal lock-in
+5. I-D-main spec stage を bootstrapped framework full leverage 状態で再開
+
+#### Path F 採用時:
+1. `.claude/rules/check-job-review-layers.md` Cell 30 spec を asymptotic floor 込みで revise
+2. 新 convergence criterion で Iteration v17 状態 verify (= "Critical ≤ 1 + High ≤ 4 + 3 round non-regression + meta < 25%" 等で satisfy 確認)
+3. PRD doc Spec Stage Tasks status を全 COMPLETE 同期 + Iteration v18 entry で convergence 確定 record
+4. Implementation stage 着手準備 (T1-T8 task execution)
+
+### Step 4: 後続 prerequisite chain (案 γ Phase 1〜)
+PRD I-D Spec stage close + Implementation stage 完了後、案 γ Phase 1 (= I-225 → I-162 → I-205 T14-T16) 着手。詳細 = 下記「実行順序」section + 「次の作業 table」。
 
 ---
 
@@ -77,7 +189,11 @@
    ↓
 ═════ 案 γ Phase 0: Framework quality integration (NEW、2026-05-09 順序入れ替え = 旧案 β I-D を Phase 1-C → Phase 0 へ前倒し) ═════
    ↓
-[次] **PRD I-D = Framework rule integration cohesive batch** (= 32 candidates / 14 rounds adversarial review 累積、4 度連続 v12-2 pattern 構造的解消)。**起票時 primary reference** = TODO `[I-D]` entry + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section
+[次] **PRD I-D = Framework rule integration cohesive batch** (= 30 candidates / 14 rounds adversarial review 累積 (当初 32 件 - v13-2/v13-3 PRD I-E migrate 2026-05-10)、4 度連続 v12-2 pattern 構造的解消)。**起票時 primary reference** = TODO `[I-D]` entry + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section
+   ↓
+═════ 案 γ Phase 0.5: lib/CLI API + Web API runtime integration (NEW、2026-05-10 PRD I-D scope split 由来) ═════
+   ↓
+[次候補] **PRD I-E = lib/CLI API + Web API runtime integration cohesive batch** (= I-D scope 分離由来 v13-2 + v13-3 candidates、orthogonal concern なので Phase 1/2 と並行可能)。Priority L3、起票 timing は I-D close 後または案 γ Phase 1/2 並行
    ↓
 ═════ 案 γ Phase 1: I-205 T14 prerequisite chain (旧案 β Phase 1-A、framework quality 後着手) ═════
    ↓
@@ -128,7 +244,8 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | 優先度 | レベル | PRD | architectural concern (= 1 PRD = 1 concern) |
 |--------|-------|-----|---------------------------------------------|
-| **次着手 (案 γ Phase 0)** | L4 (framework quality) | **PRD I-D Framework rule integration cohesive batch** | 32 framework 改善 candidates の cohesive integration (= R-1 + R-5 + 改善 v2-1〜v13-7、14 rounds adversarial review 累積)。**Canonical source**: TODO `[I-D]` entry (32 件全列挙) + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 9 candidates I-224-derived chain detailed table + 12 度 v12-2 pattern recurrence chain evidence)。Cohesive batch boundary (= 単一 PRD or sub-domain split) は spec stage で確定 |
+| **進行中 (案 γ Phase 0)** | L4 (framework quality) | **PRD I-D Framework rule integration cohesive batch (Spec Stage Iteration v17 plateau)** | 30 framework 改善 candidates の cohesive integration、Spec Stage で 8 third-party rounds 経過、v17 で trajectory floor break (11→9)、2/4 PASS 3 round 連続。**現状**: Path E bootstrap (= verify_line_refs.py 264 LOC + verify_prd_self_audits.py 368 LOC) で Cell 19/17 完全 absorb + Cell 10/6+8/28 partial absorb。**次 action**: user 方針確認 (Path E+ recommended / Path B PRD split / Path F criterion re-design) → 採用 path で v18+ 実施 OR Spec stage close。詳細 = 上記「PRD I-D Spec Stage 進捗」section + [`backlog/I-D-framework-rule-integration-cohesive-batch.md`](backlog/I-D-framework-rule-integration-cohesive-batch.md) Iteration v17 entry |
+| **次候補 (案 γ Phase 0.5、I-D scope split 由来 NEW)** | L3 | **PRD I-E lib/CLI API + Web API runtime integration cohesive batch** | v13-2 (Promise builtin runtime integration deficiency) + v13-3 (transpile lib API vs CLI binary builtin loading inconsistency) cohesive batch。Spec stage で 2 candidates の真 cohesion verify + 必要なら 2 PRD split 判断、orthogonal concern のため案 γ Phase 1/2 並行可能 |
 | 次優先 (案 γ Phase 1) | L3 | **I-225 (B3)** | Class field の literal-only initializer (annotation 無) で type inference 完成 |
 | 次優先 (案 γ Phase 1) | L3 | **I-162** | Constructor synthesis `Self::new()` for no-explicit-constructor classes |
 | 次優先 (案 γ Phase 2) | L2 | **I-205 T14〜T16** | Class member access dispatch with getter/setter framework 完了 (e2e green-ify + naming refactor) |
@@ -157,6 +274,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | PRD / Phase | 日付 | 後続への影響 |
 |-------------|------|-------------|
+| **PRD I-D Spec Stage Iteration v1-v17 progress (= 8 third-party rounds + 9 fix iterations + 2 bootstrap utilities 632 LOC)** | 2026-05-10 (single session 累積) | PRD doc 1494 LOC、Iteration v17 で trajectory floor break (11→9、-18%、Critical 半減 2→1、meta 22% history 最低)。Method A bootstrap (Cell 19 verify_line_refs.py) で line-ref drift class 完全 absorption + Path E bootstrap (Cell 10/6+8/17/28 verify_prd_self_audits.py 4 axes) で multi-axis partial absorption。Spec stage close 未到達 (2/4 PASS 3 round 連続)、user 方針相談 mandatory pending = Path E+ / Path B / Path F option 提示。詳細 = 上記「PRD I-D Spec Stage 進捗」section + [`backlog/I-D-framework-rule-integration-cohesive-batch.md`](backlog/I-D-framework-rule-integration-cohesive-batch.md) Iteration v17 entry |
 | **[CLOSE] I-224 PRD 完了 (B2 fn main mechanism + Option β cohesive batch + Iteration v13 + post-close 2 round /check_job adversarial review)** | 2026-05-09 | top-level executable script の Rust emission `fn main()` 自動生成 mechanism 完成 (INV-1〜INV-7 structural lock-in)、Option β cohesive batch (top-await Tier 1 + ESM harness + collision detection) 完成、12 C1 cells e2e GREEN-ify + I-180 close 達成、Hono bench Preservation 107/72 維持 (production code 0 LOC change)。**4 度連続 v12-2 pattern empirical lock-in** = framework v12-1/v12-2 + v13-1〜v13-7 = **9 candidates** を I-D PRD batch 起票候補化 (計 **32 件 / 14 rounds adversarial review** 累積)。**詳細** = git log `[CLOSE] I-224 PRD 完了` commit + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 16 sub-sections embed: Option β cohesive batch decision pattern + Axis E orthogonality merge + 25 NA cells unified mutual exclusion + 3-tuple dispatch tree + INV 4-item invariant pattern + 6-category test layout + R-2/R-4 audit methodology + 23 sub-commits decomposition + 9 framework 改善 candidates table + 12 度 v12-2 pattern recurrence chain evidence + Implementation-level structural fixes (Iteration v8〜v11) + structural lock-in artifact 一覧) |
 | **audit-prd-rule10-compliance.py default mode structural fix (= I-224 T7 /check_problem 由来)** | 2026-05-08 | CI merge gate が真に I-205 + I-224 を audit 化 (`## Rule 10 Application` section presence による content-based auto-detect、命名 convention に依存しない future-proof な audit 対象選定)。詳細 = git log |
 | **[CLOSE] I-399 PRD 完了 (E2E test isolation defect、universal infra prerequisite for I-224 T9)** | 2026-05-08 | 全 PRD review iteration の e2e empirical verification 信頼性 base が **structural lock-in** 化 = 偽陽性/偽陰性 source 構造的排除 (per-test content-hash-derived bin design、INV-T1/T2/T3 が `tests/i399_isolation_test.rs` lock-in)。Layer 2 empirical post-fix mean **128.77s vs baseline 165.72s = -22%**。詳細 = git log `[CLOSE] I-399 PRD 完了` commit |
@@ -174,7 +292,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 ## 次の PRD 着手前の参照ポイント
 
-- **PRD I-D (Framework rule integration cohesive batch、次着手 = 案 γ Phase 0)**: I-205/I-225/I-162 PRD chain prerequisite、32 candidates / 14 rounds adversarial review 累積。**Canonical source** = TODO `[I-D]` entry (32 件全列挙)。**Primary lesson source** = [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 16 sub-sections + 9 candidates I-224-derived chain detailed table + 12 度 v12-2 pattern recurrence chain evidence)。**Cohesive batch boundary** (= 単一 PRD or sub-domain split) は spec stage で確定
+- **PRD I-D (Framework rule integration cohesive batch、進行中 = 案 γ Phase 0、Spec Stage Iteration v17 plateau)**: I-205/I-225/I-162 PRD chain prerequisite、30 candidates。**現 state**: Spec stage で 8 third-party rounds 経過、v17 trajectory floor break (11→9)、2/4 PASS 3 round 連続、user 方針相談 pending。**Primary references**: 本 plan.md「PRD I-D Spec Stage 進捗」section (= trajectory + bootstrap utilities + 3 path options) + [`backlog/I-D-framework-rule-integration-cohesive-batch.md`](backlog/I-D-framework-rule-integration-cohesive-batch.md) Iteration v17 entry + [`scripts/verify_line_refs.py`](scripts/verify_line_refs.py) (Method A、Cell 19) + [`scripts/verify_prd_self_audits.py`](scripts/verify_prd_self_audits.py) (Path E、Cell 10/6+8/17/28)。**Cohesive batch boundary** (= 単一 PRD or sub-domain split) は user 確定 2026-05-10 = "30 candidates 単一 PRD"、Path B 採用時のみ再確認
 - **I-225 / I-162 (案 γ Phase 1、I-D 完了後着手)**: TODO 内 entry + 案 γ chain
 - **I-205 T14-T16 (案 γ Phase 2、I-225/I-162 完了後着手)**: [`backlog/I-205-getter-setter-dispatch-framework.md`](backlog/I-205-getter-setter-dispatch-framework.md) の T11 削除 + 新 PRD I-A/I-B migration 注記
 - **I-224 / I-399 / I-180 (closed PRDs)**: PRD doc は `backlog/` から削除済、git log audit trail (`[CLOSE] I-224 PRD 完了` / `[CLOSE] I-399 PRD 完了` commit) + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) framework lesson archive section から access

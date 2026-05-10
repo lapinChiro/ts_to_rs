@@ -801,9 +801,15 @@ def verify_invariants_test_contracts(prd_path: Path, content: str) -> list[str]:
     if section is None:
         return violations  # Rule 8 (8-5) で別途 detect
 
-    # 各 INV-N entry を extract
+    # 各 INV-N entry を extract.
+    # Bug fix (PRD I-D Iteration v3 third-party review F1 source、2026-05-10):
+    # 旧 regex `[^#]*?` は body 内に literal `#` (= `cell #` / `# 1-30` 等) が
+    # 含まれると early stop し、後続 INV-N が silent skip される構造的 bug。
+    # `(?s)(?:(?!###\s+INV-\d+|^##\s).)*?` で 任意文字 (改行含、negative lookahead で
+    # 次 INV / ## section / EOF を terminator) に置換、誤った `#` literal stop を排除。
     inv_pattern = re.compile(
-        r"###\s+INV-(\d+)[^#]*?(?=###\s+INV-\d+|^##\s+(?!#)|\Z)",
+        r"^###\s+INV-(\d+)\b"
+        r"(?P<body>(?:(?!^###\s+INV-\d+|^##\s+(?!#)).)*)",
         re.MULTILINE | re.DOTALL,
     )
     for m in inv_pattern.finditer(section):
