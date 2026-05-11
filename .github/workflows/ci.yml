@@ -64,6 +64,13 @@ jobs:
       - name: Audit PRD Rule 10/11/12 + Rule 4 (4-3) compliance
         run: python3 scripts/audit-prd-rule10-compliance.py
 
+      # PRD I-D-pre Cell 3 / v11-5 / T1-pre-3b: handoff doc line-ref drift
+      # detection。`<file>:<line>` cross-references in doc/handoff/*.md must
+      # resolve to an existing file with the line number in bounds + no
+      # ambiguous bare-basename refs。Merge gate (exit 1 blocks PR merge)。
+      - name: Audit handoff doc line refs (PRD I-D-pre Cell 3)
+        run: python3 scripts/audit-handoff-doc-line-refs.py doc/handoff/
+
       # I-224 INV-4 invariant: `pub fn init` mechanism (legacy library-mode
       # emission target) は I-224 T4 で structural fix 完了 (= fn main 統合)。
       # 本 step は merge gate として src/ / tools/ / tests/e2e/rust-runner/ を

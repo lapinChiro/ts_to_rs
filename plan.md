@@ -9,9 +9,9 @@
 
 ---
 
-## 現在の状態 (2026-05-11、Path B split adoption + I-D-pre Implementation Phase 1+2+3 完了 + /check_job A1-A9 ideal-clean fix + Iteration v3 Option α design decision lock-in + **Phase 3 audit script extensions 完了 + /check_job 4-layer review pass (= C1 branch coverage 達成)** = Phase 4 着手 ready)
+## 現在の状態 (2026-05-11、Path B split adoption + I-D-pre Implementation Phase 1+2+3+4 完了 + /check_job A1-A9 ideal-clean fix + Iteration v3 Option α design decision lock-in + **Phase 4 handoff audit script + CI integration 完了 + design-decisions.md 5 ambiguous refs structural fix + 4-layer self-applied review pass** = Phase 5 着手 ready)
 
-**進行中**: 案 γ Phase 0 = **PRD I-D-pre Implementation Phase 4 着手 ready (= audit-handoff-doc-line-refs.py 新設 + CI integration)** (= Phase 1 test infra setup + Phase 2 bootstrap utility formal lock-in + /check_job A1-A9 fix + Iteration v3 baseline + Option α decision + **Phase 3 audit script extensions 完了 + 4-layer review pass**: 3 NEW verify functions + helper `has_cell_numbering_convention_section()` + formatter `_format_path_e_drifts()` を `scripts/audit-prd-rule10-compliance.py` に embed、Path E utility を library import で source of truth 共有、4 test stubs `#[ignore]` 解除 + 6 fixtures 新設 + /check_job 4-layer review で I1 (Helper False branch test 不在) 即時 fix (= I-205-like fixture + False branch test 追加) で **5/5 tests PASS** + C1 branch coverage 達成、残 4 findings (I2/R1/R2/R3) は L4 latent TODO `[I-D-future-audit-extensions-hardening]` cohesive batch lock-in、INV-4 4-tuple baseline preserved、Path E drifts 0 maintained)。
+**進行中**: 案 γ Phase 0 = **PRD I-D-pre Implementation Phase 5 着手 ready (= rule wording strengthening = T2-pre-1 + T2-pre-2)** (= Phase 1 test infra setup + Phase 2 bootstrap utility formal lock-in + /check_job A1-A9 fix + Iteration v3 baseline + Option α decision + Phase 3 audit script extensions + **Phase 4 完了**: `scripts/audit-handoff-doc-line-refs.py` (246 行) 新設 = handoff doc `<path>:<line>` cross-ref drift detection (3 categories: MISSING_FILE / OUT_OF_BOUNDS / AMBIGUOUS、glob fallback + OOB filter)、`.github/workflows/ci.yml` に CI step integrate (PR merge gate)、`doc/handoff/design-decisions.md` 5 ambiguous refs structural fix (= `interfaces.rs:466/141` → `pipeline/type_converter/...`、`type_aliases.rs:370` → 同 path、`error_handling.rs:436` × 2 → `transformer/statements/...`)、`tests/i_d_pre_handoff_audit_test.rs` 2 stubs fill-in (= drift detection + standalone baseline、`run_handoff_audit` subprocess helper)、`tests/fixtures/i_d_pre/{positive,negative}/handoff_*.md` 2 fixtures、self-applied 4-layer review pass (= Critical 0 / High 0 / 4-axis cross check / structural fix vs patch trade-off ✓)、Iteration v4 entry retroactive embed、INV-4 4-tuple baseline preserved、Path E utility 0 drifts maintained、audit-handoff-doc-line-refs.py 0 drifts on doc/handoff/)。
 
 **Phase 1+2 完了 state**:
 - ✓ **Phase 1**: 6 test stub files + tests/fixtures/i_d_pre/ infrastructure setup
@@ -36,11 +36,11 @@
 - **I-205 retroactive update intent (= 案 γ Phase 2 T15 batch 化)**: I-205 PRD doc に `## Cell Numbering Convention` + `## Spec→Impl Mapping` section 追加 = framework rule retroactive compliance。section 追加で audit scope 内に自動 promote (= helper True 判定 = future-proof design)
 - **Rejected options**: Option β (Path E utility 側修正、framework rule structural enforcement 弱化 = ideal-implementation-primacy 違反)、Option γ (audit script 独立 design、DRY 違反)、Option α-batched (cohesion violation + scope creep)
 
-**次着手** = **PRD I-D-pre Implementation Phase 3 = 3 NEW verify functions + helper + 6 fixtures + 4 test stubs `#[ignore]` 解除**。詳細 = 下記「/start 再開時の手順」Step 3 + I-D-pre PRD doc `## Implementation Stage Tasks > T1-pre-1〜T1-pre-4` section + Iteration v3 entry。
+**次着手** = **PRD I-D-pre Implementation Phase 5 = rule wording strengthening (T2-pre-1 + T2-pre-2)**。詳細 = 下記「/start 再開時の手順」Step 3 + I-D-pre PRD doc `## Implementation Stage Tasks > T2-pre-1 / T2-pre-2` section + Iteration v4 entry。
 
-**最新の完了**: PRD I-D-pre Phase 1+2 + /check_job A1-A9 fix + Phase 3 着手前 baseline analysis (2026-05-11)。前回 PRD close = I-224 (B2 fn main mechanism、Option β cohesive batch) close (2026-05-09)。詳細 = § 直近の完了作業。
+**最新の完了**: PRD I-D-pre Phase 4 (handoff audit script + CI integration + design-decisions.md structural fix + self-applied 4-layer review pass、2026-05-11)。前回 PRD close = I-224 (B2 fn main mechanism、Option β cohesive batch) close (2026-05-09)。詳細 = § 直近の完了作業。
 
-**開発順序**: 案 γ (= **I-D-pre Phase 3-6 → I-D-main → I-225 → I-162 → I-205 T14-T16**、Path B split で I-D を 2 PRD serial sequence に展開)。詳細 = 下記「実行順序」section。
+**開発順序**: 案 γ (= **I-D-pre Phase 5-6 → I-D-main → I-225 → I-162 → I-205 T14-T16**、Path B split で I-D を 2 PRD serial sequence に展開)。詳細 = 下記「実行順序」section。
 
 ---
 
@@ -163,18 +163,18 @@
 
 ---
 
-## /start 再開時の手順 (= PRD I-D-pre Phase 1+2+3 + /check_job 4-layer + deep deep review + /check_problem 全 pass 完了後 = Phase 4 着手 ready)
+## /start 再開時の手順 (= PRD I-D-pre Phase 1+2+3+4 + /check_job + /check_problem 全 fix + handoff structural fix + recursive self-audit structure 完成後 = Phase 5 着手 ready)
 
-### Step 1: 現在の state empirical verify (= sanity check、Phase 3 + all reviews 完了 state preservation)
+### Step 1: 現在の state empirical verify (= sanity check、Phase 4 + /check_job + /check_problem 完了 state preservation)
 
 **baseline verification commands** (= /start 直後に必ず run):
 
 ```bash
-# 1. 全 i_d_pre tests (Method A 2 + Path E 5 + Audit ext 6 = 13 PASS / Phase 4-6 stubs 9 ignored)
+# 1. 全 i_d_pre tests (Method A 2 + Path E 5 + Audit ext 6 + Handoff audit 2 = 15 PASS / Phase 5-6 stubs 7 ignored)
 cargo test --tests --no-fail-fast 2>&1 | grep -E "i_d_pre|test result"
 # Expected (各 test file):
 #   - i_d_pre_audit_extensions_test: 6 passed (True branch 4 + False branch 1 + dual verify 1)
-#   - i_d_pre_handoff_audit_test:    0 passed; 0 failed; 2 ignored (Phase 4 で fill in)
+#   - i_d_pre_handoff_audit_test:    2 passed (Phase 4 完了 evidence、drift detection + standalone baseline)
 #   - i_d_pre_invariants_test:       0 passed; 0 failed; 5 ignored (Phase 6 で fill in)
 #   - i_d_pre_method_a_test:         2 passed (Phase 2.1 完了 evidence、保持)
 #   - i_d_pre_path_e_test:           5 passed (Phase 2.2 完了 evidence、保持)
@@ -187,34 +187,45 @@ done
 # Expected:
 #   - I-050: FAIL: 1 compliance violation(s):     ← pre-existing baseline preserve
 #   - I-205: PASS                                  ← Option α auto-detect で audit out-of-scope (= 新 verify functions skip、既存 framework rules で PASS)
-#   - I-D-pre: PASS                                ← Phase 3 完了 evidence (= 自己 audit PASS、INV-1 evidence)
+#   - I-D-pre: PASS                                ← Phase 4 完了 evidence (= 自己 audit PASS、INV-1 evidence)
 #   - I-D-main: PASS                               ← Path B split rename + Impact Area byte claim sync 維持
 
-# 3. Path E 0 drifts (= ideal-clean state 維持 post Phase 3 + deep deep review fix)
+# 3. Path E 0 drifts (= ideal-clean state 維持 post Phase 4 + /check_problem、recursive self-audit structure 完成 = 3 audit utilities 全ての byte claim auto-verify)
 for prd in backlog/I-D-pre-audit-mechanism-bootstrap.md backlog/I-D-main-framework-rule-integration-cohesive-batch.md; do
     python3 scripts/verify_prd_self_audits.py "$prd" 2>&1 | grep "^Total drifts"
 done
-# Expected: I-D-pre 0 drifts / I-D-main 0 drifts (= byte claim 44451 sync 済)
+# Expected: I-D-pre 0 drifts / I-D-main 0 drifts
+# Impact Area byte claims (Phase 4 + /check_problem post-fix):
+#   - scripts/audit-prd-rule10-compliance.py:        44451 bytes / 1033 LOC
+#   - scripts/verify_line_refs.py:                   11517 bytes / 297 LOC (= /check_problem Issue #1 fix で sync)
+#   - scripts/verify_prd_self_audits.py:             31728 bytes / 644 LOC (= /check_problem Issue #1 fix で sync)
+#   - scripts/audit-handoff-doc-line-refs.py:         9773 bytes / 260 LOC (= /check_problem Issue #3 fix で INVALID_RANGE category 追加後の最新 sync)
 
-# 4. cargo clippy / fmt (clean state preserved)
+# 4. Handoff audit baseline (Phase 4 完了 + 4 drift categories evidence、5 ambiguous refs structural fix lock-in)
+python3 scripts/audit-handoff-doc-line-refs.py doc/handoff/
+# Expected: 30 refs / 0 drifts / exit 0 PASS
+# Drift category count = 4 (INVALID_RANGE / MISSING_FILE / OUT_OF_BOUNDS / AMBIGUOUS、/check_problem Issue #3 fix で 3→4)
+
+# 5. cargo clippy / fmt (clean state preserved)
 cargo clippy --all-targets --all-features -- -D warnings  # exit 0、0 warnings
 cargo fmt --all --check                                    # exit 0、0 diffs
 
-# 5. No mechanical suppression (= deep deep review I3 fix preserved)
+# 6. No mechanical suppression (= deep deep review I3 fix preserved)
 grep -n "noqa" scripts/audit-prd-rule10-compliance.py
 # Expected: (no output) = `# noqa` suppression 0 件
 ```
 
-**1 つでも expected 不一致 = state mismatch、Phase 4 着手前に root cause 調査**。
+**1 つでも expected 不一致 = state mismatch、Phase 5 着手前に root cause 調査**。
 
-### Step 2: 主要 reference docs 読込 (= Phase 4 着手前 context 把握)
+### Step 2: 主要 reference docs 読込 (= Phase 5 着手前 context 把握)
 
-1. **本 plan.md「直近の完了作業」 table** = Phase 3 + 4-layer + deep deep + check_problem 全 pass entry (2026-05-11) で完了 scope + ideal-clean 達成状態 把握
+1. **本 plan.md「直近の完了作業」 table** = Phase 4 + /check_job + /check_problem entry (2026-05-11、handoff audit script + CI integration + design-decisions.md 5 ambiguous refs structural fix + L1-1/L1-2 fix + INVALID_RANGE 新 category + recursive self-audit structure 完成) で完了 scope + ideal-clean 達成状態 把握
 2. **[`backlog/I-D-pre-audit-mechanism-bootstrap.md`](backlog/I-D-pre-audit-mechanism-bootstrap.md)** = 5 cells PRD doc:
-   - `## Spec Review Iteration Log > Iteration v3` (= Option α design decision + Phase 3 完了 + /check_job 4-layer + deep deep review + Action Item fix retroactive embed log)
-   - `## Implementation Stage Tasks > T1-pre-3a / T1-pre-3b` = **Phase 4 spec** (= 次着手 = `scripts/audit-handoff-doc-line-refs.py` 新設 + CI integration)
-   - `## Test Plan > Test category 5 (handoff_audit_test)` (= Phase 4 fixture + test pattern reference)
-   - `## Implementation Stage Tasks > T2-pre-1 / T2-pre-2` = **Phase 5 spec** (= Phase 4 後 = rule wording strengthening)
+   - `## Spec Review Iteration Log > Iteration v4` (= Phase 4 完了 + /check_job 4-layer review (L1-1/L1-2 fix + R1/R2 retroactive embed) + /check_problem (Issue #1 + #3 fix + #2 archive scope update + #4 TODO C6 + #5 skip user 承認) 全 history retroactive embed log)
+   - `## Implementation Stage Tasks > T2-pre-1 / T2-pre-2` = **Phase 5 spec** (= 次着手 = rule wording strengthening: `.claude/rules/check-job-review-layers.md` Layer 1 factual accuracy + `.claude/rules/spec-stage-adversarial-checklist.md` Rule 9/13 cell numbering convention)
+   - `## Test Plan > Test category 2 (rule_wording_test)` (= Phase 5 grep-based assertion pattern reference)
+3. **[`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)** `## 7 度連続 v12-2 pattern recurrence` section (= I-D-pre Phase 3/4 + /check_problem 由来の 3 occurrences embed 済 + recursive self-audit structure 完成 evidence、I-D-main batch 起票時 primary lesson source)
+4. **TODO `[I-D-future-audit-extensions-hardening]`** = 6 candidate classes (C1-C6) cohesive batch lock-in (= Phase 3 /check_job 由来 C1-C3 + deep deep review C4 + Phase 4 /check_job R2 = C5 + /check_problem Issue #4 = C6)、案 γ Phase 0 完了後再評価
 3. **[`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md)** = 24 cells PRD doc (Iteration v18 = Path B split entry preserved、I-D-pre 完了後 spec stage 再開 = WAITING state)
 4. **TODO entries**:
    - `[I-D-pre]` = 5 cells full enumeration + iteration history audit trail
@@ -224,7 +235,7 @@ grep -n "noqa" scripts/audit-prd-rule10-compliance.py
    - **`[I-205-retroactive-cell-numbering-section]`** = Phase 3 Option α decision 由来、案 γ Phase 2 T15 batch 化、I-205 PRD doc に `## Cell Numbering Convention` + `## Spec→Impl Mapping` section 追加で audit scope 内自動 promote (= future-proof design)
 5. **closed PRDs** (I-224 / I-399 / I-180): `backlog/` から削除済、git log + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) からアクセス
 
-### Step 3: PRD I-D-pre Implementation Phase 4 着手 (= 次 action = handoff audit script + CI integration)
+### Step 3: PRD I-D-pre Implementation Phase 5 着手 (= 次 action = rule wording strengthening)
 
 **Implementation tasks roadmap** = ~10 tasks across **6 phases** (各 phase 完了で incremental commit、TDD discipline 適用):
 
@@ -246,15 +257,15 @@ grep -n "noqa" scripts/audit-prd-rule10-compliance.py
 - **Tests**: 6 PASS (True branch 4 + False branch 1 helper False auto-detect + dual verify 1 fixture violation patterns presence via Path E) + 7 fixtures (positive 3 + negative 3 + out-of-scope 1)
 - **Reviews pass**: /check_job 4-layer (= Action Item I1 即時 fix) + /check_job deep deep (= I3 mechanical compromise 排除 + I4 dual verify lock-in) + /check_problem (= TODO C4 candidate embed)
 
-#### ★ Phase 4: NEW audit script + CI integration (NEXT、T1-pre-3a + T1-pre-3b、Cell 3 / v11-5)
-- **Step 4.1 (T1-pre-3a)**: `scripts/audit-handoff-doc-line-refs.py` (NEW、~150 行) 新設 (= handoff doc grep `\.rs:\d+` + actual file existence + line content syntactic verify)
-  - **Test stub**: `tests/i_d_pre_handoff_audit_test.rs` 2 stubs (現在 `#[ignore]`、Phase 4 で `#[ignore]` 解除 + assertion fill in)
-  - **Fixture 新設**: handoff doc synthetic fixtures (positive = drift 含む / negative = drift 不在)
-- **Step 4.2 (T1-pre-3b)**: `.github/workflows/ci.yml` CI step integration (= PR merge gate active 化)
-- **Phase 4 完了基準**: `tests/i_d_pre_handoff_audit_test.rs` 2 stubs `#[ignore]` 解除 + assertion fill in PASS + standalone `python3 scripts/audit-handoff-doc-line-refs.py doc/handoff/` で existing handoff doc に対し PASS or detected drift report + INV-4 4-tuple baseline preserved + cargo clippy/fmt clean
-- **Phase 4 implementation 注意**: Phase 3 で確立した test helper pattern (= `run_audit` + `path_e_total_drifts` subprocess invocation helpers in `tests/i_d_pre_audit_extensions_test.rs`) と同 pattern を `tests/i_d_pre_handoff_audit_test.rs` でも適用、必要なら 3 scripts 経由共通 helper への refactor 検討 (= L4 latent、code dup ではなく knowledge dup 観点で評価)
+#### ✓ Phase 4: NEW audit script + CI integration (COMPLETE 2026-05-11、T1-pre-3a + T1-pre-3b、Cell 3 / v11-5)
+- **Step 4.1 (T1-pre-3a)**: `scripts/audit-handoff-doc-line-refs.py` (246 行) 新設 完了 = handoff doc grep `<path>.<ext>:<line>(-<end>)?` regex (8 拡張子) + as-is resolve + glob fallback + OOB filter + drift classification (MISSING_FILE / OUT_OF_BOUNDS / AMBIGUOUS)
+  - **Tests**: `tests/i_d_pre_handoff_audit_test.rs` 2 tests PASS (= drift detection で 3 categories verify + standalone baseline で 0 drifts lock-in)、`run_handoff_audit` subprocess helper を Phase 3 pattern と同期
+  - **Fixtures**: `tests/fixtures/i_d_pre/positive/handoff_drift.md` (= 3 drift categories trigger) + `tests/fixtures/i_d_pre/negative/handoff_clean.md` (= stable refs only)
+  - **Structural fix**: `doc/handoff/design-decisions.md` で empirical detect された 5 ambiguous refs を section-context-consistent な partial path に migrate = handoff doc 0 drifts ideal-clean 達成
+- **Step 4.2 (T1-pre-3b)**: `.github/workflows/ci.yml` に "Audit handoff doc line refs" step を `Audit PRD Rule 10/11/12` 直後に integrate 完了 = PR merge gate active (= INV-3 evidence)
+- **Self-applied 4-layer review pass (Phase 4 完了 verification)**: Layer 1 (Mechanical) ✓ / Layer 2 (Empirical) ✓ / Layer 3 (Structural cross-axis, 4 orthogonal axes all covered) ✓ / Layer 4 (Adversarial trade-off, structural fix lock-in) ✓、findings 0
 
-#### Phase 5: Rule wording strengthening (T2-pre-1 + T2-pre-2、Phase 2-3 完了後)
+#### ★ Phase 5: Rule wording strengthening (NEXT、T2-pre-1 + T2-pre-2)
 - **Step 5.1 (T2-pre-1)**: `.claude/rules/check-job-review-layers.md` Layer 1 (Mechanical) sub-step 追加 (= factual accuracy semantic check、Cell 4)、Versioning section v1.8 entry
 - **Step 5.2 (T2-pre-2)**: `.claude/rules/spec-stage-adversarial-checklist.md` Rule 9 / Rule 13 sub-rule 追加 (= Cell numbering convention single-source-of-truth、Cell 5)、Versioning section v1.8 entry
 - **完了 verify**: `tests/i_d_pre_rule_wording_test.rs` 全 PASS (grep-based assertion で specific text pattern 存在 verify)
@@ -299,7 +310,7 @@ PRD I-D-pre + I-D-main 両 close + Implementation stage 完了後、案 γ Phase
    ↓
 ═════ 案 γ Phase 0: Framework quality integration (NEW、2026-05-09 順序入れ替え = 旧案 β I-D を Phase 1-C → Phase 0 へ前倒し、2026-05-11 Path B split で 2 PRD serial sequence 化) ═════
    ↓
-[進行中、Phase 3 着手 ready] **PRD I-D-pre = Audit mechanism bootstrap (Path B split user 確定 2026-05-11、5 cells)** (= Iteration v17 plateau の bootstrapping problem 構造的解消、`scripts/verify_line_refs.py` (Method A) + `scripts/verify_prd_self_audits.py` (Path E、F6/F7 fix integrated + Axis 3 extension + 4 additive utility fixes) + `scripts/audit-handoff-doc-line-refs.py` (Phase 4 NEW) を formal regression-tested utilities として lock-in)。**現 state (2026-05-11)**: ✓ Phase 1 (test infra) + ✓ Phase 2 (Method A + Path E formal lock-in、7 tests PASS、ideal-clean state 達成 post /check_job A1-A9 fix)、Phase 3 (= audit script extensions = 3 NEW functions in audit-prd-rule10-compliance.py) 着手 ready。**Primary reference** = TODO `[I-D-pre]` entry + [`backlog/I-D-pre-audit-mechanism-bootstrap.md`](backlog/I-D-pre-audit-mechanism-bootstrap.md) (~770 LOC post v2)
+[進行中、Phase 5 着手 ready] **PRD I-D-pre = Audit mechanism bootstrap (Path B split user 確定 2026-05-11、5 cells)** (= Iteration v17 plateau の bootstrapping problem 構造的解消、`scripts/verify_line_refs.py` (Method A) + `scripts/verify_prd_self_audits.py` (Path E、F6/F7 fix integrated + Axis 3 extension + 4 additive utility fixes) + `scripts/audit-handoff-doc-line-refs.py` (Phase 4 完了) を formal regression-tested utilities として lock-in)。**現 state (2026-05-11)**: ✓ Phase 1 + ✓ Phase 2 + ✓ Phase 3 + ✓ **Phase 4 (handoff audit script + CI integration + design-decisions.md structural fix + 4-layer self-applied review pass)**、Phase 5 (= rule wording strengthening = T2-pre-1 + T2-pre-2) 着手 ready。**Primary reference** = TODO `[I-D-pre]` entry + [`backlog/I-D-pre-audit-mechanism-bootstrap.md`](backlog/I-D-pre-audit-mechanism-bootstrap.md) (Iteration v4 entry post Phase 4)
    ↓
 [次] **PRD I-D-main = Framework rule integration cohesive batch (Path B split 後、24 cells)** (= post-bootstrap framework full leverage で initial iteration convergence target で再開、I-D-pre 完了 prerequisite)。**起票時 primary reference** = TODO `[I-D-main]` entry + [`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md) (1516 LOC、Iteration v1-v17 + v18 Path B split entry preserved) + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section
    ↓
@@ -356,7 +367,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | 優先度 | レベル | PRD | architectural concern (= 1 PRD = 1 concern) |
 |--------|-------|-----|---------------------------------------------|
-| **次着手 (案 γ Phase 0、Phase 1+2+3 完了、Phase 4 着手 ready)** | L3 (audit mechanism construction) | **PRD I-D-pre Audit mechanism bootstrap (Phase 4 着手 ready 2026-05-11)** | 5 audit mechanism cells (= I-D parent Cell 6+8/10/17/19/28 から migration) の cohesive batch。**完了済**: Phase 1 (test infra 6 files + fixtures dir) + Phase 2.1 (Method A formal lock-in、`scripts/verify_line_refs.py` metadata + 2 tests passing) + Phase 2.2 (Path E formal lock-in、`scripts/verify_prd_self_audits.py` F6/F7/Axis 3 fix + 4 additive utility fixes、5 tests passing) + Iteration v2 (= /check_job A1-A9 fix retroactive embed、ideal-clean 達成) + Iteration v3 (Option α design decision lock-in) + **Phase 3 (= 3 NEW verify functions + helper `has_cell_numbering_convention_section()` + formatter `_format_path_e_drifts()` + Path E utility library import + 4 tests PASS + 6 fixtures)**。**次 action (Phase 4)**: T1-pre-3a + T1-pre-3b = `scripts/audit-handoff-doc-line-refs.py` (NEW、~150 行) 新設 + `.github/workflows/ci.yml` CI step integration (= handoff doc line-ref drift detection、Cell 3 / v11-5)、`tests/i_d_pre_handoff_audit_test.rs` 2 stubs `#[ignore]` 解除。詳細 = [`backlog/I-D-pre-audit-mechanism-bootstrap.md`](backlog/I-D-pre-audit-mechanism-bootstrap.md) Iteration v3 entry + `## Implementation Stage Tasks > T1-pre-3a/T1-pre-3b` |
+| **次着手 (案 γ Phase 0、Phase 1+2+3+4 完了、Phase 5 着手 ready)** | L3 (audit mechanism construction) | **PRD I-D-pre Audit mechanism bootstrap (Phase 5 着手 ready 2026-05-11)** | 5 audit mechanism cells (= I-D parent Cell 6+8/10/17/19/28 から migration) の cohesive batch。**完了済**: Phase 1 (test infra) + Phase 2 (Method A + Path E formal lock-in、7 tests) + Iteration v2 ideal-clean + Iteration v3 (Option α design decision) + Phase 3 (= 3 NEW verify functions + helper + formatter + Path E library import + 6 tests + 7 fixtures + dual verify lock-in) + **Phase 4 (= `scripts/audit-handoff-doc-line-refs.py` 246 行新設 + CI step integrate + design-decisions.md 5 ambiguous refs structural fix + 2 tests + 2 fixtures + Iteration v4 self-applied 4-layer review pass、findings 0)**。**次 action (Phase 5)**: T2-pre-1 + T2-pre-2 = rule wording strengthening (`.claude/rules/check-job-review-layers.md` Layer 1 factual accuracy semantic check sub-step + `.claude/rules/spec-stage-adversarial-checklist.md` Rule 9 / Rule 13 cell numbering convention single-source-of-truth sub-rule)、`tests/i_d_pre_rule_wording_test.rs` 2 stubs `#[ignore]` 解除。詳細 = [`backlog/I-D-pre-audit-mechanism-bootstrap.md`](backlog/I-D-pre-audit-mechanism-bootstrap.md) Iteration v4 entry + `## Implementation Stage Tasks > T2-pre-1/T2-pre-2` |
 | **次々候補 (案 γ Phase 0、I-D-pre 完了後再開)** | L3 (framework rule level structural compliance) | **PRD I-D-main Framework rule integration cohesive batch (Path B split 後、24 cells、I-D-pre 完了 prerequisite 待ち)** | 24 framework rule integration cells (= I-D parent matrix # 1, 2, 3, 4, 5, 7, 9, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30、original numbers preserved with documented gaps {6, 8, 10, 17, 19, 28}) の cohesive integration、I-D-pre 完成 bootstrap utilities full leverage で post-bootstrap framework state 確立後、initial iteration convergence target で再開。**現状**: WAITING for I-D-pre completion。**次 action**: I-D-pre close 後 first third-party adversarial review = Iteration v19 で convergence target、Hybrid 4-条件 final rule satisfy 到達なら Implementation stage 着手。詳細 = [`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md) Iteration v18 entry + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: ...` section |
 | **次候補 (案 γ Phase 0.5、I-D scope split 由来 NEW)** | L3 | **PRD I-E lib/CLI API + Web API runtime integration cohesive batch** | v13-2 (Promise builtin runtime integration deficiency) + v13-3 (transpile lib API vs CLI binary builtin loading inconsistency) cohesive batch。Spec stage で 2 candidates の真 cohesion verify + 必要なら 2 PRD split 判断、orthogonal concern のため案 γ Phase 1/2 並行可能 |
 | 次優先 (案 γ Phase 1) | L3 | **I-225 (B3)** | Class field の literal-only initializer (annotation 無) で type inference 完成 |
@@ -387,6 +398,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | PRD / Phase | 日付 | 後続への影響 |
 |-------------|------|-------------|
+| **PRD I-D-pre Implementation Phase 4 完了 + /check_job 4-layer review (L1-1 + L1-2 即時 fix + R1 + R2 retroactive embed) + /check_problem (Issue #1 + #3 即時 fix + #2 archive scope user 承認で broader update + #4 TODO C6 lock-in + #5 skip user 承認) = ideal-clean 達成 + recursive self-audit structure 完成** | 2026-05-11 | (上記 entry に /check_problem additions): /check_job fix 直後の `/check_problem` light review で **4 additional issues 発見** = **v12-2 pattern 7 度目 empirical 再発** (= depth-axis `/check_job` だけでは捕捉漏れ、breadth-axis `/check_problem` 経由で更に findings = `[I-D-main]` v13-7 candidate 補強 evidence)。**Issue #1 fix (Documentation drift、Medium)**: Impact Area table stale LOC = `verify_line_refs.py` 264→297 + `verify_prd_self_audits.py` 368→644 (Phase 2 完了時点で stale、Phase 3/4 review でも catch されず) + byte counts (11517 / 31728) 追加 = **recursive self-audit structure 完成** (= Path E utility が own + sibling utilities 3 件全ての byte claim を auto-verify、Phase 2/3/4 で発生した stale claim pattern を future 再発 block)。**Issue #3 fix (Silent failure mode、Medium)**: `<path>:<start>-<end>` で `start > end` (backwards range typo) を script が silent pass する failure mode → 新 drift category **INVALID_RANGE** 追加 (= 3→4 categories)、`classify_ref` で as_is/glob 前に precedence check、positive fixture Drift 6 (`src/lib.rs:100-50`) + assertion 拡張 = `[INVALID_RANGE]` + "backwards range" substring verify。post-fix script bytes 9131→9773 で Path E utility が即時 detect → Impact Area row 自動 re-sync を促す cycle で **recursive self-audit structure が structural drift prevention mechanism として動作することを empirical 証明**。**Issue #2 user 承認で archive scope 拡張 fix**: `doc/handoff/design-decisions.md` の v12-2 pattern recurrence section を I-224 close 時 "4 度連続" snapshot → I-D-pre Phase 3/4 + /check_problem 後の "**7 度連続**" broader framework-wide archive へ update + recursive self-audit structure 完成 evidence embed。**Issue #4 (Future-proofing、Low)**: TODO `[I-D-future-audit-extensions-hardening]` **C6 candidate** lock-in (= GLOB_ROOTS hardcoded → Cargo.toml metadata leverage / `.git/config` / file-extension auto-detect / `.claude/audit-config.toml` declarative 4 options、L4 latent)。**Issue #5 user 承認で skip**: directory + mixed drift fixture gap は loop logic trivial sum + silent failure risk なしのため testing.md C1 implicit cover で justify、追加 fixture は overengineering。empirical state final (post-fix): 全 i_d_pre tests 15 PASS / 7 ignored (= handoff_audit 2 で 6 drift patterns + 4 categories verify) + INV-4 4-tuple baseline preserved + Path E 0 drifts on both real PRDs (= 3 utilities byte claims 9773 / 11517 / 31728 全 auto-sync) + audit-handoff-doc-line-refs.py 0 drifts on doc/handoff/ + cargo clippy 0 warnings + cargo fmt 0 diffs + file-line OK + CI step embedded + Iteration v4 entry に /check_job + /check_problem fix history retroactive embed + design-decisions.md 7 度連続 v12-2 pattern recurrence archive update + TODO C6 candidate + I-D-main v13-7 entry 5 度目補強 contextual link。次 action = **Phase 5** = T2-pre-1 + T2-pre-2 rule wording strengthening |
 | **PRD I-D-pre Implementation Phase 3 完了 + /check_job 4-layer + deep deep review pass (= audit script extensions、Option α auto-detect + C1 branch coverage + dual verify + proper top-level import)** | 2026-05-11 | `scripts/audit-prd-rule10-compliance.py` に **3 NEW verify functions** (T1-pre-1 `verify_pending_verdict_findings_consistency` + T1-pre-2 `verify_cross_reference_cell_consistency` + T1-pre-4 `verify_cell_numbering_drift_detection`) + **helper `has_cell_numbering_convention_section()`** (= Option α auto-detect、I-205 audit out-of-scope 自動分類) + **formatter `_format_path_e_drifts()`** embed。Path E utility を **proper top-level library import で source of truth 共有** (= sys.path.insert + `# noqa: E402` 排除 = Python 自動 sys.path[0] 利用、PEP 8 compliant、DRY 達成)。**4 test stubs `#[ignore]` 解除 + 7 fixtures 新設** (positive 3 + negative 3 + out-of-scope 1)。**/check_job 4-layer review** で **Helper False branch test 不在** 発見 → I-205-like fixture `audit_out_of_scope_skip.md` 新設 + Option α skip verify test 追加 = 5 tests PASS。**/check_job deep deep review** で **(i) sys.path.insert + `# noqa: E402` mechanical 妥協 (Implementation gap I3、High)** + **(ii) fixture violation patterns presence indirect verify (= silent miss risk、Implementation gap I4、Medium)** 発見 → 即時 fix: (i) proper top-level import 移動 + suppression 排除、(ii) `test_out_of_scope_fixture_violation_patterns_present_via_path_e` 追加 (= Path E utility 経由 3 drifts direct verify = Option α auto-detect skip correctness の dual verify lock-in) = **6 tests PASS**。残 findings (I2/I5 + R1/R2/R3) は L4 latent、TODO `[I-D-future-audit-extensions-hardening]` cohesive batch entry に structural lock-in。empirical state: 6/6 PASS + INV-4 4-tuple baseline preserved + Path E utility 0 drifts (= byte claim 37310 → 44451 sync) + cargo clippy 0 warnings + cargo fmt 0 diffs + file-line OK + `# noqa` suppression 0 件。audit script LOC 906 → 1033 (+127 行、29 functions enumerated、no mechanical compromise)。次 action = **Phase 4** = `scripts/audit-handoff-doc-line-refs.py` (NEW、~150 行) 新設 + `.github/workflows/ci.yml` CI step integration |
 | **PRD I-D-pre Iteration v3 = Phase 3 着手前 baseline analysis + Option α design decision lock-in** | 2026-05-11 | Phase 3 着手前 empirical baseline analysis 結果を Iteration v3 entry に retroactive embed + Option α (= `## Cell Numbering Convention` section 有無で auto-detect、I-205 audit out-of-scope) user 確定。TODO `[I-205-retroactive-cell-numbering-section]` 新規起票 (= 案 γ Phase 2 T15 batch 化、I-205 PRD doc に section 追加で audit scope 内 promote)。Cohesion 純化 = I-205 PRD doc touch せず、I-D-pre Iteration v3 entry + TODO で spec-traceable lock-in。Phase 3 implementation ready (= 3 NEW verify functions + helper `has_cell_numbering_convention_section()` + 6 fixtures + 4 test stubs `#[ignore]` 解除) |
 | **PRD I-D-pre Phase 3 着手前 empirical baseline analysis 完了 + I-205 false-positive 発見** | 2026-05-11 | 3 real PRDs (I-D-pre / I-D-main / I-205) で `/tmp/phase3_baseline_analysis.py` script run → I-D-pre/main は matrix ↔ Spec→Impl Mapping 1-to-1 alignment ✓、**I-205 は Spec→Impl Mapping section 不在 + documented gaps 21 cells**、empirical evidence で **Path E utility が I-205 で既に 2 drifts (= false-positive)** 発見。Phase 3 で `verify_cross_reference_cell_consistency` を audit script 側 mirror すると同 false-positive 再発 = INV-4 4-tuple baseline 破壊 risk。次 session で **Option α / β / γ design decision** を user 確認後 Step 3 実装着手 → **Iteration v3 entry で Option α 確定 (上記 row 参照)** |
@@ -410,7 +422,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 ## 次の PRD 着手前の参照ポイント
 
-- **PRD I-D-pre (Audit mechanism bootstrap、Phase 1+2 完了 + /check_job A1-A9 fix 完了、Phase 3 着手 ready)**: I-D-main 着手 prerequisite、5 audit mechanism cells (= I-D parent Cell 6+8/10/17/19/28 from Path B split 2026-05-11)。**現 state (2026-05-11)**: Phase 1+2 完了 + Iteration v2 ideal-clean state 達成 (= /check_job A1-A9 fix retroactive embed)、Method A 2 PASS + Path E 5 PASS = 7 tests PASS、INV-4 4-tuple baseline preserved、Path E 0 drifts on both real PRDs。**Primary references**: [`backlog/I-D-pre-audit-mechanism-bootstrap.md`](backlog/I-D-pre-audit-mechanism-bootstrap.md) (~770 LOC post v2) `## Spec Review Iteration Log > Iteration v2` (= /check_job fix history) + `## Implementation Stage Tasks > T1-pre-1/T1-pre-2/T1-pre-4` (= **Phase 3 spec**) + `## Test Plan > Fixture design pattern + Test helper convention` (= A6 fix で追加された fixture pattern + helper spec、Phase 3 fixture 新設時 reference) + [`scripts/verify_line_refs.py`](scripts/verify_line_refs.py) (Method A、formal lock-in 完了) + [`scripts/verify_prd_self_audits.py`](scripts/verify_prd_self_audits.py) (Path E、formal lock-in + F6/F7/Axis 3 + 4 additive utility fixes 完了)。**Phase 3 NEW target**: `scripts/audit-prd-rule10-compliance.py` に 3 NEW verify functions (= verify_pending_verdict_findings_consistency + verify_cross_reference_cell_consistency + verify_cell_numbering_drift_detection) + `tests/i_d_pre_audit_extensions_test.rs` 4 stubs `#[ignore]` 解除 + 6 fixtures 新設
+- **PRD I-D-pre (Audit mechanism bootstrap、Phase 1+2+3+4 完了、Phase 5 着手 ready)**: I-D-main 着手 prerequisite、5 audit mechanism cells (= I-D parent Cell 6+8/10/17/19/28 from Path B split 2026-05-11)。**現 state (2026-05-11、post Phase 4)**: Phase 1-4 完了 + Iteration v4 entry retroactive embed (= 4-layer self-applied review pass、findings 0)、15 i_d_pre tests PASS (= audit_extensions 6 + handoff_audit 2 + method_a 2 + path_e 5) / 7 ignored (= invariants 5 + rule_wording 2、Phase 6 + Phase 5 で fill in)、INV-4 4-tuple baseline preserved、Path E 0 drifts on both real PRDs、audit-handoff-doc-line-refs.py 0 drifts on doc/handoff/ (= post 5 ambiguous refs structural fix)。**Primary references**: [`backlog/I-D-pre-audit-mechanism-bootstrap.md`](backlog/I-D-pre-audit-mechanism-bootstrap.md) `## Spec Review Iteration Log > Iteration v4` (= Phase 4 完了 retroactive embed log) + `## Implementation Stage Tasks > T2-pre-1/T2-pre-2` (= **Phase 5 spec**) + `## Test Plan > Test category 2 (rule wording test)` (= Phase 5 grep-based assertion pattern reference) + [`scripts/audit-handoff-doc-line-refs.py`](scripts/audit-handoff-doc-line-refs.py) (= Phase 4 完了 NEW utility、handoff doc `<path>:<line>` drift detection)。**Phase 5 NEW target**: `.claude/rules/check-job-review-layers.md` Layer 1 sub-step (factual accuracy semantic check) + `.claude/rules/spec-stage-adversarial-checklist.md` Rule 9 / Rule 13 sub-rule (cell numbering convention single-source-of-truth) + Versioning v1.8 entry + `tests/i_d_pre_rule_wording_test.rs` 2 stubs `#[ignore]` 解除
 - **PRD I-D-main (Framework rule integration cohesive batch、I-D-pre 完了後再開、Iteration v18 = Path B split adoption record)**: I-205/I-225/I-162 PRD chain prerequisite、24 candidates (= I-D parent 30 - I-D-pre 5 logical cells migration、original numbers preserved with documented gaps {6, 8, 10, 17, 19, 28})。**現 state**: WAITING for I-D-pre completion、I-D-pre 完了後 first third-party adversarial review = Iteration v19 で convergence target で再開。**Primary references**: [`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md) (1516 LOC、Iteration v1-v17 + v18 Path B split entry preserved) + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: ...` section
 - **TODO `[I-D-future-vocab-fork]` (新規 deferred entry、/check_job A3 fix 由来)**: PRD I-D-pre Cell 5 narrow CELL_SLOT_AS_IDENTIFIER_RE detection scope の補完、broader vocabulary fork detection (= "cell # / candidate ID / matrix #" 間 semantic-level mixed canonical naming) を別 framework concern として deferred。4 candidate classes (C1 cell # vs matrix # / C2 candidate ID vs cell # / C3 section heading vs body wording / C4 external reference canonical fork)、L4 latent priority、案 γ Phase 0 完了後再評価
 - **I-225 / I-162 (案 γ Phase 1、I-D 完了後着手)**: TODO 内 entry + 案 γ chain

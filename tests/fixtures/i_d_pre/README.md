@@ -17,6 +17,8 @@ Per-test fixture pattern: `<test_module>_<scenario>.md`
 - `method_a_drift.md` / `method_a_clean.md` — Cell 4 / T1-pre-5 (`tests/i_d_pre_method_a_test.rs`)
 - `path_e_axis1_*.md` / `path_e_axis2_*.md` / `path_e_axis3_*.md` / `path_e_axis4_*.md` — Cells 1+2+5 / T1-pre-6 (`tests/i_d_pre_path_e_test.rs`)
 - `handoff_drift.md` / `handoff_clean.md` — Cell 3 / T1-pre-3a (`tests/i_d_pre_handoff_audit_test.rs`)
+  - positive 3 refs cover all drift categories (OUT_OF_BOUNDS / MISSING_FILE / AMBIGUOUS)
+  - negative refs use only repo-stable paths (`Cargo.toml` / `README.md` / self-reference / single-candidate glob)
 
 Each Implementation Phase (2/3/4) creates its required fixtures as part of its task scope.
 
