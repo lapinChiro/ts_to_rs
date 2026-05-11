@@ -245,6 +245,42 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
               structural fix
             - **= 2 度連続発生 = recurring problem signal**、3 度目発生前の structural
               prevention が ideal-implementation-primacy 観点で必須
+      - (d) **Cell numbering convention single-source-of-truth** (framework v1.8 source、
+            I-D-pre Cell 5 / v13-5 由来、確定 2026-05-11):
+            Matrix cell の canonical identifier は **matrix #** (= matrix table 内 row
+            number、1-based sequential) を **single-source-of-truth** として確定し、
+            Spec→Impl Mapping table / Implementation Stage Tasks / Test contract path /
+            Invariants / Iteration Log 等 全 PRD cross-reference contexts で **同一 matrix
+            # を使用** する。surface convention drift (= 同一 cell に複数 identifier 体系を
+            混在使用、例: matrix 内では `Cell 1`、INV section では `e2e fixture-1`、Iteration
+            entry では `C-1` 等) は **structural framework rule 違反** で禁止。
+            Verification mechanism:
+            - **(d-1) `## Cell Numbering Convention` section embed mandatory**: PRD doc に
+              `## Cell Numbering Convention` heading section を hard-code、本 section 内に:
+              (i) canonical identifier 形式 (= "matrix #" or "Cell N" 等の declared form) +
+              (ii) section coverage policy (= 本 convention が適用される PRD sections の
+              列挙、Rule 13 (13-4) との overlap allow) + (iii) audit auto-detect mechanism
+              reference (= 下記 (d-2) 参照) を embed 必須
+            - **(d-2) Audit script auto-detect (identifier-level fork detection)**:
+              `audit-prd-rule10-compliance.py` に `verify_cell_numbering_drift_detection`
+              function 追加 + Path E utility (`scripts/verify_prd_self_audits.py`) Axis 3
+              で `CELL_SLOT_AS_IDENTIFIER_RE` narrow scope (= "cell-slot N" / "cell-slot #N"
+              数値 identifier 用法 = canonical 違反 detection) を auto-detect。Helper
+              `has_cell_numbering_convention_section()` で auto-detect (= I-205-pattern PRD
+              は `## Cell Numbering Convention` section 不在 = audit out-of-scope、
+              future-proof design = section 追加で audit scope 内自動 promote)
+            - **(d-3) Identifier-level fork scope**: 本 sub-rule (d) は **identifier-level
+              fork detection** に限定 (= numeric identifier 用法のみ flag、descriptive uses
+              ("cell-slot occurrence" / "cell-slot vocabulary fork" 等 concept descriptors) は
+              legitimate として allow)。**Broader vocabulary fork detection** (= "cell # /
+              candidate ID / matrix #" 間の mixed canonical naming, semantic-level 検出)
+              は別 framework concern で本 sub-rule scope 外 (= TODO `[I-D-future-vocab-fork]`
+              候補として deferred、別 PRD で structural extend)
+            **Recurring problem evidence (本 sub-rule の必要性)**:
+            - PRD I-224 で 2 surface convention drift (= INV-3 entries は matrix #
+              numbering、e2e fixture filenames は sequential filename numbering で同名異物
+              confusion 発生) を patch 化、structural fix 不在 = framework rule level での
+              single-source-of-truth enforcement 必須と判明
       実装の dispatch arms と PRD matrix cell が乖離する場合は **Spec gap signal**:
       PRD 起草時に問題空間を網羅していなかった証拠であり、現 PRD scope の rework または
       別 PRD 切り出しを判断する。
@@ -257,6 +293,10 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
       別 PRD I-213 (codebase-wide IR struct construction DRY refactor) と相補的に動作:
       I-213 が **structural** な解決 (構築 site の集約 abstraction)、本 sub-rule (c) が
       **process** な解決 (新 field 追加時の symmetric audit checklist)。)
+      (Lesson source (d): PRD I-224 surface convention drift patch (2026-05-09) →
+      I-D-pre Cell 5 / v13-5 で `verify_cell_numbering_drift_detection` + Path E
+      Axis 3 narrow extension で audit script-level structural enforcement、本
+      sub-rule (d) を framework v1.8 で wording 追加 = self-applied integration。)
 - [ ] **Cross-axis matrix completeness**: PRD の matrix は **「PRD の解決軸 single
       dimension」ではなく「機能 emission を決定する全 input dimension の直積
       (Cartesian product)」** で構築する。
@@ -429,9 +469,28 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
         PRD close 時に self-applied integration として skill / rule に improvement
         を組み込む。本 PRD I-205 自身が first-class adopter として improvement を
         逆適用し validate
+      - **(13-6)** **Cell numbering convention audit symmetry** (framework v1.8 source、
+        I-D-pre Cell 5 / v13-5 由来、確定 2026-05-11): Rule 9 (d) `## Cell Numbering
+        Convention` section embed mandatory に対応する **audit auto-verify mechanism** を
+        Rule 13 audit (= `verify_*` family in `audit-prd-rule10-compliance.py`) として
+        hard-code。具体的には:
+        - **(13-6-a) Section presence verify**: matrix-driven PRD で `## Cell Numbering
+          Convention` heading section 不在 → audit fail (= Helper
+          `has_cell_numbering_convention_section()` False return 時の audit error)
+        - **(13-6-b) Auto-detect helper as audit out-of-scope dispatcher**: 同 Helper
+          が True を return する PRD のみ `verify_cell_numbering_drift_detection` 等の
+          NEW verify functions を apply (= I-205-pattern PRD は audit out-of-scope 自動分類、
+          INV-4 4-tuple baseline preservation)
+        - **(13-6-c) Audit ↔ Rule symmetry principle**: 全 cell numbering convention rule
+          (= Rule 9 (d) sub-rules) に対応する audit script auto-verification を整備、
+          framework rule-audit symmetry (v1.6 で確立、本 (13-6) で適用領域拡張)
       - Lesson source: I-205 PRD draft v1 (2026-04-27) で Spec Stage Self-Review が
         systematic 不在、第三者 review で 15 findings 発覚 → 9 RC clusters に集約 →
         framework 改善 + Rule 13 新設 (本 PRD self-applied integration)。
+        Lesson source ((13-6) v1.8 addition): I-D-pre Cell 5 / v13-5 で
+        `verify_cell_numbering_drift_detection` + `has_cell_numbering_convention_section()`
+        helper 実装、Rule 9 (d) wording 追加と同時に audit ↔ Rule symmetry を Rule 13
+        sub-rule で hard-code (= v1.6 framework rule-audit symmetry principle の継続)。
 ```
 
 ## Prohibited
@@ -456,6 +515,32 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
 
 ## Versioning
 
+- **v1.8** (2026-05-11): I-D-pre PRD Implementation Phase 5 self-applied integration として Rule 9 sub-rule (d) + Rule 13 sub-rule (13-6) 追加 (= cell numbering convention single-source-of-truth + audit symmetry):
+  - **Rule 9 sub-rule (d) NEW**: "Cell numbering convention single-source-of-truth"
+    - (d-1) `## Cell Numbering Convention` section embed mandatory (= canonical identifier
+      形式 + section coverage policy + audit auto-detect mechanism reference)
+    - (d-2) Audit script auto-detect (= `verify_cell_numbering_drift_detection` function +
+      Path E utility Axis 3 `CELL_SLOT_AS_IDENTIFIER_RE` narrow extension + Helper
+      `has_cell_numbering_convention_section()` auto-detect dispatch)
+    - (d-3) Identifier-level fork scope restriction (= numeric identifier 用法のみ flag、
+      descriptive uses は legitimate、broader vocabulary fork は別 PRD `[I-D-future-vocab-fork]`)
+    - Matrix cell の canonical identifier として **matrix #** を single-source-of-truth と確定、
+      全 PRD cross-reference contexts で同一 matrix # 使用 mandatory
+  - **Rule 13 sub-rule (13-6) NEW**: "Cell numbering convention audit symmetry"
+    - (13-6-a) Section presence verify (= `## Cell Numbering Convention` heading 不在で audit fail)
+    - (13-6-b) Auto-detect helper as audit out-of-scope dispatcher (= I-205-pattern PRD は
+      audit out-of-scope 自動分類、INV-4 4-tuple baseline preservation)
+    - (13-6-c) Audit ↔ Rule symmetry principle (= v1.6 framework rule-audit symmetry の
+      cell numbering convention 領域への拡張)
+  - **Lesson source**: PRD I-224 surface convention drift patch (2026-05-09) で structural
+    fix 不在 = framework rule level での single-source-of-truth enforcement 必須と判明、
+    I-D-pre Cell 5 / v13-5 で `verify_cell_numbering_drift_detection` + Path E Axis 3
+    narrow extension + Helper `has_cell_numbering_convention_section()` 実装、本 PRD Phase 5
+    T2-pre-2 で rule wording 追加 (= self-applied integration、本 PRD I-D-pre が
+    first-class adopter として `## Cell Numbering Convention` section を embed し validate)。
+  - **Related Layer 1 sub-step (4) v1.8 integration**: `check-job-review-layers.md` Layer 1
+    sub-step (4) Factual accuracy semantic check と同 framework v1.8 self-applied integration
+    set (= I-D-pre Phase 5 = T2-pre-1 + T2-pre-2 coordinated rule wording strengthening)。
 - **v1.7** (2026-04-28): I-205 PRD T1-T3 Implementation batch の `/check_job` 4-layer review で発見された **本質的原因 3 (process / framework gap = "field 追加 PRD で symmetric conversion site review が checklist 不在")** に対する self-applied integration:
   - **Rule 9 sub-rule (c) NEW**: "Field-addition symmetric conversion site audit" を新設、(c-1) Pre-implementation symmetric audit + (c-2) Audit script auto-verify (`verify_field_addition_symmetric_audit` function 追加候補) + (c-3) Post-implementation review trigger (bulk-script 後 mandatory)。
   - Lesson source: I-205 T1-T3 batch `/check_job` Layer 4 Adversarial trade-off review (2026-04-28) で `convert_method_info_to_sig` (`type_literals.rs:98`) の latent kind drop を発見。Root cause を I-383 T8' (`type_params` field 追加) + I-205 T2 (`kind` field 追加) の **2 度連続 recurring problem** として分析、3 度目発生前の structural prevention が必須と判定。

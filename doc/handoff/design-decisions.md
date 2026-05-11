@@ -1342,6 +1342,118 @@ PRD doc は `backlog/I-224-top-level-fn-main-mechanism.md` から削除済 (`bac
 
 ---
 
+## I-D-pre: Audit mechanism bootstrap (Path B split adoption + bootstrapping circularity 構造的解消、closed 2026-05-11)
+
+### 概要
+
+PRD I-D parent Spec Stage Iteration v17 plateau で empirical 発覚した **3rd-order pattern = bootstrap
+utility correctness ceiling** (= 各 bootstrap utility が次 round の dominant defect class を自ら生成
+する無限 chain) を **Path B (PRD split into I-D-pre + I-D-main)** で構造的解消した bootstrap utility
+formal lock-in PRD。Iteration v1〜v5 (5 cells matrix-driven、6 phases implementation、2 度の `/check_job`
+adversarial review)、interim patch 0 件、structural fix 14 件 (4 + 10) で convergence 達成。
+
+### Path B split rationale (= ideal-implementation-primacy + 妥協禁止 directive 適用結果)
+
+3 path options 評価:
+- **Path E+** (continue): utility correctness ceiling = 無限 chain 継続 = 妥協 → rejected
+- **Path F** (criterion re-design): asymptotic floor 受容 = explicit compromise → rejected
+- **Path B** (PRD split): bootstrapping circularity 構造的解消 + 1 PRD = 1 architectural concern 原則
+  準拠 → **accepted**
+
+Cohesion principle 適合 evidence: 5 audit mechanism cells と 24 rule integration cells が異なる
+architectural concern (memory `feedback_prd_cohesion_granularity.md` 整合)。
+
+### 5 cells resolution + 6 phases implementation timeline
+
+| Cell | I-D source | Resolution | Phase |
+|------|-----------|-----------|-------|
+| 1 | v3-6+v4-2 | `verify_pending_verdict_findings_consistency` + Path E Axis 2 (F7 fix integrated) | Phase 3 |
+| 2 | v5-1 | `verify_cross_reference_cell_consistency` + Path E Axis 1 (F6 fix integrated) | Phase 3 |
+| 3 | v11-5 | `scripts/audit-handoff-doc-line-refs.py` (NEW 260 行) + CI step + handoff doc 5 ambiguous refs structural fix | Phase 4 |
+| 4 | v11-7 | `check-job-review-layers.md` Layer 1 sub-step (4) factual accuracy semantic check + `verify_line_refs.py` Method A formal lock-in | Phase 2 + Phase 5 |
+| 5 | v13-5 | `spec-stage-adversarial-checklist.md` Rule 9 (d) + Rule 13 (13-6) cell numbering convention + `verify_cell_numbering_drift_detection` + Path E Axis 3 `CELL_SLOT_AS_IDENTIFIER_RE` | Phase 3 + Phase 5 |
+
+### 主要 lesson source: framework rule-audit symmetry principle (Rule 13 (13-6-c) v1.8 empirical validation)
+
+**2 度独立 iteration で framework 自己改善 cycle 発動**:
+
+1. **1st `/check_job` 4-layer review**: 新 Layer 1 sub-step (4) factual accuracy semantic check author
+   直後、(4-3) hard-coded reference の `verify_prd_self_audits.py` Axis 4 verify_external_file_drift に
+   **100-byte tolerance threshold** (line 590: `abs(actual_bytes - claimed_bytes) > 100`) 存在 →
+   新 rule への infrastructure asymmetry violation = Spec gap。即時 structural fix (tolerance 排除 =
+   strict byte-exact comparison、24-byte drift も即時 detect)。
+2. **2nd `/check_job` deep deep review**: 新 Rule 9 (d) "single-source-of-truth = matrix #" author
+   直後、I-D-pre 自身の `## Cell Numbering Convention` section に "Single-source-of-truth = matrix #"
+   と "cell # / Cell N / candidate ID / I-D source / matrix # は single canonical naming" の
+   **contradictory wording 並列** 存在 (本 PRD body で "Cell N" を 17 回使用) → 自己違反 = Spec gap。
+   即時 structural fix (Conceptual identifier vs Written form 明確分離 + Allowed forms enumeration)。
+
+**= framework rule-audit symmetry principle (Rule 13 (13-6-c) v1.8) の empirical 自己実証**: 新 framework
+rule author 時、既存 infrastructure / 自 PRD body との symmetry violation が initial iteration 内で
+発見可能、structural fix で fix 完了可能。本 lesson が後続 PRD で同 pattern 発生時の primary reference。
+
+### Recursive self-audit structure 完成 + Path E strict mode 採用
+
+Phase 4 で完成、Phase 5 /check_job で strict mode 化 (= tolerance 排除):
+- `scripts/verify_prd_self_audits.py` (Path E utility) が own + sibling utilities (= `verify_line_refs.py` +
+  `audit-handoff-doc-line-refs.py` + `audit-prd-rule10-compliance.py`) 全 4 utility の byte claim を
+  Impact Area row で auto-verify
+- strict byte-exact comparison で 1 byte 単位の drift も即時 detect → Impact Area row sync を強制
+- Phase 5 で **3 度連続 cascading detection cycle** (50568→50544 + 20730→20665 + 31728→32520) を
+  empirical 実証、recursive self-audit structure が structural drift prevention mechanism として動作
+
+### Framework v1.8 self-applied integration (rule wording strengthening = Phase 5 T2-pre-1 + T2-pre-2)
+
+`.claude/rules/check-job-review-layers.md` v1.8 + `.claude/rules/spec-stage-adversarial-checklist.md`
+v1.8 の coordinated self-applied integration (= 互いに cross-reference + 同じ framework v1.8 で同時
+昇格、PRD I-205 v1.3 pattern 継承):
+- Layer 1 sub-step (4): Factual accuracy semantic check + 3 hard-coded enforcement mechanisms
+- Rule 9 sub-rule (d): Cell numbering convention single-source-of-truth (Written form "Cell N",
+  Conceptual identifier matrix #、Allowed forms enumeration)
+- Rule 13 sub-rule (13-6): Cell numbering convention audit symmetry (section presence verify +
+  auto-detect helper as dispatcher + audit ↔ Rule symmetry principle)
+
+### Quality gate post close
+
+| 指標 | 値 |
+|------|-----|
+| 全 i_d_pre tests | 17 PASS / 5 ignored (= invariants stub for I-D-main retroactive verify、Phase 6 で fill 不要 = INV-5 retroactive 担当) |
+| INV-1〜INV-5 | INV-1〜INV-4 達成 / INV-5 = I-D-main 着手後 retroactive verify (= forward-looking criterion per PRD spec) |
+| Path E utility | strict byte-exact comparison 採用、I-D-main で 0 drifts maintained |
+| INV-4 baseline | post-close 3-tuple (I-050 FAIL preserve / I-205 PASS / I-D-main PASS、I-D-pre は close で audit out-of-scope) |
+| Hono bench | Preservation (= 107 clean / 72 errors、production code 0 LOC change、framework infra PRD) |
+| cargo clippy / fmt / file-size | 0 warnings / 0 diffs / 0 violations |
+
+### 14 structural fixes / 0 patches (= empirical evidence of "妥協絶対不許可" directive compliance)
+
+- Phase 1-5 implementation: 6 phases / ~10 tasks
+- 1st `/check_job` 4-layer review fixes: 4 件 (L1-1 placement + L1-2 aliasing + L3-1 Spec gap Path E + L2-1 byte claim drift)
+- 2nd `/check_job` deep deep review fixes: 10 件 (A inline comment / B v1.8 symmetry / D Iteration v5 entry / F Cell Numbering Convention contradictory / C+H test enhancement + 4 cascading byte syncs + 1 audit script re-sync)
+- すべて structural fix、interim patch 0 件、ideal-implementation-primacy + Rule 13 (13-6-c) audit-rule symmetry principle 完全準拠
+
+### 後続 PRD への影響
+
+- **I-D-main spec stage 再開**: completed bootstrap utilities full leverage で initial iteration
+  convergence target 可能化 (= framework rule-audit symmetry empirical proof 利用、24 cells を Iteration v19 で convergence target)
+- **全 future PRDs**: bootstrap utilities (verify_line_refs.py / verify_prd_self_audits.py /
+  audit-handoff-doc-line-refs.py) + Layer 1 sub-step (4) factual accuracy semantic check rule + Rule 9 (d) /
+  Rule 13 (13-6) cell numbering convention rule の compound benefit、spec stage iteration cost 構造的削減
+
+### Active TODO items spawned post-close
+
+- `[I-205-retroactive-cell-numbering-section]`: 案 γ Phase 2 T15 で I-205 PRD doc に `## Cell Numbering
+  Convention` + `## Spec→Impl Mapping` section 追加 (= audit scope 内自動 promote、future-proof design)
+- `[I-D-future-vocab-fork]`: broader vocabulary fork detection (cell # / candidate ID / matrix # 間
+  semantic-level mixed canonical naming detection) = L4 latent、案 γ Phase 0 完了後再評価
+- `[I-D-future-audit-extensions-hardening]`: 6 candidate classes (C1=Path E API stability / C2=byte-exact
+  invariant / C3=scripts/ file-size policy / C4=Closed PRD test / C5=4-layer self-applied review action
+  embed / C6=GLOB_ROOTS hardcoded auto-detect) cohesive batch = L4 latent
+- `[I-D-future-self-applied-symmetry-audit]`: 新 framework rule author 時の既存 PRD body self-applied
+  compliance mandatory verify rule (framework v1.9 candidate) = L4 latent、本 PRD 2nd `/check_job`
+  deep deep Spec gap #2 由来
+
+---
+
 ## バージョン / 更新履歴
 
 本ドキュメントは design handoff のアーカイブ。各 section の対応 PRD は section 見出しで明記。

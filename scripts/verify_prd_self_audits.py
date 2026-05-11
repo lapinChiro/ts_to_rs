@@ -587,7 +587,8 @@ def verify_external_file_drift(
                     actual_bytes = file_path.stat().st_size
                 except OSError:
                     continue
-                if abs(actual_bytes - claimed_bytes) > 100:
+                # Strict byte-exact (no tolerance) per Rule 13 (13-6-c) audit-rule symmetry.
+                if actual_bytes != claimed_bytes:
                     drifts.append(
                         f"verify_external_file_drift: line {i} '{file_rel}' claims {claimed_bytes} bytes, "
                         f"actual {actual_bytes} bytes (drift {actual_bytes - claimed_bytes:+d})"

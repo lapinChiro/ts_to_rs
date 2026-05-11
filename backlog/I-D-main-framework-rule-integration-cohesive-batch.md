@@ -1,6 +1,6 @@
 # PRD I-D-main — Framework rule integration cohesive batch (post Path B split)
 
-**Status**: Spec stage Iteration v18 = Path B split adoption (= PRD I-D parent から I-D-pre architectural concern 5 audit mechanism cells 分離後の post-bootstrap **24 cells** scope、I-D-pre 完了 prerequisite 待ち、I-D-pre 完了後 initial iteration convergence target で再開)
+**Status**: Spec stage Iteration v18 = Path B split adoption 完了 (= PRD I-D parent から I-D-pre architectural concern 5 audit mechanism cells 分離後の post-bootstrap **24 cells** scope)。**I-D-pre close 済 2026-05-11** = bootstrap utilities + framework v1.8 full leverage 可能 = Iteration v19 で initial iteration convergence target で再開 ready。
 **起票日**: 2026-05-10 (案 γ Phase 0、user 確定 開発順序見直し 2026-05-09 由来) → **2026-05-11 Path B split 適用** (= PRD I-D parent から rename + scope reduce 30→24 cells、I-D-pre 5 audit mechanism cells 分離)
 **Origin**: PRD I-224 chain (= Iteration v2〜v13 + post-close 2 rounds third-party `/check_job` adversarial review) で empirical 累積した **30 framework 改善 candidates** (= 当初 32 件 - v13-2/v13-3 が PRD I-E に migrate split 2026-05-10) の cohesive batch integration → Iteration v17 plateau の bootstrapping problem empirical evidence (= self-applied audit utility correctness ceiling = 無限 chain 構造) 由来 **Path B split 採用 2026-05-11** で **5 audit mechanism logical cells (= I-D parent Cell 6+8/10/17/19/28、6 row numbers) を I-D-pre に migrate**、本 I-D-main は **24 framework rule integration cells** scope (= I-D parent matrix # 1, 2, 3, 4, 5, 7, 9, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30、original cell numbers preserved with documented gaps {6, 8, 10, 17, 19, 28} per Cell 28 v13-5 single-source-of-truth = matrix # canonical preservation principle)
 **架構的 concern**: Framework rule の verify mechanism が個別 PRD 内で false-positive を許容する **structural integrity gap** を、`spec-stage-adversarial-checklist.md` / `spec-first-prd.md` / `check-job-review-layers.md` / `prd-completion.md` / `problem-space-analysis.md` / `audit-prd-rule10-compliance.py` / `prd-template` skill / `tdd` skill / `/check_job` command の coordinated 改修で構造的解消する (= **post-bootstrap framework full leverage 状態** で I-D-pre 完成 audit utilities 上で initial iteration convergence target、bootstrapping circularity は I-D-pre で構造的解消済)
@@ -425,9 +425,9 @@ framework PRD として、上記 audit script では replace できない以下 
 
 | File | Status | Size (bytes) | Last modified | Empirical verify |
 |------|--------|--------------|---------------|------------------|
-| `.claude/rules/spec-stage-adversarial-checklist.md` | exists | 42965 | 2026-04-28 21:15 | ✓ verified |
+| `.claude/rules/spec-stage-adversarial-checklist.md` | exists | 50544 | 2026-05-11 (I-D-pre Phase 5 T2-pre-2 完了 = Rule 9 sub-rule (d) + Rule 13 sub-rule (13-6) 追加 + Versioning v1.8 entry + /check_job structural placement fix で (d) を (c) 直後に re-group) | ✓ verified |
 | `.claude/rules/spec-first-prd.md` | exists | 11913 | 2026-04-27 22:17 | ✓ verified |
-| `.claude/rules/check-job-review-layers.md` | exists | 16159 | 2026-04-25 22:18 | ✓ verified |
+| `.claude/rules/check-job-review-layers.md` | exists | 21482 | 2026-05-11 (I-D-pre Phase 5 T2-pre-1 完了 = Layer 1 sub-step (4) factual accuracy semantic check 追加 + Versioning v1.8 entry + /check_job aliasing line refactor で canonical 名を definition bullet 内に inline 化 = DRY 達成 + /check_job deep deep B fix で v1.8 entry に spec-stage-adversarial-checklist.md cross-reference 追加 = Versioning symmetry restore) | ✓ verified |
 | `.claude/rules/prd-completion.md` | exists | 6138 | 2026-05-08 02:26 | ✓ verified |
 | `.claude/rules/problem-space-analysis.md` | exists | 12024 | 2026-04-27 22:17 | ✓ verified |
 | `.claude/rules/post-implementation-defect-classification.md` | exists | 6450 | 2026-04-27 22:17 | ✓ verified |
