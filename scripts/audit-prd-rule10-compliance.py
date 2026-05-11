@@ -36,6 +36,25 @@ from pathlib import Path
 
 import yaml
 
+# PRD I-D-pre Phase 3 (T1-pre-1 + T1-pre-2 + T1-pre-4) source-of-truth import:
+# Path E utility (`scripts/verify_prd_self_audits.py`) の verify functions を本 audit
+# script 側 mirror として library import 経由で共有 (= DRY、single source of truth)。
+# Path E utility 改善 (= F6/F7 fix + Axis 3 cell-slot extension 等) が audit script
+# 側に auto sync する。Mirror wrapper 関数 (= `verify_pending_verdict_findings_consistency`
+# + `verify_cross_reference_cell_consistency` + `verify_cell_numbering_drift_detection`)
+# は Option α auto-detect (= `has_cell_numbering_convention_section()` early-return) で
+# I-205 audit out-of-scope に自動分類、INV-4 4-tuple baseline preserve。
+#
+# Note: Python が `python3 script.py` 実行時に script directory を自動的に sys.path[0]
+# に追加するため、同 directory 内の `verify_prd_self_audits` への top-level import は
+# 自然に解決される (= sys.path.insert は redundant、PEP 8 compliant top-level import)。
+from verify_prd_self_audits import (
+    parse_headings as _parse_headings,
+    verify_cross_reference_cell_consistency as _path_e_verify_cross_reference,
+    verify_label_namespace_collision as _path_e_verify_label_namespace,
+    verify_status_pending_verdict as _path_e_verify_status_pending,
+)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKLOG_DIR = REPO_ROOT / "backlog"
 
@@ -824,6 +843,109 @@ def verify_invariants_test_contracts(prd_path: Path, content: str) -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# PRD I-D-pre Phase 3 (T1-pre-1 + T1-pre-2 + T1-pre-4) audit script extensions.
+# Path E utility verify functions の audit-prd-rule10-compliance.py 側 mirror。
+# Option α auto-detect (= `## Cell Numbering Convention` section 有無) で I-205 等
+# retroactive framework rule compliance 未達 PRD を新 verify functions の audit
+# out-of-scope に自動分類 (= INV-4 4-tuple baseline preserve)。
+# 詳細: TODO `[I-205-retroactive-cell-numbering-section]` + I-D-pre PRD doc Iteration v3
+# ---------------------------------------------------------------------------
+
+
+def has_cell_numbering_convention_section(content: str) -> bool:
+    """Option α auto-detect helper: 新 verify functions の audit scope 判定。
+
+    `## Cell Numbering Convention` section 有無で判定。section 存在 = 該当 PRD doc は
+    framework rule retroactive compliance 完了 = audit scope 内、不在 = retroactive
+    compliance 未達 = audit out-of-scope (= 新 verify functions skip)。
+
+    Lesson source (PRD I-D-pre Iteration v3、2026-05-11): I-205 PRD doc は本 section +
+    `## Spec→Impl Mapping` section 不在 + documented gaps 21 cells を持つ PRD pattern。
+    案 γ Phase 2 T15 で section 追加 (= TODO `[I-205-retroactive-cell-numbering-section]`)
+    で audit scope 内に自動 promote = future-proof design。
+    """
+    return bool(re.search(r"^##\s+Cell Numbering Convention\b", content, re.MULTILINE))
+
+
+def _format_path_e_drifts(prd_path: Path, t_id: str, source: str, drifts: list[str]) -> list[str]:
+    """Path E utility drifts を audit script convention violation message 形式へ変換。
+
+    Format: "{prd_name}: {t_id} violation ({source}): {drift}"
+    例: "I-D-pre-...md: T1-pre-1 violation (pending verdict): verify_status_pending_verdict: ..."
+    """
+    return [f"{prd_path.name}: {t_id} violation ({source}): {d}" for d in drifts]
+
+
+def verify_pending_verdict_findings_consistency(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-pre-1 (Cell 1 / v3-6+v4-2 consolidated、F7 fix integrated)。
+
+    Path E Axis 2 (`verify_status_pending_verdict`) の audit-prd-rule10-compliance.py 側
+    mirror wrapper。v3-6 (pending verdict pattern detect) + v4-2 (Critical=0 claim ↔
+    stale verdict consistency) を consolidated batch + F7 fix (= TS-X heading context
+    内でも post-v15 wording 含む = stale late-stage claim flag) で structural detect。
+
+    Option α auto-detect: `## Cell Numbering Convention` section 不在 PRD (= I-205) は
+    audit out-of-scope に自動分類 (early-return)、INV-4 4-tuple baseline preserve。
+    """
+    if not has_cell_numbering_convention_section(content):
+        return []  # I-205 等 retroactive compliance 未達 PRD は audit out-of-scope
+
+    lines = content.splitlines()
+    headings = _parse_headings(lines)
+    drifts = _path_e_verify_status_pending(lines, headings)
+    return _format_path_e_drifts(prd_path, "T1-pre-1", "pending verdict", drifts)
+
+
+def verify_cross_reference_cell_consistency(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-pre-2 (Cell 2 / v5-1、F6 fix integrated)。
+
+    Path E Axis 1 (`verify_cross_reference_cell_consistency`) の audit-prd-rule10-compliance.py
+    側 mirror wrapper。matrix と各 cross-reference context (= Scope sub-sections /
+    Spec→Impl Mapping / Invariants / Test Plan / Implementation Stage Tasks) の cell #
+    appearance consistency を SECTION_COVERAGE_POLICY 5 sections allow-list で verify。
+    F6 fix = threshold "5" arbitrary heuristic を spec-traceable allow-list に置換。
+
+    Option α auto-detect: `## Cell Numbering Convention` section 不在 PRD (= I-205) は
+    audit out-of-scope に自動分類 (early-return)、INV-4 4-tuple baseline preserve。
+    """
+    if not has_cell_numbering_convention_section(content):
+        return []  # I-205 等 retroactive compliance 未達 PRD は audit out-of-scope
+
+    lines = content.splitlines()
+    headings = _parse_headings(lines)
+    drifts = _path_e_verify_cross_reference(lines, headings)
+    return _format_path_e_drifts(prd_path, "T1-pre-2", "cross-reference cell", drifts)
+
+
+def verify_cell_numbering_drift_detection(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-pre-4 (Cell 5 / v13-5 audit part)。
+
+    Path E Axis 3 (`verify_label_namespace_collision`、CELL_SLOT_AS_IDENTIFIER_RE narrow
+    detection) の audit-prd-rule10-compliance.py 側 mirror wrapper。matrix # canonical
+    identifier ↔ Spec→Impl Mapping table cell # ↔ 各 cross-reference context cell # の
+    三者 1-to-1 mapping verify + cell-slot vocabulary fork drift detection (=
+    identifier-level fork detection、broader vocabulary fork は別 PRD
+    `[I-D-future-vocab-fork]` で deferred)。
+
+    Option α auto-detect: `## Cell Numbering Convention` section 不在 PRD (= I-205) は
+    audit out-of-scope に自動分類 (early-return)、INV-4 4-tuple baseline preserve。
+    """
+    if not has_cell_numbering_convention_section(content):
+        return []  # I-205 等 retroactive compliance 未達 PRD は audit out-of-scope
+
+    lines = content.splitlines()
+    headings = _parse_headings(lines)
+    drifts = _path_e_verify_label_namespace(lines, headings)
+    return _format_path_e_drifts(prd_path, "T1-pre-4", "cell numbering drift", drifts)
+
+
 def audit_prd(prd_path: Path) -> list[str]:
     """1 PRD doc の audit を実施、violation list を返す。"""
     content = prd_path.read_text(encoding="utf-8")
@@ -849,6 +971,11 @@ def audit_prd(prd_path: Path) -> list[str]:
         violations.extend(verify_rule11_d6_relevance_compliance(prd_path, content))
         violations.extend(verify_invariants_test_contracts(prd_path, content))
         violations.extend(verify_rule13_spec_review_iteration_log(prd_path, content))
+        # PRD I-D-pre Phase 3 audit script extensions (T1-pre-1 + T1-pre-2 + T1-pre-4)
+        # Option α auto-detect で I-205 等 retroactive compliance 未達 PRD を early-return
+        violations.extend(verify_pending_verdict_findings_consistency(prd_path, content))
+        violations.extend(verify_cross_reference_cell_consistency(prd_path, content))
+        violations.extend(verify_cell_numbering_drift_detection(prd_path, content))
     # 全 active PRD で uncertain expr 検出
     violations.extend(verify_impact_area_uncertain_expressions(prd_path, content))
     return violations

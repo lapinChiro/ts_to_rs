@@ -431,7 +431,7 @@ framework PRD として、上記 audit script では replace できない以下 
 | `.claude/rules/prd-completion.md` | exists | 6138 | 2026-05-08 02:26 | ✓ verified |
 | `.claude/rules/problem-space-analysis.md` | exists | 12024 | 2026-04-27 22:17 | ✓ verified |
 | `.claude/rules/post-implementation-defect-classification.md` | exists | 6450 | 2026-04-27 22:17 | ✓ verified |
-| `scripts/audit-prd-rule10-compliance.py` | exists | 37310 (~906 行) | 2026-05-10 (Iteration v16 F6 fix で +480 bytes drift sync via `verify_prd_self_audits.py` Axis 4 detect、Cell 17 v11-5 bootstrap empirical 動作) | ✓ verified (26 functions enumerated) |
+| `scripts/audit-prd-rule10-compliance.py` | exists | 44451 (~1033 行) | 2026-05-11 (I-D-pre Phase 3 + /check_job deep deep review fix で +7141 bytes drift sync = T1-pre-1 + T1-pre-2 + T1-pre-4 audit script extensions、3 NEW verify functions + helper + formatter 追加 + sys.path.insert + `# noqa: E402` 排除 = proper top-level import、`verify_prd_self_audits.py` Axis 4 detect、Cell 17 v11-5 bootstrap empirical 動作) | ✓ verified (29 functions enumerated post I-D-pre Phase 3) |
 | `scripts/audit-handoff-doc-line-refs.py` | NOT EXISTS | — | — | ✗ to be created (v11-5) |
 | `.claude/skills/prd-template/SKILL.md` | exists | — | — | ✓ verified |
 | `.claude/skills/tdd/SKILL.md` | exists | — | — | ✓ verified |

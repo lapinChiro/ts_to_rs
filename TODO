@@ -10,6 +10,27 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 
 ---
 
+## ユーザー記載アイディア
+
+- **[I-DSPY-paradigm-learning]** **DSPy paradigm 内部仕様 / algorithm 調査 + 本 project workflow 参考点抽出** [L4 / 改善 candidate、後続 task として記録 2026-05-11] — Phase 1-5 evaluation (report/dspy-*.md 5 files、計 2649 LOC) で確立した最終 verdict は **S1 (Status quo) 維持 + DSPy paradigm 借用 cluster 3 つ identified**。"DSPy framework 採用 ≠ DSPy paradigm 借用" framing を user 確定 (2026-05-11)、framework 移行は cost が justify されないが paradigm の体系的整理を学ぶ価値は明確。
+
+  **Phase 1-5 で identify した 3 paradigm 借用 cluster** (詳細 = `report/dspy-vs-claudecode-tradeoff.md:Section "★ 高 value"`):
+  - **Metric 化 cluster** (M-1〜M-4): 既存 audit script の binary PASS/FAIL を numeric score 化、`/check_job` Iteration trajectory を全 PRD 横断で systematic 蓄積、改善方向を observable 化
+  - **Optimizer-inspired cluster** (O-1〜O-3): Skill 改修 PRD に Before/After metric 義務化、quarterly skill review 制度化、bootstrap 借用で `/prd-template` skill が過去 high-quality PRD を明示参照
+  - **Corpus integration cluster** (C-1〜C-4): `report/corpus/` directory 新設、全 PRD から `## Oracle Observations` / `## Invariants` / `## Spec Review Iteration Log` を抽出 archive、skill が参照可能化、failure case archive 整備
+
+  **本 task の investigation scope (future session 着手時)**:
+  - **(調査 1)** DSPy paper (arxiv 2310.03714) + Assertions paper (arxiv 2312.13382) の内部 algorithm deep read (MIPROv2 Bayesian Opt の具体手順、Bootstrap demo selection criterion、Assertion retry feedback 注入 mechanism)
+  - **(調査 2)** DSPy GitHub repo の source code 読込み (`dspy/teleprompt/mipro_v2.py` 等の compile cycle、`dspy/predict/predict.py` の prompt 構築)、本 project workflow へ移植可能な data structure / algorithm 識別
+  - **(調査 3)** 3 cluster (M/O/C) 各々の **具体的 PRD draft 候補** 化: 着手順序 / dependency / 完了条件 / metric / risk 分析
+  - **(調査 4)** S3 (Selective DSPy) re-trigger 条件 4 件 (= `report/dspy-vs-claudecode-tradeoff.md:Section 5.3`) の monitoring 機構設計
+
+  **Resolution target**: 本 project の workflow 体系化が課題化した時点 (現状 well-functioning のため緊急性なし)。または S3 trigger 4 件のいずれか発生時。
+
+  **関連 report (依存 chain)**: `report/dspy-overview.md` (Phase 1 paradigm grounding) → `report/dspy-application-surfaces.md` (Phase 2 51 surface 体系列挙) → `report/dspy-per-surface-evaluation.md` (Phase 3 5 軸評価、Phase 5 で修正) → `report/dspy-applicability-assessment.md` (Phase 4 synthesis、Phase 5 で Wave 1 撤回) → `report/dspy-vs-claudecode-tradeoff.md` (Phase 5 最終 verdict)
+
+  **🔗 関連 INV (本 task に内包)**: INV-1 DSPy v2.5/2.6 production 安定性 / INV-2 既存 PRD の training data 適合性 / INV-3 `audit-prd-rule10-compliance.py` の metric 化適合性 / INV-4 DSPy compile cost 実測値 / INV-5 S1→S3 trigger monitoring 機構不在
+
 ## Tier 0: L1（Reliability Foundation、silent semantic change）
 
 **最優先**。`conversion-correctness-priority.md` Tier 1 (silent semantic change) に
@@ -165,6 +186,55 @@ OBJECT_LITERAL_NO_TYPE 全体で 28件（2026-04-21 T6-6 後 bench 実測、I-14
   - 既存 PRDs vocabulary cleanup (= retroactive normalization)
 
   - 🔗 PRD I-D-pre Cell 5 (本 entry の scope 分離 source、Iteration v2 retroactive embed log で documented)、PRD I-D-main 24 cells 完了後 (= framework leverage state で再評価 prerequisite)
+
+- **[I-D-future-audit-extensions-hardening]** **Audit extensions structural hardening cohesive batch (PRD I-D-pre Phase 3 /check_job 4-layer + deep deep review 由来 Review insights、2026-05-11 起票)** [**L4 latent** (= I-D-pre 完了後 framework leverage 状態で再評価、現状の Phase 3 implementation で audit auto-detect は機能、本 entry は ideal-clean strengthening 性質)] — PRD I-D-pre Phase 3 完了直後 `/check_job` 4-layer review + deep deep review (2026-05-11) で発見された **4 candidate classes** の cohesive batch、いずれも "audit script extensions" architectural concern の structural hardening:
+
+  **検出対象 candidates** (= Phase 3 /check_job 4-layer review Action Items #3/4/5 + deep deep review I5):
+
+  - **(C1) Path E utility API stability contract** (Layer 3 Review insight、framework rule level): `scripts/audit-prd-rule10-compliance.py` が `scripts/verify_prd_self_audits.py` を library import = Path E utility に runtime dependency。Path E utility の function signature 変更 (= `parse_headings` / `verify_cross_reference_cell_consistency` / `verify_status_pending_verdict` / `verify_label_namespace_collision` 等) で audit script が break する risk。**Resolution direction**: framework rule (= `spec-stage-adversarial-checklist.md` or 新 `library-api-stability.md` 新設) で "library import される utility function の API stability contract" を mandatory declare 化、`tests/i_d_pre_path_e_test.rs` を Path E utility function signature の lock-in test に拡張 (= signature change で test fail)
+
+  - **(C2) Wrapper output ↔ Path E utility output 1-to-1 mapping byte-exact invariant** (Layer 2 Review insight、test coverage level): 現状 `tests/i_d_pre_audit_extensions_test.rs` の assertion は wrapper output の source label (= "pending verdict" / "cross-reference cell" / "cell numbering drift") + violation count を verify。**byte-exact mapping invariant (= Path E utility drift output → wrapper formatter `_format_path_e_drifts` 適用 → audit script violation message) は test 不在**。 by construction (= 1-to-1 mapping by formatter logic) で satisfied だが、**formatter logic 変更で silent regression risk**。**Resolution direction**: `_format_path_e_drifts` の output ↔ Path E utility drifts 直接比較 test 追加 (= 同 fixture を Path E utility と audit script 両方経由で run + drift count + drift content の 1-to-1 match assert)
+
+  - **(C3) scripts/ scope file-size policy** (Layer 1 Review insight、scripts/ scope rule level): `scripts/audit-prd-rule10-compliance.py` Phase 3 + deep deep review fix 完了で **1033 行** (= 1000 行超過)。`./scripts/check-file-lines.sh` は src/ scope のみ、`.claude/rules/file-size-resolution.md` も src/ scope rule = scripts/ scope file-size policy は未確立。**Resolution direction**: (a) `check-file-lines.sh` を scripts/ scope (= `*.py` / `*.sh`) にも適用、または (b) scripts/ scope 用に別 threshold (例: 1500 行) を declare、または (c) `audit-prd-rule10-compliance.py` を sub-module 分割 refactor (= 例: `_audit_rule_10_12.py` + `_audit_rule_4.py` + `_audit_extensions_t1_pre.py` 等の concern-based split、main module は dispatch のみ)。ideal-clean lens で (c) が最 structural、(a) は coverage 拡大、(b) は policy clarification
+
+  - **(C4) Closed PRD test 不在 (Implementation gap I5、Phase 3 deep deep review 由来 2026-05-11)**: `is_active_prd == False` (= Status header `Closed/完了/Done` or 不在) の case で新 verify functions (T1-pre-1/T1-pre-2/T1-pre-4) が **invoke されない** (= matrix-driven check 前の early return) ことを明示 test していない。既存 audit-prd-rule10-compliance.py logic test (= `is_active_prd` predicate の direct test) として位置付ければ Phase 3 scope outside だが、新 verify functions のための regression lock-in test として cohesive batch 対象。**Resolution direction**: synthetic fixture `closed_prd_no_new_audit_invocation.md` (= Status header `Closed`) 新設 + 新 test = audit script で全 matrix-driven verify functions が skip されること verify (= exit 0 + 0 T1-pre-* violations 並存)。Phase 3 で `has_cell_numbering_convention_section()` False branch test は実装済 (Phase 3 deep deep review fix)、本 C4 は **`is_active_prd` False branch の symmetric coverage**
+
+  **Resolution direction summary**:
+  - C1 = framework rule update + test contract extension
+  - C2 = test additions (= byte-exact invariant lock-in)
+  - C3 = file-size policy clarification + script split refactor candidate
+  - C4 = Closed PRD fixture + symmetric branch coverage test (= deep deep review I5、L4 latent)
+
+  **着手 timing**: PRD I-D-pre + I-D-main 完了後 = 案 γ Phase 0 (framework rule full leverage 状態) で再評価。Priority L4 = framework leverage 効果見極め後 (= 現状 implementation で audit auto-detect は機能、structural hardening は ideal-clean strengthening 性質)。3 candidate classes は cohesive batch 候補だが、必要なら C1 / C2 / C3 個別 PRD に split も検討 (= 各々 architectural concern 微妙に異なる)。
+
+  **影響範囲** (起票時):
+  - C1: `.claude/rules/spec-stage-adversarial-checklist.md` (新 sub-rule 候補) + `scripts/verify_prd_self_audits.py` (= public API contract 化) + `tests/i_d_pre_path_e_test.rs` (= signature lock-in test 拡張)
+  - C2: `tests/i_d_pre_audit_extensions_test.rs` (= byte-exact invariant test 追加) + `scripts/audit-prd-rule10-compliance.py` (= `_format_path_e_drifts` の structural lock-in)
+  - C3: `scripts/check-file-lines.sh` (= scope 拡大) + `.claude/rules/file-size-resolution.md` (= policy clarification) + `scripts/audit-prd-rule10-compliance.py` (= sub-module split refactor 候補)
+  - C4: `tests/fixtures/i_d_pre/negative/closed_prd_no_new_audit_invocation.md` (NEW) + `tests/i_d_pre_audit_extensions_test.rs` (= `is_active_prd` False branch coverage test 追加)
+
+  - 🔗 PRD I-D-pre Phase 3 (= 本 entry 起票 source、`/check_job` 4-layer review Action Items #3/4/5 + deep deep review I5)、PRD I-D-future-vocab-fork (= 同 framework hardening 性質、cohesive batch 候補)、`scripts/audit-prd-rule10-compliance.py` + `scripts/verify_prd_self_audits.py` (= 本 entry 改修対象)
+
+- **[I-205-retroactive-cell-numbering-section]** **I-205 PRD doc retroactive framework rule compliance (= `## Cell Numbering Convention` + `## Spec→Impl Mapping` section 追加、PRD I-D-pre Phase 3 Option α decision 由来、2026-05-11 起票)** [**L3** (PRD I-D-pre Phase 3 Option α auto-detect mechanism = `## Cell Numbering Convention` section 有無で audit scope 内/外 判定、I-205 audit scope 内 promote 実現には本 retroactive update 必須、ただし I-205 architectural concern (= class member access dispatch with getter/setter framework) と orthogonal なので I-205 T15 (案 γ Phase 2 = /check_job 4-layer review + 12-rule self-applied verify) と batch 化)] — PRD I-D-pre Iteration v3 (2026-05-11) Phase 3 着手前 empirical baseline analysis で発覚: I-205 PRD doc は `## Cell Numbering Convention` section 不在 + `## Spec→Impl Mapping` section 不在 + documented gaps 21 cells を持ち、`verify_prd_self_audits.py` (Path E utility) で 2 drifts (Axis 1 cross-reference) を出している (= 既知 false-positive baseline)。Path E utility logic を audit-prd-rule10-compliance.py 側 mirror すると、I-205 で同 false-positive が audit script 側でも発生 = INV-4 4-tuple baseline (I-205 PASS) 破壊 risk。
+
+  **Resolution direction (案 γ Phase 2 T15 で実施)**:
+  - **(R1) `## Cell Numbering Convention` section 追加**: I-205 PRD doc に section を embed、I-205 cell numbering canonical (= matrix # = 1〜81 with documented gaps {29, 34, 35, 41, 45, 48-49, 51-59, 65-69} per single-source-of-truth principle) を explicit declare = Rule 9 (Spec stage adversarial checklist) 13-5 compliance
+  - **(R2) `## Spec→Impl Mapping` section 追加**: I-205 matrix 60 cells dispatch tree を section に embed (= 各 cell → 該当 Implementation Stage Task の 1-to-1 mapping)、verify_cross_reference_cell_consistency `policy=full` clear 達成
+  - **(R3) batch 化判断**: 上記 R1 + R2 を I-205 T15 (= /check_job 4-layer review) と batch 化、I-205 T15 完了 = I-205 が audit script 側 mirror function の audit scope 内に **自動 promote** (= helper `has_cell_numbering_convention_section()` で True 判定、future-proof design)
+
+  **When to promote (audit scope 内に自動分類される条件)**:
+  - I-205 PRD doc に `## Cell Numbering Convention` section 追加完了 (= R1)
+  - Phase 3 で実装される `has_cell_numbering_convention_section(content)` helper が True を返す
+  - 同時に I-205 が verify_cross_reference_cell_consistency `policy=full` の Scope + Spec→Impl Mapping 両 section で missing cells 0 達成 (= R2 完了で達成)
+  - これらを `python3 scripts/audit-prd-rule10-compliance.py backlog/I-205-getter-setter-dispatch-framework.md` exit 0 で empirical verify
+
+  **着手 timing**: 案 γ Phase 2 (= I-225 / I-162 完了後の I-205 T14-T16 chain)、T15 (= /check_job 4-layer review + 12-rule self-applied verify) と batch 化。**現状**: I-D-pre Phase 3 完了で audit script 側 mirror functions 実装 + helper `has_cell_numbering_convention_section()` embed = 本 retroactive update の auto-detect mechanism 準備完了 = T15 着手 ready。
+
+  **影響範囲** (起票時):
+  - `backlog/I-205-getter-setter-dispatch-framework.md` (= 本 entry 対象 PRD doc、`## Cell Numbering Convention` + `## Spec→Impl Mapping` section 追加 ~数百行)
+  - I-205 T15 spec section (= 案 γ Phase 2 で batch 化)
+
+  - 🔗 PRD I-D-pre Iteration v3 (= 本 entry 起票 source、Option α design decision lock-in)、PRD I-D-pre `## Cell Numbering Convention` (= R1 reference template)、`scripts/audit-prd-rule10-compliance.py` `has_cell_numbering_convention_section()` helper (= 本 entry の auto-detect mechanism、Phase 3 で実装)、PRD I-205 T15 (= 案 γ Phase 2 で本 entry batch 化先)
 
 - **[I-E]** **lib/CLI API + Web API runtime integration cohesive batch (PRD I-D scope 分離由来、2026-05-10 起票)** [**L3** (Web API runtime integration deficiency が個別 fixture rewrite で workaround 可能、ただし `transpile()` lib API vs CLI binary の semantic divergence は universal infra defect で future PRDs の test harness reliability に structural な負の影響)] — PRD I-D scope split (2026-05-10) で抽出された 2 candidates の cohesive batch:
 
