@@ -12,24 +12,28 @@ Tier 内の記載順序が優先度。根本原因を共有するイシューは
 
 ## ユーザー記載アイディア
 
-- **[I-DSPY-paradigm-learning]** **DSPy paradigm 内部仕様 / algorithm 調査 + 本 project workflow 参考点抽出** [L4 / 改善 candidate、後続 task として記録 2026-05-11] — Phase 1-5 evaluation (report/dspy-*.md 5 files、計 2649 LOC) で確立した最終 verdict は **S1 (Status quo) 維持 + DSPy paradigm 借用 cluster 3 つ identified**。"DSPy framework 採用 ≠ DSPy paradigm 借用" framing を user 確定 (2026-05-11)、framework 移行は cost が justify されないが paradigm の体系的整理を学ぶ価値は明確。
+- **[I-DSPY-paradigm-learning]** **DSPy paradigm 内部仕様 / algorithm 調査 + 本 project workflow 参考点抽出** [L4 / 改善 candidate、後続 task として記録 2026-05-11] — DSPy 適用可能性評価 (2026-05-11) で確立した最終 verdict は **S1 (Status quo) 維持 + DSPy paradigm 借用 cluster 3 つ identified**。"DSPy framework 採用 ≠ DSPy paradigm 借用" framing を user 確定、framework 移行は cost が justify されないが paradigm の体系的整理を学ぶ価値は明確。
 
-  **Phase 1-5 で identify した 3 paradigm 借用 cluster** (詳細 = `report/dspy-vs-claudecode-tradeoff.md:Section "★ 高 value"`):
-  - **Metric 化 cluster** (M-1〜M-4): 既存 audit script の binary PASS/FAIL を numeric score 化、`/check_job` Iteration trajectory を全 PRD 横断で systematic 蓄積、改善方向を observable 化
-  - **Optimizer-inspired cluster** (O-1〜O-3): Skill 改修 PRD に Before/After metric 義務化、quarterly skill review 制度化、bootstrap 借用で `/prd-template` skill が過去 high-quality PRD を明示参照
-  - **Corpus integration cluster** (C-1〜C-4): `report/corpus/` directory 新設、全 PRD から `## Oracle Observations` / `## Invariants` / `## Spec Review Iteration Log` を抽出 archive、skill が参照可能化、failure case archive 整備
+  **3 paradigm 借用 cluster** (詳細 = [`report/dspy-vs-claudecode-tradeoff.md`](report/dspy-vs-claudecode-tradeoff.md) Section 6):
+  - **Metric 化 cluster** (M-1〜M-4、Section 6.1): 既存 audit script の binary PASS/FAIL を numeric score 化、`/check_job` Iteration trajectory を全 PRD 横断で systematic 蓄積、改善方向を observable 化
+  - **Optimizer-inspired cluster** (O-1〜O-3、Section 6.2): Skill 改修 PRD に Before/After metric 義務化、quarterly skill review 制度化、bootstrap 借用で `/prd-template` skill が過去 high-quality PRD を明示参照
+  - **Corpus integration cluster** (C-1〜C-4、Section 6.3): `report/corpus/` directory 新設、全 PRD から `## Oracle Observations` / `## Invariants` / `## Spec Review Iteration Log` を抽出 archive、skill が参照可能化、failure case archive 整備
+
+  **着手順序** (Section 6.4): Metric 化 → Corpus integration (並列可) → Optimizer-inspired (Metric cluster に依存)
 
   **本 task の investigation scope (future session 着手時)**:
   - **(調査 1)** DSPy paper (arxiv 2310.03714) + Assertions paper (arxiv 2312.13382) の内部 algorithm deep read (MIPROv2 Bayesian Opt の具体手順、Bootstrap demo selection criterion、Assertion retry feedback 注入 mechanism)
-  - **(調査 2)** DSPy GitHub repo の source code 読込み (`dspy/teleprompt/mipro_v2.py` 等の compile cycle、`dspy/predict/predict.py` の prompt 構築)、本 project workflow へ移植可能な data structure / algorithm 識別
+  - **(調査 2)** DSPy GitHub repo (https://github.com/stanfordnlp/dspy) の source code 読込み (`dspy/teleprompt/mipro_v2.py` 等の compile cycle、`dspy/predict/predict.py` の prompt 構築)、本 project workflow へ移植可能な data structure / algorithm 識別
   - **(調査 3)** 3 cluster (M/O/C) 各々の **具体的 PRD draft 候補** 化: 着手順序 / dependency / 完了条件 / metric / risk 分析
-  - **(調査 4)** S3 (Selective DSPy) re-trigger 条件 4 件 (= `report/dspy-vs-claudecode-tradeoff.md:Section 5.3`) の monitoring 機構設計
+  - **(調査 4)** S3 (Selective DSPy) re-trigger 4 条件 (= [`report/dspy-vs-claudecode-tradeoff.md`](report/dspy-vs-claudecode-tradeoff.md) Section 5.3) の monitoring 機構設計
 
   **Resolution target**: 本 project の workflow 体系化が課題化した時点 (現状 well-functioning のため緊急性なし)。または S3 trigger 4 件のいずれか発生時。
 
-  **関連 report (依存 chain)**: `report/dspy-overview.md` (Phase 1 paradigm grounding) → `report/dspy-application-surfaces.md` (Phase 2 51 surface 体系列挙) → `report/dspy-per-surface-evaluation.md` (Phase 3 5 軸評価、Phase 5 で修正) → `report/dspy-applicability-assessment.md` (Phase 4 synthesis、Phase 5 で Wave 1 撤回) → `report/dspy-vs-claudecode-tradeoff.md` (Phase 5 最終 verdict)
+  **関連 report (2 件、self-contained)**:
+  - [`report/dspy-overview.md`](report/dspy-overview.md) — DSPy paradigm grounding + 一次資料 references (調査 1/2 の起点)
+  - [`report/dspy-vs-claudecode-tradeoff.md`](report/dspy-vs-claudecode-tradeoff.md) — 最終 verdict + 4 戦略 (S1-S4) + 4 True Apply surface + S3 trigger 4 件 + 3 paradigm 借用 cluster
 
-  **🔗 関連 INV (本 task に内包)**: INV-1 DSPy v2.5/2.6 production 安定性 / INV-2 既存 PRD の training data 適合性 / INV-3 `audit-prd-rule10-compliance.py` の metric 化適合性 / INV-4 DSPy compile cost 実測値 / INV-5 S1→S3 trigger monitoring 機構不在
+  **🔗 関連 INV (本 task に内包、詳細 = tradeoff.md Section 8.3)**: INV-1 DSPy v2.5/2.6 production 安定性 / INV-2 既存 PRD の training data 適合性 / INV-3 `audit-prd-rule10-compliance.py` の metric 化適合性 / INV-4 DSPy compile cost 実測値 / INV-5 S1→S3 trigger monitoring 機構不在
 
 ## Tier 0: L1（Reliability Foundation、silent semantic change）
 
