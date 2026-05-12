@@ -1,3 +1,12 @@
+---
+paths:
+  - "backlog/**/*.md"
+  - ".claude/rules/**/*.md"
+  - ".claude/skills/**/SKILL.md"
+  - ".claude/commands/**/*.md"
+  - "doc/handoff/**/*.md"
+---
+
 # Post-Implementation Defect Classification
 
 ## When to Apply
@@ -105,8 +114,3 @@ Spec gap (= framework 失敗 signal) を発見した場合、以下を実施す�
 | [problem-space-analysis.md](problem-space-analysis.md) | Spec gap 発見時に matrix 構築 methodology の改善検討 |
 | [conversion-correctness-priority.md](conversion-correctness-priority.md) | Implementation gap で発見された silent semantic change の Tier 1 分類 |
 
-## Versioning
-
-- **v1.0** (2026-04-25): `spec-first-prd.md` line 154-167 の "Post-Implementation Review:
-  Defect Classification" を本 file に分離。Trace 優先順序、Spec gap 発見時の framework
-  改善検討手順を強化追加。

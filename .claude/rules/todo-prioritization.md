@@ -1,3 +1,10 @@
+---
+paths:
+  - "TODO"
+  - "backlog/**/*.md"
+  - "plan.md"
+---
+
 # TODO Prioritization Criteria
 
 ## When to Apply

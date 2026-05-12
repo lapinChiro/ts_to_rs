@@ -1,3 +1,11 @@
+---
+paths:
+  - "TODO"
+  - "backlog/**/*.md"
+  - "plan.md"
+  - ".claude/rules/**/*.md"
+---
+
 # Conversion Feasibility Criteria
 
 ## When to Apply

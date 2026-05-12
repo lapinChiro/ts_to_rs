@@ -1,3 +1,12 @@
+---
+paths:
+  - "backlog/**/*.md"
+  - "plan.md"
+  - ".claude/rules/**/*.md"
+  - ".claude/skills/**/SKILL.md"
+  - "doc/handoff/**/*.md"
+---
+
 # PRD Design Review
 
 ## When to Apply

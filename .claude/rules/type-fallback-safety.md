@@ -1,3 +1,10 @@
+---
+paths:
+  - "src/**"
+  - "tests/**"
+  - "backlog/**/*.md"
+---
+
 # Type Fallback Safety
 
 ## When to Apply

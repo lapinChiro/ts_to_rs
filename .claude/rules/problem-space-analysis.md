@@ -1,3 +1,12 @@
+---
+paths:
+  - "backlog/**/*.md"
+  - "plan.md"
+  - ".claude/rules/**/*.md"
+  - ".claude/skills/**/SKILL.md"
+  - "doc/handoff/**/*.md"
+---
+
 # Problem Space Analysis (最上位 PRD ルール)
 
 ## When to Apply
@@ -118,7 +127,7 @@ PRD 完了宣言前に、以下の自問を文書化する:
 4. 同時に「なぜこのセルを最初の enumerate で見落としたか」を振り返り、次元の
    列挙基準を補強する。
 
-## Non-Matrix-Driven PRD への適用 (PRD 2.7 確定 2026-04-27)
+## Non-Matrix-Driven PRD への適用
 
 Non-matrix-driven PRD (infra, refactor, bug fix) であっても、本ルールの cross-axis
 enumeration 概念は適用される。
@@ -143,8 +152,8 @@ spec extension を行う必要がある。
    independent dimension として PRD doc に列挙
    (`spec-stage-adversarial-checklist.md` Rule 10 axis enumeration 3 prompt = 逆問題視点 /
    実装 dispatch trace / 影響伝搬 chain を non-matrix-driven PRD でも適用)
-2. **Structural reason for matrix absence**: matrix を構築しない理由を **Permitted
-   reasons** (本 PRD 2.7 で確定) から選択し、PRD doc の `## Rule 10 Application`
+2. **Structural reason for matrix absence**: matrix を構築しない理由を以下の **Permitted
+   reasons** から選択し、PRD doc の `## Rule 10 Application`
    section に machine-parseable format で明示:
    - `infra で AST input dimension irrelevant` (matrix-driven 概念が機能しない infra
      task、例: CI workflow update / build script 改修)
@@ -157,13 +166,9 @@ spec extension を行う必要がある。
    for matrix absence` に含まれない (`scripts/audit-prd-rule10-compliance.py` で
    auto verify、CI merge gate)
 
-### Lesson source
+### Recurring problem rationale
 
-PRD 2.7 (I-198 + I-199 + I-200 cohesive batch、Q5 確定 2026-04-27)。本ルール (matrix-driven
-PRD のみ適用と従来 wording) と Rule 12 (Mandatory application + structural enforcement、
-全 PRD 適用) の gap を解消するため、non-matrix-driven PRD への structural extension を
-本ルールに記載。本 spec extension により、matrix を構築しない PRD でも cross-axis 直交軸を
-独立 enumerate する spec stage verification が必須化される。
+`spec-stage-adversarial-checklist.md` Rule 12 (Mandatory application、全 PRD 適用) が確立される一方、本ルールが matrix-driven PRD のみ適用 と書かれていた場合、non-matrix-driven PRD で cross-axis 直交軸 enumerate が漏れ、spec stage verification が一貫しなくなる pattern が発生する。本 spec extension により、matrix を構築しない PRD でも cross-axis 直交軸を独立 enumerate する spec stage verification が必須化され、両 rule の gap が構造的に解消される。
 
 ## Prohibited
 

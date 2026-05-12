@@ -99,7 +99,7 @@ For functions that recurse on type structures (e.g., `resolve_type_params_in_typ
 - **Deep nesting**: Test with nesting depth exceeding expected limits (e.g., `Option<Option<Option<...>>>`)
 - **HashMap/map-based lookups**: When a function looks up a key and recurses on the result, test that the result doesn't contain the same key (circular reference)
 
-Incidents: `resolve_type_params_in_type` caused an infinite loop in directory mode when `type_param_constraints` contained `"T" → Named("T")` (self-referential). The function recursively resolved `Named("T")` → looked up `"T"` → got `Named("T")` → infinite recursion. Fixed by adding depth limit and self-reference detection.
+**Recurring problem rationale**: type-param-resolving recursion (HashMap lookup → recurse on the resolved value) is prone to infinite loops when the resolved value contains the same key as input (self-referential mapping, e.g., constraint `"T" → Named("T")`). Compile-time exhaustiveness check cannot detect this runtime defect. Structural prevention requires both a depth limit and a self-reference detection probe in any function that resolves type params via map lookup.
 
 #### Transpiler-Specific: AST Variant Exhaustiveness
 

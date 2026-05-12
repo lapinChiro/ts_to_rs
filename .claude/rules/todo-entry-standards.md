@@ -1,3 +1,10 @@
+---
+paths:
+  - "TODO"
+  - "backlog/**/*.md"
+  - "plan.md"
+---
+
 # TODO Entry Standards
 
 ## When to Apply

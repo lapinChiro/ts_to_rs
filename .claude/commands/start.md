@@ -16,7 +16,7 @@
 2. 進行中 PRD があれば該当 `backlog/<id>.md` を読み、stage (Spec / Implementation) と次 task を特定
 3. PRD なし or 完了済の場合、prerequisite chain 先頭の PRD を起票 (/prd-template skill 適用)
 4. 各 stage に応じて専用 skill を invoke:
-   - **Spec stage**: /prd-template (Step 0a/0b matrix) → matrix 確定後 /check_job (10-rule checklist)
+   - **Spec stage**: /prd-template (Step 0a/0b matrix) → matrix 確定後 /check_job (13-rule checklist)
    - **Implementation stage**: /tdd (TDD 5-stage) → /quality-check → /check_job (4-layer review)
    - **Close**: /backlog-management または /end (commit message 提案)
 

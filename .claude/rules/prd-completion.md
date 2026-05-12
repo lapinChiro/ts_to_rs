@@ -1,3 +1,11 @@
+---
+paths:
+  - "backlog/**/*.md"
+  - "plan.md"
+  - ".claude/rules/**/*.md"
+  - "doc/handoff/**/*.md"
+---
+
 # Strict PRD Completion Criteria
 
 ## When to Apply
@@ -15,7 +23,7 @@ When reporting PRD work as "complete".
   2. Ask the user: "Completion criterion X is unmet. Reason is Y. How should we proceed?" and defer to their judgment
 - Even if meeting criteria is difficult, **never unilaterally reduce scope and report completion**
 
-## Tier-transition compliance (broken-fix PRD wording、I-205 source 確定 2026-04-27)
+## Tier-transition compliance (broken-fix PRD wording)
 
 **新機能 PRD と broken-fix PRD では Hono bench / regression criteria の wording が異なる**。
 "0 regression" は新機能 PRD 用の単純化された表現。broken-fix PRD (= 既存実装が
@@ -38,8 +46,7 @@ When reporting PRD work as "complete".
     - **Improvement (Tier 2 → Tier 1)** (allowed): existing related Tier 2 errors
       transition to Tier 1 GREEN (= clean files count 増加 / errors count 減少 が
       **expected**、regression ではない)
-    - **Improvement (Tier 1 silent → Tier 2 honest)** (allowed、I-224 T5-1
-      `/check_problem` 2026-05-08 source 確定): existing **silent semantic loss**
+    - **Improvement (Tier 1 silent → Tier 2 honest)** (allowed): existing **silent semantic loss**
       (Tier 1 silent semantic change、e.g., var decl silent drop / wrapper passthrough
       type info loss) が **honest error reporting** (Tier 2 honest error with
       transparent wording) に transition。clean files count **減少 / errors count 増加** = surface result だが per `ideal-implementation-primacy.md` /
@@ -70,12 +77,9 @@ PRD が broken-fix か新機能か判定するための classification:
 とも新機能とも見なせる) は、Hono bench を **Tier-transition compliance** 表現で記述
 (より厳格な broken-fix 表現を default とする、ideal-implementation-primacy 観点)。
 
-### Lesson source
+### Recurring problem rationale
 
-I-205 PRD draft v1 (2026-04-27) で "Hono bench 0 regression" を broken-fix PRD context で
-記述、第三者 review F12 → broken-fix PRD では既存 Tier 2 errors の Tier 1 化が
-**improvement** であり regression と区別すべきと判明 → Tier-transition compliance
-wording を本 rule に追加 (本 PRD I-205 self-applied integration)。
+新機能 PRD と broken-fix PRD で同じ "Hono bench 0 regression" を要求すると、broken-fix PRD では既存 Tier 2 errors の Tier 1 化 (= **improvement**) が surface 上 regression と見分けがつかず、第三者 review で「regression を導入した」と誤分類される pattern が発生する。Tier-transition compliance wording による classification は、Tier 1 silent / Tier 2 honest / Tier 1 GREEN の transition direction を spec-traceable に区別し、improvement と true regression の混同を構造的に防ぐ。
 
 ## Prohibited
 

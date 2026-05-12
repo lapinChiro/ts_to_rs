@@ -1,3 +1,13 @@
+---
+paths:
+  - "backlog/**/*.md"
+  - "plan.md"
+  - ".claude/rules/**/*.md"
+  - ".claude/skills/**/SKILL.md"
+  - ".claude/commands/**/*.md"
+  - "doc/handoff/**/*.md"
+---
+
 # Spec-First PRD Workflow (SDCDF)
 
 ## When to Apply
@@ -96,7 +106,7 @@ tsc observation (Stage 1 artifact #2) は **TS 側の runtime semantic のみ** 
 **実装ガイド**:
 - Discovery (T0) 段階の matrix では「TS ✓ / Rust 要 T1 probe」形式で書く
 - T1 probe で RED が判明した cell は **pre-existing defect** として新 TODO 起票または
-  既存別 PRD (例: I-050 / I-149) に吸収 → 本 PRD regression fixture から削除
+  既存別 PRD (= 関連 umbrella PRD) に吸収 → 本 PRD regression fixture から削除
 - T1 probe で GREEN が判明した cell のみ「TS ✓ / Rust ✓」regression fixture として lock-in
 
 ### Stage 2: Implementation (spec approved 後)
@@ -163,7 +173,7 @@ tsc observation (Stage 1 artifact #2) は **TS 側の runtime semantic のみ** 
 | Rule | Relation |
 |------|----------|
 | [problem-space-analysis.md](problem-space-analysis.md) | 本ルールの前提。matrix 構築の detailed methodology |
-| [spec-stage-adversarial-checklist.md](spec-stage-adversarial-checklist.md) | Stage 1 完了 verification (12-rule checklist) |
+| [spec-stage-adversarial-checklist.md](spec-stage-adversarial-checklist.md) | Stage 1 完了 verification (13-rule checklist) |
 | [check-job-review-layers.md](check-job-review-layers.md) | Stage 2 完了 verification (4-layer review framework) |
 | [post-implementation-defect-classification.md](post-implementation-defect-classification.md) | Stage 2 review 結果の defect 5 category 分類 |
 | [ideal-implementation-primacy.md](ideal-implementation-primacy.md) | 最上位原則。本ルールは subordinate |
@@ -171,24 +181,3 @@ tsc observation (Stage 1 artifact #2) は **TS 側の runtime semantic のみ** 
 | [prd-design-review.md](prd-design-review.md) | 設計段階の review は本ルールの Spec stage 内で実施 |
 | [type-fallback-safety.md](type-fallback-safety.md) | 型 fallback 導入時の安全性分析 |
 
-## Versioning
-
-- **v1.0** (2026-04-25 SDCDF Rollout 1.0): I-178 で Spec-Stage Adversarial Review Checklist が
-  5 → 10 rule に拡張、`spec-stage-adversarial-checklist.md` に分離。I-183 で `/check_job`
-  Stage Dispatch を `check-job-review-layers.md` に分離、4-layer framework 化。
-  Defect Classification 5 category を `post-implementation-defect-classification.md`
-  に分離。本 file は Stage 1/2 lifecycle + Dual verdict + Spec への逆戻り に責務集中。
-- **Beta** (2026-04-17 Phase 4 Rollout 昇格): SDCDF Pilot (I-050-a) で Spec gap = 0 を
-  達成し正式 rule として昇格。
-- **Lessons Learned (Pilot Phase)**:
-  - **TypeResolver と IR 型の乖離**: `input as string` は TypeResolver 上 `String` だが IR
-    上 `serde_json::Value` のまま。Ident coercion は TypeResolver 精度向上が前提、
-    Lit のみに限定すべき (I-050-a Pilot)。
-  - **Any-narrowing enum との交差**: `typeof` guard 付き `any` 変数は narrowing enum に
-    置換、`RustType::Any` マッチの coercion 条件に該当しない (I-050-a Pilot)。
-  - **expected_override と TypeResolver expected_type の分離**: closure body / NC branch で
-    false-positive `Any` propagation あり、coercion は expected_override (明示呼び出し元)
-    のみで発動が安全 (I-050-a Pilot)。
-  - **Dual verdict (TS / Rust)**: I-144 T1 で R4 / F6 が TS observation ✓ だが Rust emission ✗
-    (E0308 / try body 崩壊) を empirical 発見、framework に Dual verdict 条項を追加
-    (2026-04-19)。
