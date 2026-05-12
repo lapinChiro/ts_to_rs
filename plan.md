@@ -9,19 +9,36 @@
 
 ---
 
-## 現在の状態 (2026-05-11、**PRD I-D-pre close 完了** = Phase 1-5 全完了 + 2 度の `/check_job` adversarial review fix + framework v1.8 self-applied integration 達成 = 案 γ Phase 0 で **PRD I-D-main 着手 ready**)
+## 現在の状態 (2026-05-12、**Rules 徹底レビュー + 改善 batch 着手** = `rule_review_list.md` 新設完了、`.claude/rules/*.md` 全 file への適用が次タスク)
 
-**進行中**: 案 γ Phase 0 = **PRD I-D-main spec stage 着手 ready (= 24 cells、post-bootstrap framework full leverage 状態、Iteration v19 で initial iteration convergence target)** (= I-D-pre close 完了 = bootstrap utility formal lock-in 完成 base 確立、Method A `verify_line_refs.py` + Path E `verify_prd_self_audits.py` (strict byte-exact mode、F6/F7 fix + Axis 3 extension integrated) + `audit-handoff-doc-line-refs.py` (NEW、4 drift categories、CI step PR merge gate active) + framework v1.8 `check-job-review-layers.md` Layer 1 sub-step (4) factual accuracy semantic check + `spec-stage-adversarial-checklist.md` Rule 9 sub-rule (d) + Rule 13 sub-rule (13-6) cell numbering convention = full leverage 可能)。
+**進行中**: 案 γ Phase 0.5 = **Rules 徹底レビュー + 改善 batch** (= 本 session で `rule_review_list.md` (8 group / 24 観点) 新設、他 rule file への適用は new session で実施)。**PRD I-D-main spec stage 再開は本 batch 完了後** (= rule 品質 base が更に向上した状態で着手)。
 
-**最新の完了**: **PRD I-D-pre close 完了** (2026-05-11) = 5 cells matrix-driven、6 phases implementation、2 度の `/check_job` adversarial review、14 structural fixes / 0 patches、framework v1.8 self-applied integration 達成。詳細 = `doc/handoff/design-decisions.md` `## I-D-pre: Audit mechanism bootstrap` section + § 直近の完了作業。
+**最新の完了** (2026-05-12): `.claude/rules/spec-stage-adversarial-checklist.md` 大幅整理 (50.5KB → 35.1KB、-31%) + `rule_review_list.md` (12.9KB、260 行) 新設 = 8 group / 24 観点の汎用 Claude Code rule review checklist。詳細 = § 直近の完了作業。
 
-**次着手** = **PRD I-D-main spec stage 再開** = 24 cells、post-bootstrap framework full leverage 状態で initial iteration convergence target (Iteration v19 で Hybrid 4-条件 final rule satisfy 到達なら Implementation stage 着手)。
+**前回完了** (2026-05-11): **PRD I-D-pre close 完了** = 5 cells matrix-driven、6 phases implementation、2 度の `/check_job` adversarial review、14 structural fixes / 0 patches、framework v1.8 self-applied integration 達成。詳細 = `doc/handoff/design-decisions.md` `## I-D-pre: Audit mechanism bootstrap` section。
+
+**次着手** = **Rules 徹底レビュー + 改善 batch** = `rule_review_list.md` を `.claude/rules/*.md` 全 file に適用、各 file の改善実施 (new session で実施)。本 batch 完了後 PRD I-D-main spec stage 再開。
 
 **開発順序**: 案 γ (= **[完了] I-D-pre → I-D-main → I-225 → I-162 → I-205 T14-T16**、Path B split で I-D を 2 PRD serial sequence に展開、I-D-pre 完了で bootstrap utility 完成 base 確立)。詳細 = 下記「実行順序」section。
 
 ---
 
-## /start 再開時の手順 (= PRD I-D-pre close 完了後 = PRD I-D-main spec stage 着手 ready)
+## /start 再開時の手順 (= Rules 徹底レビュー + 改善 batch 着手 ready)
+
+**次タスク**: `rule_review_list.md` を `.claude/rules/*.md` 全 file (`spec-stage-adversarial-checklist.md` 本 session 完了済を除く) に適用、徹底レビューと改善。**Primary reference**: [`rule_review_list.md`](rule_review_list.md) (12.9KB、260 行、8 group / 24 観点)。
+
+### 進め方 (本 batch)
+
+1. **対象 file 選定**: `.claude/rules/*.md` から spec-stage-adversarial-checklist.md を除いた全 file (file size 順 or dependency 順で順次 review)
+2. **各 file ごとに 24 観点 evaluation**: `rule_review_list.md` の Group A-H に従い check
+3. **Finding 集計 + severity 分類**: Critical / High / Medium / Low に分類 (`rule_review_list.md` 「Review プロセス」 Step 2 参照)
+4. **Fix 実施**: 独立 finding は parallel、依存ありは順序付け、設計判断要は user 承認後
+5. **Post-fix verification**: 24 観点 Test question を再 evaluate、Counter-pattern 残存ゼロ confirm
+6. **本 batch 完了後** → 案 γ Phase 0 継続 = PRD I-D-main spec stage 再開
+
+---
+
+## /start 再開時の手順 (本 batch 完了後の PRD I-D-main spec stage 着手 ready 用、reference 保持)
 
 ### Step 1: Empirical sanity check (= post I-D-pre close state preservation verify)
 
@@ -113,7 +130,17 @@ I-D parent Iteration v1-v17 trajectory、Path B split rationale、3 path options
    ↓
 [完了] PRD I-D-pre = **Audit mechanism bootstrap** — 2026-05-11 (= 5 cells matrix-driven、6 phases implementation、2 度 `/check_job` adversarial review、14 structural fixes / 0 patches、framework v1.8 self-applied integration、bootstrap utility formal lock-in + bootstrapping circularity 構造的解消)。詳細 = `doc/handoff/design-decisions.md` `## I-D-pre: ...` section
    ↓
-[次] **PRD I-D-main = Framework rule integration cohesive batch (Path B split 後、24 cells)** (= post-bootstrap framework full leverage で initial iteration convergence target で再開、I-D-pre 完了 prerequisite satisfy)。**起票時 primary reference** = TODO `[I-D-main]` entry + [`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md) (1516 LOC、Iteration v1-v17 + v18 Path B split entry preserved) + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-D-pre: ...` + `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` sections
+═════ 案 γ Phase 0.5: Rules 徹底レビュー + 改善 batch (NEW、2026-05-12 追加) ═════
+   ↓
+[一部完了] **spec-stage-adversarial-checklist.md 整理** — 2026-05-12 (= Versioning 削除 + PRD-agnostic 化 + sub-rule 命名 (N-N) 統一 + Rule 11 (d-6) flatten + Rule 8 restructure + paths frontmatter 追加、50.5KB → 35.1KB)
+   ↓
+[完了] **`rule_review_list.md` 新設** — 2026-05-12 (= 8 group / 24 観点の汎用 Claude Code rule review checklist、本 session の改善経験を抽象化、project root に top-level 配置)
+   ↓
+[次] **Rules 徹底レビュー + 改善 batch** = `rule_review_list.md` を `.claude/rules/*.md` 全 file (本 session で完了の spec-stage-adversarial-checklist.md は除く) に適用、各 file で 24 観点 evaluation → finding 集計 → severity 分類 → fix 実施。new session で着手 (本 session は commit + 立て直し)
+   ↓
+═════ 案 γ Phase 0 (継続): I-D-main spec stage 再開 (Rules 改善 base で着手) ═════
+   ↓
+[次] **PRD I-D-main = Framework rule integration cohesive batch (Path B split 後、24 cells)** (= post-bootstrap framework full leverage + rule corpus 改善 base で initial iteration convergence target で再開、I-D-pre 完了 prerequisite satisfy)。**起票時 primary reference** = TODO `[I-D-main]` entry + [`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md) (1516 LOC、Iteration v1-v17 + v18 Path B split entry preserved) + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-D-pre: ...` + `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` sections
    ↓
 ═════ 案 γ Phase 0.5: lib/CLI API + Web API runtime integration (NEW、2026-05-10 PRD I-D scope split 由来) ═════
    ↓
@@ -168,7 +195,8 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | 優先度 | レベル | PRD | architectural concern (= 1 PRD = 1 concern) |
 |--------|-------|-----|---------------------------------------------|
-| **次着手 (案 γ Phase 0、I-D-pre close 完了 2026-05-11 = bootstrap utility 完成 base + framework v1.8 leverage 可能)** | L3 (framework rule level structural compliance) | **PRD I-D-main Framework rule integration cohesive batch (Path B split 後、24 cells)** | 24 framework rule integration cells (= I-D parent matrix # 1, 2, 3, 4, 5, 7, 9, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30、original numbers preserved with documented gaps {6, 8, 10, 17, 19, 28}) の cohesive integration、I-D-pre 完成 bootstrap utilities full leverage で post-bootstrap framework state 確立、initial iteration convergence target で再開。**次 action**: first third-party adversarial review = Iteration v19 で convergence target、Hybrid 4-条件 final rule satisfy 到達なら Implementation stage 着手。詳細 = [`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md) Iteration v18 entry + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-D-pre: ...` + `## I-224: ...` sections |
+| **次着手 (案 γ Phase 0.5、NEW 2026-05-12)** | L3 (framework quality) | **Rules 徹底レビュー + 改善 batch** | `rule_review_list.md` (8 group / 24 観点) を `.claude/rules/*.md` 全 file (本 session 完了の spec-stage-adversarial-checklist.md は除く) に適用、各 file の改善実施。**次 action**: new session で着手、各 file ごとに (1) 24 観点 evaluation (2) finding 集計 + severity 分類 (3) independent finding は parallel fix、依存あり finding は順序付け (4) post-fix verification。詳細 = [`rule_review_list.md`](rule_review_list.md) の "Review プロセス" section |
+| **次々着手 (案 γ Phase 0、I-D-pre close 完了 2026-05-11 = bootstrap utility 完成 base + framework v1.8 leverage 可能)** | L3 (framework rule level structural compliance) | **PRD I-D-main Framework rule integration cohesive batch (Path B split 後、24 cells)** | 24 framework rule integration cells (= I-D parent matrix # 1, 2, 3, 4, 5, 7, 9, 11, 12, 13, 14, 15, 16, 18, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30、original numbers preserved with documented gaps {6, 8, 10, 17, 19, 28}) の cohesive integration、I-D-pre 完成 bootstrap utilities full leverage + rule corpus 改善 base で post-bootstrap framework state 確立、initial iteration convergence target で再開。**次 action**: first third-party adversarial review = Iteration v19 で convergence target、Hybrid 4-条件 final rule satisfy 到達なら Implementation stage 着手。詳細 = [`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md) Iteration v18 entry + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-D-pre: ...` + `## I-224: ...` sections |
 | **次候補 (案 γ Phase 0.5、I-D scope split 由来 NEW)** | L3 | **PRD I-E lib/CLI API + Web API runtime integration cohesive batch** | v13-2 (Promise builtin runtime integration deficiency) + v13-3 (transpile lib API vs CLI binary builtin loading inconsistency) cohesive batch。Spec stage で 2 candidates の真 cohesion verify + 必要なら 2 PRD split 判断、orthogonal concern のため案 γ Phase 1/2 並行可能 |
 | 次優先 (案 γ Phase 1) | L3 | **I-225 (B3)** | Class field の literal-only initializer (annotation 無) で type inference 完成 |
 | 次優先 (案 γ Phase 1) | L3 | **I-162** | Constructor synthesis `Self::new()` for no-explicit-constructor classes |
@@ -198,6 +226,7 @@ Phase A Step 5 → I-015 → I-158+I-159 → Phase A Step 6 → ...
 
 | PRD / Phase | 日付 | 後続への影響 |
 |-------------|------|-------------|
+| **[REFACTOR] `.claude/rules/spec-stage-adversarial-checklist.md` 大幅整理 + `rule_review_list.md` 新設** | 2026-05-12 | spec-stage-adversarial-checklist.md (50,544 → 35,068 bytes、-31% / 603 → 449 行) = 5 段階 cleanup の cumulative result: (1) Versioning section 削除 (v1.0〜v1.8 change log、git history へ delegation) (2) PRD-agnostic 化 (I-205 / PRD 2.7 / Lesson source / Finding ID / 日付 / iteration marker 等の citation 全除去、transferable pattern は `Recurring problem rationale` / `Failure pattern` / `Rationale` として abstract 保全) (3) Tier 1+2+4 fixes (grammar fix、equivalence chain readability、placeholder 明示化、cross-reference 修正、Rule 7 sub-rule structure 追加、orphan prefix cross-ref semantic 化) (4) Sub-rule 命名 scheme `(N-N)` numeric 全 rule 統一 (Rule 8 mixed (a-d)+(8-5) restructure / Rule 9 (a-d) → (9-1〜4) / Rule 11 (d-N) → (11-N) / Rule 12 (e-N) → (12-N))、Rule 11 (d-6) triple-nesting → 2-level flatten (5) `paths` frontmatter 追加で on-demand load (PRD work 時のみ load)。**外部 file への coordinated rename** (5 files): `.claude/rules/check-job-review-layers.md` / `.claude/skills/prd-template/SKILL.md` / `doc/handoff/design-decisions.md` / `backlog/I-205-getter-setter-dispatch-framework.md` / `backlog/I-D-main-framework-rule-integration-cohesive-batch.md`。**NEW** [`rule_review_list.md`](rule_review_list.md) (12,949 bytes、260 行) = project root の汎用 Claude Code rule review checklist (8 group / 24 観点)、本 session の改善経験を抽象化 + 第三者目線 over-fit 検出 review 実施済。**次タスク**: rule_review_list.md を他 rule (`.claude/rules/*.md` の spec-stage-adversarial-checklist.md 以外) に適用、徹底レビューと改善 (new session で実施) |
 | **[CLOSE] PRD I-D-pre 完了 = Audit mechanism bootstrap + bootstrapping circularity 構造的解消 + framework v1.8 self-applied integration 達成** | 2026-05-11 | **5 cells matrix-driven** (= I-D parent Cell 6+8/10/17/19/28 から migration) **の cohesive batch を 6 phases で完了**。**Phase 5 = T2-pre-1 + T2-pre-2 rule wording strengthening** = `.claude/rules/check-job-review-layers.md` Layer 1 sub-step (4) factual accuracy semantic check + `.claude/rules/spec-stage-adversarial-checklist.md` Rule 9 sub-rule (d) + Rule 13 sub-rule (13-6) cell numbering convention single-source-of-truth + Versioning v1.8 entry coordinated self-applied integration set。**2 度の `/check_job` adversarial review で 14 structural fixes / 0 patches** = framework rule-audit symmetry principle (Rule 13 (13-6-c)) 2 度独立 iteration で発動 empirical 自己実証 (= 1st /check_job で Path E utility 100-byte tolerance violation 発見 → strict byte-exact comparison 採用 / 2nd /check_job deep deep で I-D-pre 自身の Cell Numbering Convention contradictory wording 発見 → Conceptual identifier vs Written form 分離 fix)。Bootstrap utilities 完成 lock-in: `verify_line_refs.py` (Method A、PRD doc heading-based line-ref drift detection) + `verify_prd_self_audits.py` (Path E、4 axes + strict byte-exact、recursive self-audit structure、own + sibling utilities 全 4 件 byte claim auto-verify) + `audit-handoff-doc-line-refs.py` (handoff doc 4 drift categories、CI step PR merge gate active)。empirical state final: 17 i_d_pre tests PASS / 5 ignored (INV-5 retroactive verify placeholder) + INV-4 baseline 3-tuple (I-050 FAIL preserve / I-205 PASS / I-D-main PASS、I-D-pre は close で audit out-of-scope) + Path E 0 drifts on I-D-main + handoff audit 0 drifts on doc/handoff/ + cargo clippy 0 warnings + cargo fmt 0 diffs + Hono bench Preservation 107/72 (production code 0 LOC change)。**詳細 (削除禁止 lesson source)** = [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-D-pre: Audit mechanism bootstrap (Path B split adoption + bootstrapping circularity 構造的解消、closed 2026-05-11)` section (= 5 cells resolution table + 6 phases timeline + framework rule-audit symmetry empirical validation evidence + 14 structural fixes / 0 patches / recursive self-audit structure 完成 evidence + 4 active TODO entries spawned post-close)。次 action = **PRD I-D-main spec stage 再開** (= 24 cells、Iteration v19 で initial iteration convergence target、Hybrid 4-条件 final rule satisfy 到達なら Implementation stage 着手) |
 | **[CLOSE] I-224 PRD 完了 (B2 fn main mechanism + Option β cohesive batch + Iteration v13 + post-close 2 round /check_job adversarial review)** | 2026-05-09 | top-level executable script の Rust emission `fn main()` 自動生成 mechanism 完成 (INV-1〜INV-7 structural lock-in)、Option β cohesive batch (top-await Tier 1 + ESM harness + collision detection) 完成、12 C1 cells e2e GREEN-ify + I-180 close 達成、Hono bench Preservation 107/72 維持 (production code 0 LOC change)。**4 度連続 v12-2 pattern empirical lock-in** = framework v12-1/v12-2 + v13-1〜v13-7 = **9 candidates** を I-D PRD batch 起票候補化 (計 **32 件 / 14 rounds adversarial review** 累積)。**詳細** = git log `[CLOSE] I-224 PRD 完了` commit + [`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md) `## I-224: top-level fn main mechanism + framework v12-2 candidate empirical 補強 chain` section (= 16 sub-sections embed: Option β cohesive batch decision pattern + Axis E orthogonality merge + 25 NA cells unified mutual exclusion + 3-tuple dispatch tree + INV 4-item invariant pattern + 6-category test layout + R-2/R-4 audit methodology + 23 sub-commits decomposition + 9 framework 改善 candidates table + 12 度 v12-2 pattern recurrence chain evidence + Implementation-level structural fixes (Iteration v8〜v11) + structural lock-in artifact 一覧) |
 | **audit-prd-rule10-compliance.py default mode structural fix (= I-224 T7 /check_problem 由来)** | 2026-05-08 | CI merge gate が真に I-205 + I-224 を audit 化 (`## Rule 10 Application` section presence による content-based auto-detect、命名 convention に依存しない future-proof な audit 対象選定)。詳細 = git log |

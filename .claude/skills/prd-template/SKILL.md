@@ -154,7 +154,7 @@ audit fail の対象:
 - Audit verify mechanism: `audit-prd-rule10-compliance.py` で `## Impact Area` section の
   uncertain expression を regex match → audit fail (RC-3 enforcement)
 
-#### 3-pre-2. Pre-draft ast-variant audit (RC-8 source、Rule 11 (d-5) 適用)
+#### 3-pre-2. Pre-draft ast-variant audit (RC-8 source、Rule 11 (11-5) 適用)
 
 **Mandatory step**: 本 PRD scope の修正対象 file (Impact Area で listing) に対し:
 
@@ -288,7 +288,7 @@ Spec stage 完了 verification は `.claude/rules/spec-stage-adversarial-checkli
 
 (全 NA cell について繰返、SWC parser accept 確認時は本 PRD scope 内で Tier 2 reclassify)
 
-## Impact Area Audit Findings (matrix-driven PRD で必須、Rule 11 (d-5) hard-code)
+## Impact Area Audit Findings (matrix-driven PRD で必須、Rule 11 (11-5) hard-code)
 
 ```bash
 python3 scripts/audit-ast-variant-coverage.py --files <impact-area-files>
@@ -299,8 +299,8 @@ spec-traceable に記録:
 
 | Violation | Location | Phase | Decision | Rationale |
 |-----------|----------|-------|----------|-----------|
-| Rule 11 d-1 `_ => ` arm | foo.rs:42 | Transformer | 本 PRD scope で fix | dispatch arm 拡張に伴い既存 `_ => ` arm を explicit enumerate 化 |
-| Rule 11 d-3 Tier mismatch | bar.rs section | TypeResolver | I-203 defer | 本 PRD architectural concern と orthogonal |
+| Rule 11 (11-1) `_ => ` arm | foo.rs:42 | Transformer | 本 PRD scope で fix | dispatch arm 拡張に伴い既存 `_ => ` arm を explicit enumerate 化 |
+| Rule 11 (11-3) Tier mismatch | bar.rs section | TypeResolver | I-203 defer | 本 PRD architectural concern と orthogonal |
 
 ## Rule 10 Application
 
@@ -343,7 +343,7 @@ architectural concern; Cartesian matrix で `Tier 2 honest error reclassify (本
 これは silent drop / silent failure を排除し、user に compile-time error として明示する
 reclassify、ideal-implementation-primacy 観点で structural improvement。
 
-## Invariants (matrix-driven PRD で必須独立 section、Rule 8 (8-5) audit verify)
+## Invariants (matrix-driven PRD で必須独立 section、Rule 8 (8-2) audit verify)
 
 機能仕様の中で「matrix cell に展開できない / 全 cell で同時に成立する必要がある」transversal
 property を列挙。各 invariant について以下 4 項目必須:
