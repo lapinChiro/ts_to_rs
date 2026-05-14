@@ -278,7 +278,11 @@ run_single_file_mode() {
 
     while IFS= read -r f; do
         total=$((total + 1))
-        err=$("$BINARY" "$f" 2>&1 | grep "Caused by:" -A1 | tail -1 | sed 's/^[[:space:]]*//')
+        # Successful single-file runs often emit no `Caused by:` line at all.
+        # Under `set -euo pipefail`, a bare `grep` miss would abort the entire
+        # benchmark loop before any summary is printed, so tolerate that case.
+        err=$("$BINARY" "$f" 2>&1 || true)
+        err=$(printf '%s\n' "$err" | { grep "Caused by:" -A1 || true; } | tail -1 | sed 's/^[[:space:]]*//')
         if [ -z "$err" ]; then
             success=$((success + 1))
         else

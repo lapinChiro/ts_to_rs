@@ -222,6 +222,20 @@ mod tests {
     }
 
     #[test]
+    fn test_byte_pos_to_line_col_counts_utf8_columns_by_byte_offset() {
+        // `é` is 2 bytes in UTF-8. The following `x` starts at byte position 3,
+        // so the current public contract is column 3 rather than character column 2.
+        assert_eq!(byte_pos_to_line_col("éx", 3), (1, 3));
+    }
+
+    #[test]
+    fn test_byte_pos_to_line_col_resets_column_after_utf8_prefix_line_break() {
+        // `é` occupies 2 bytes on line 1, but the first byte on line 2 must still
+        // resolve to column 1 after the newline reset.
+        assert_eq!(byte_pos_to_line_col("é\nx", 4), (2, 1));
+    }
+
+    #[test]
     fn test_transpile_collecting_all_supported_returns_empty_unsupported() {
         let source = "interface Foo { name: string; }";
         let (output, unsupported) = transpile_collecting(source).unwrap();

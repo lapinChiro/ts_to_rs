@@ -55,7 +55,7 @@ enum Commands {
 const DOCKER_IMAGE: &str = "ts-to-rs-extract-types";
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = parse_cli();
 
     if let Some(command) = cli.command {
         return match command {
@@ -157,7 +157,7 @@ fn transpile_file(
 
     let output_path = output
         .map(PathBuf::from)
-        .unwrap_or_else(|| input.with_extension("rs"));
+        .unwrap_or_else(|| default_file_output_path(input));
 
     fs::write(&output_path, &file.rust_source)
         .with_context(|| format!("failed to write output file: {}", output_path.display()))?;
@@ -179,7 +179,7 @@ fn transpile_directory(
 
     let output_dir = output
         .map(PathBuf::from)
-        .unwrap_or_else(|| directory::default_output_dir(input_dir));
+        .unwrap_or_else(|| default_directory_output_path(input_dir));
 
     // Read all source files
     let mut files: Vec<(PathBuf, String)> = Vec::new();
@@ -274,6 +274,27 @@ fn transpile_directory(
 }
 
 // ===== Helpers =====
+
+fn parse_cli() -> Cli {
+    Cli::parse()
+}
+
+#[cfg(test)]
+fn parse_cli_from<I, T>(iter: I) -> std::result::Result<Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    Cli::try_parse_from(iter)
+}
+
+fn default_file_output_path(input: &Path) -> PathBuf {
+    input.with_extension("rs")
+}
+
+fn default_directory_output_path(input_dir: &Path) -> PathBuf {
+    directory::default_output_dir(input_dir)
+}
 
 /// Resolves an [`UnsupportedSyntaxError`] into an [`UnsupportedSyntax`] with file path + line/col.
 fn resolve_unsupported(
@@ -425,4 +446,120 @@ fn resolve_types(tsconfig: &Path, output: Option<&Path>) -> Result<()> {
 
     eprintln!("Wrote {}", output_path.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_parse_cli_from_transpile_flags_and_input() {
+        let cli = parse_cli_from([
+            "ts_to_rs",
+            "input.ts",
+            "--output",
+            "out.rs",
+            "--report-unsupported",
+            "--no-builtin-types",
+        ])
+        .expect("CLI args should parse");
+
+        assert!(
+            cli.command.is_none(),
+            "plain transpile mode should have no subcommand"
+        );
+        assert_eq!(cli.input, Some(PathBuf::from("input.ts")));
+        assert_eq!(cli.output, Some(PathBuf::from("out.rs")));
+        assert!(cli.report_unsupported);
+        assert!(cli.no_builtin_types);
+    }
+
+    #[test]
+    fn test_parse_cli_from_resolve_types_subcommand_and_output() {
+        let cli = parse_cli_from([
+            "ts_to_rs",
+            "resolve-types",
+            "--tsconfig",
+            "tsconfig.json",
+            "--output",
+            "types.json",
+        ])
+        .expect("resolve-types args should parse");
+
+        match cli.command {
+            Some(Commands::ResolveTypes { tsconfig, output }) => {
+                assert_eq!(tsconfig, PathBuf::from("tsconfig.json"));
+                assert_eq!(output, Some(PathBuf::from("types.json")));
+            }
+            other => panic!("expected resolve-types subcommand, got {other:?}"),
+        }
+
+        assert!(
+            cli.input.is_none(),
+            "subcommand form should not consume positional transpile input"
+        );
+    }
+
+    #[test]
+    fn test_parse_cli_from_rejects_unknown_resolve_types_option() {
+        let err = parse_cli_from(["ts_to_rs", "resolve-types", "--bogus"])
+            .expect_err("unknown resolve-types option should be rejected by clap");
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains("--bogus"),
+            "unexpected clap diagnostic for unknown resolve-types option: {msg}"
+        );
+        assert!(
+            msg.contains("resolve-types"),
+            "diagnostic should stay scoped to the resolve-types subcommand: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_parse_cli_from_rejects_resolve_types_missing_tsconfig_value() {
+        let err = parse_cli_from(["ts_to_rs", "resolve-types", "--tsconfig"])
+            .expect_err("missing tsconfig value should be rejected by clap");
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains("--tsconfig <TSCONFIG>"),
+            "diagnostic should identify the missing tsconfig value: {msg}"
+        );
+        assert!(
+            msg.contains("required"),
+            "diagnostic should explain that the option requires a value: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_default_file_output_path_replaces_extension_with_rs() {
+        assert_eq!(
+            default_file_output_path(Path::new("fixtures/example.input.ts")),
+            PathBuf::from("fixtures/example.input.rs")
+        );
+    }
+
+    #[test]
+    fn test_default_directory_output_path_appends_rs_suffix() {
+        assert_eq!(
+            default_directory_output_path(Path::new("fixtures/src")),
+            PathBuf::from("fixtures/src_rs")
+        );
+    }
+
+    #[test]
+    fn test_resolve_unsupported_prepends_file_path_and_line_col() {
+        let source = "const ok = 1;\nexport default 42;\n";
+        let raw = ts_to_rs::transformer::UnsupportedSyntaxError {
+            kind: "ExportDefaultExpr".to_string(),
+            byte_pos: 15,
+        };
+
+        let resolved = resolve_unsupported(source, Path::new("fixtures/demo.ts"), raw);
+
+        assert_eq!(resolved.kind, "ExportDefaultExpr");
+        assert_eq!(resolved.location, "fixtures/demo.ts:2:1");
+    }
 }
