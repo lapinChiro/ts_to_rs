@@ -6,7 +6,9 @@
 //!
 //! Test structure: 各 rule wording strengthening について
 //! - rule file 内 specific text pattern 存在を grep-based に assert
-//! - Versioning section v1.8 entry 存在 verify
+//! - rule-review batch 後の normative contract
+//!   (Versioning section external delegation / numeric sub-rule normalization)
+//!   を verify
 //!
 //! 各 test fn name は backlog/I-D-pre-audit-mechanism-bootstrap.md
 //! `## Spec→Impl Dispatch Arm Mapping` table の Test contract path と 1-to-1 sync。
@@ -28,8 +30,9 @@ fn body_before_versioning(content: &str) -> &str {
 /// Cell 4 / v11-7 / T2-pre-1: check-job-review-layers.md Layer 1 sub-step
 /// factual accuracy semantic check
 ///
-/// **Verification**: rule file body (= Versioning 除く) 内に sub-step (4) wording +
-/// 3 hard-coded mechanism references 存在 + Versioning section v1.8 entry 存在
+/// **Verification**: rule file body 内に sub-step (4) wording +
+/// 3 hard-coded mechanism references 存在 + rule review batch で導入された
+/// `## Versioning` external delegation が維持されている
 #[test]
 fn test_layer1_factual_accuracy_semantic_check_documented() {
     let content =
@@ -60,16 +63,17 @@ fn test_layer1_factual_accuracy_semantic_check_documented() {
         );
     }
     assert!(
-        content.contains("v1.8"),
-        "Versioning section v1.8 entry 不在 = T2-pre-1 self-applied integration 未完了"
+        !content.contains("\n## Versioning"),
+        "`## Versioning` section が残存 = rule_review_list Group A2 '履歴の external delegation' 違反"
     );
 }
 
 /// Cell 5 / v13-5 / T2-pre-2: spec-stage-adversarial-checklist.md Rule 9 / Rule 13
 /// sub-rule cell numbering convention single-source-of-truth
 ///
-/// **Verification**: rule file body 内に Rule 9 (d) + Rule 13 (13-6) sub-rule wording +
-/// 3 hard-coded audit reference 存在 + Versioning section v1.8 entry 存在
+/// **Verification**: rule file body 内に Rule 9 (9-4) + Rule 13 (13-6) sub-rule wording +
+/// 3 hard-coded audit reference 存在 + legacy orphan label `(d-N)` が除去され
+/// normalized numeric labels が維持されている
 #[test]
 fn test_rule9_cell_numbering_convention_documented() {
     let content = fs::read_to_string(".claude/rules/spec-stage-adversarial-checklist.md")
@@ -88,7 +92,7 @@ fn test_rule9_cell_numbering_convention_documented() {
         "canonical identifier 'matrix #' wording 不在 in rule body = T2-pre-2 未完了"
     );
     for sub_label in &[
-        "(d-1)", "(d-2)", "(d-3)", "(13-6-a)", "(13-6-b)", "(13-6-c)",
+        "(9-4-1)", "(9-4-2)", "(9-4-3)", "(13-6-a)", "(13-6-b)", "(13-6-c)",
     ] {
         assert!(
             body.contains(sub_label),
@@ -106,7 +110,11 @@ fn test_rule9_cell_numbering_convention_documented() {
         );
     }
     assert!(
-        content.contains("v1.8"),
-        "Versioning section v1.8 entry 不在 = T2-pre-2 self-applied integration 未完了"
+        !body.contains("(d-1)") && !body.contains("(d-2)") && !body.contains("(d-3)"),
+        "Legacy orphan label `(d-N)` 残存 = rule_review_list Group C3/D1 violation"
+    );
+    assert!(
+        !content.contains("\n## Versioning"),
+        "`## Versioning` section が残存 = rule_review_list Group A2 '履歴の external delegation' 違反"
     );
 }
