@@ -151,7 +151,7 @@ Covers cell 1.
 
 ## Completion Criteria
 
-1. **Matrix completeness**: cell 1 covered by stub test.
+1. **Matrix completeness**: cell 1 covered by stub test (verify via `cargo test --tests`).
 
 ### Tier-transition compliance
 

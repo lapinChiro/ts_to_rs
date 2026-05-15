@@ -807,6 +807,749 @@ def verify_rule11_d6_relevance_compliance(prd_path: Path, content: str) -> list[
     return violations
 
 
+def verify_no_duplicate_top_level_matrix(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-2 (cell 4 / v3-4): Duplicate top-level matrix sub-section detection
+    (framework v1.10、PRD I-D-main Implementation T1-2 で establish)。
+
+    `## Problem Space` section 内に **複数 `### 組合せマトリクス` sub-section が
+    共存** する状態 (= iteration 移行時の旧 matrix 残存 pattern) を syntactic
+    detect。最初の組合せマトリクス sub-section のみ accepted、後続は audit fail。
+
+    Heading anchor based design (= `### 組合せマトリクス` canonical signal):
+      - Primary Axis enumeration table / Auxiliary Axis enumeration table 等の
+        sibling tables は `### 組合せマトリクス` heading anchor を持たないため
+        false positive を生まない
+      - active backlog/ PRDs (I-D-main / I-D-pre / I-205 等) で `組合せマトリクス`
+        命名 convention 確立済
+
+    Verification logic:
+      1. `## Problem Space` section 抽出
+      2. `^###\\s+組合せマトリクス\\b` heading occurrence count
+      3. count > 1 で violation report (= duplicate combinatorial matrix
+         sub-section detected)
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    ps_section = get_section(content, r"^##\s+Problem Space\s*$")
+    if ps_section is None:
+        return violations  # Problem Space 不在は別 audit で detect
+
+    cm_pattern = re.compile(r"^###\s+組合せマトリクス\b", re.MULTILINE)
+    cm_matches = cm_pattern.findall(ps_section)
+    if len(cm_matches) > 1:
+        violations.append(
+            f"{prd_path.name}: v3-4 violation: duplicate `### 組合せマトリクス` "
+            f"sub-section detected in `## Problem Space` section "
+            f"(count={len(cm_matches)}, expected 1 = most recent only)。"
+            f"iteration 移行時の旧 matrix 残存 pattern、cleanup 必要"
+        )
+    return violations
+
+
+def verify_dispatch_tree_pseudocode_syntactic(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-3 (cell 5 / v3-5): Dispatch tree pseudocode syntactic validation
+    (framework v1.10、PRD I-D-main Implementation T1-3 で establish)。
+
+    `## Design` section 内 Rust pseudocode (= ```rust fenced code block) の各
+    `match` arm を parse、duplicate pattern (comment-only disambiguation で
+    hiding する pattern を含む) を syntactic detect。
+
+    Verification logic:
+      1. `## Design` section 抽出
+      2. ```rust ... ``` fenced code blocks 全 extract
+      3. 各 block 内で `<pattern> => <body>` 形式の arm を抽出
+      4. pattern を normalize (= inline `/* ... */` comments を strip) して
+         duplicate detection
+      5. duplicate detected で violation report
+
+    Rust pseudocode 不在 (= framework PRD で typical) の場合は trivially PASS。
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    design_section = get_section(content, r"^##\s+Design\s*$")
+    if design_section is None:
+        return violations
+
+    rust_block_pattern = re.compile(r"```rust\s*\n(.*?)\n```", re.DOTALL)
+    rust_blocks = rust_block_pattern.findall(design_section)
+    if not rust_blocks:
+        return violations  # Pseudocode 不在 = trivially PASS
+
+    # Match arm pattern: leading whitespace + pattern + `=>` + body (anything after)
+    arm_pattern = re.compile(r"^\s*([^=\n]+?)\s*=>")
+    for block_idx, block in enumerate(rust_blocks):
+        normalized_patterns: list[str] = []
+        for line in block.splitlines():
+            m = arm_pattern.match(line)
+            if not m:
+                continue
+            raw_pattern = m.group(1).strip()
+            # Strip inline `/* ... */` comments (= comment-only disambiguation
+            # で hidden duplicate detection の core mechanism)
+            normalized = re.sub(r"/\*.*?\*/", "", raw_pattern).strip()
+            # Skip wildcard `_` arm (= exhaustiveness fallback、duplicate 概念
+            # 不適用)
+            if not normalized or normalized == "_":
+                continue
+            normalized_patterns.append(normalized)
+
+        seen: set[str] = set()
+        duplicates: list[str] = []
+        for p in normalized_patterns:
+            if p in seen and p not in duplicates:
+                duplicates.append(p)
+            seen.add(p)
+
+        if duplicates:
+            violations.append(
+                f"{prd_path.name}: v3-5 violation: duplicate match arm pattern(s) "
+                f"detected in `## Design` pseudocode block #{block_idx + 1}: "
+                f"{duplicates}。comment-only disambiguation で hidden duplicate "
+                f"の可能性、各 arm の semantic 区別を pattern level で明示必須"
+            )
+    return violations
+
+
+def verify_dispatch_tree_axis_tuple_consistency(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-5 (cell 7 / v4-1): Dispatch tree axis-tuple semantic consistency check
+    (framework v1.10、PRD I-D-main Implementation T1-5 で establish、/check_job
+    Action Item #3 で count-based → semantic verify に upgrade 2026-05-15)。
+
+    `### 組合せマトリクス` matrix table の各 active cell から **axis values
+    tuple** を抽出 (= header row で `Axis N` を含む columns の値) + Design Rust
+    pseudocode `match` arm の `(<axis_a>, <axis_b>, ...) =>` tuple pattern を
+    抽出、**set inclusion check** で matrix axis-tuple が arm tuple set に存在
+    することを verify。`_` wildcard fallback が存在し、かつ matrix axis-tuple が
+    arm set 不在 cells があれば、それら cells が `unreachable!()` に fall-through
+    する状態 = audit fail。
+
+    Verification logic:
+      1. `## Design` section の ```rust pseudocode block 抽出
+      2. Pseudocode 不在なら trivially PASS (framework PRD typical)
+      3. `### 組合せマトリクス` header row から axis columns (= header に `Axis`
+         wording 含む) を identify
+      4. axis columns 不在なら count-based fallback (= 後方互換、count comparison)
+      5. axis columns 存在なら各 data row から axis-tuple を tuple 化、matrix_tuples set 構築
+      6. Pseudocode arm の `(<a>, <b>, ...) =>` pattern を tuple 化、arm_tuples set 構築
+      7. `_` wildcard 検出
+      8. set inclusion: matrix_tuples - arm_tuples = fall-through cells set
+      9. wildcard 存在 + fall-through cells 非空 で violation report (= 各 cell の
+         axis-tuple identify)
+
+    Spec compliance: spec wording の "axis values から (axis-tuple) tuple を
+    derive + dispatch tree pseudocode の各 arm pattern と match、fall-through を
+    syntactic detect" を semantic verify として実装。
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    design_section = get_section(content, r"^##\s+Design\s*$")
+    if design_section is None:
+        return violations
+
+    rust_block_pattern = re.compile(r"```rust\s*\n(.*?)\n```", re.DOTALL)
+    rust_blocks = rust_block_pattern.findall(design_section)
+    if not rust_blocks:
+        return violations  # No pseudocode = trivially PASS
+
+    ps_section = get_section(content, r"^##\s+Problem Space\s*$")
+    if ps_section is None:
+        return violations
+    cm_match = re.search(r"^###\s+組合せマトリクス\b", ps_section, re.MULTILINE)
+    if not cm_match:
+        return violations
+    cm_start = cm_match.end()
+    next_h = re.search(r"^(###|##)\s", ps_section[cm_start:], re.MULTILINE)
+    cm_section = (
+        ps_section[cm_start : cm_start + next_h.start()]
+        if next_h
+        else ps_section[cm_start:]
+    )
+
+    # Extract Rust pseudocode wildcard presence + explicit arm count + arm tuples
+    # generic_arm_pattern catches any non-`_` arm (= tuple or single-axis pattern)
+    # for explicit_arms counting (= count-based fallback path correctness)。
+    # arm_tuple_pattern も同時 apply で tuple arms のみ arm_tuples set に追加
+    # (= semantic verify path で matrix axis-tuples との set inclusion check)。
+    generic_arm_pattern = re.compile(r"^\s*([^=\n]+?)\s*=>")
+    underscore_arm_pattern = re.compile(r"^\s*_\s*=>")
+    arm_tuples: set[tuple[str, ...]] = set()
+    has_wildcard = False
+    explicit_arms = 0
+    for block in rust_blocks:
+        for line in block.splitlines():
+            if underscore_arm_pattern.match(line):
+                has_wildcard = True
+                continue
+            m = generic_arm_pattern.match(line)
+            if not m:
+                continue
+            raw = re.sub(r"/\*.*?\*/", "", m.group(1)).strip()
+            if not raw or raw == "_":
+                continue
+            explicit_arms += 1
+            # Tuple arm semantic parsing for matrix axis-tuple set inclusion check
+            if raw.startswith("(") and raw.endswith(")"):
+                inner = raw[1:-1].strip()
+                components = tuple(c.strip() for c in inner.split(","))
+                arm_tuples.add(components)
+
+    # Parse matrix header row to identify axis columns
+    header_match = re.search(r"^\|\s*#\s*\|(.+)$", cm_section, re.MULTILINE)
+    axis_col_indices: list[int] = []
+    if header_match:
+        # header columns post `| # |` split
+        header_cols = [c.strip() for c in header_match.group(1).split("|")]
+        for idx, col in enumerate(header_cols):
+            if re.search(r"\bAxis\b", col):
+                axis_col_indices.append(idx)
+
+    if axis_col_indices:
+        # Semantic verify path: extract matrix axis-tuples and compare with arm tuples
+        matrix_axis_tuples: list[tuple[int, tuple[str, ...]]] = []
+        for row_match in re.finditer(
+            r"^\|\s*(\d+)\s*\|(.+)$", cm_section, re.MULTILINE
+        ):
+            cell_n = int(row_match.group(1))
+            cols = [c.strip() for c in row_match.group(2).split("|")]
+            if max(axis_col_indices) >= len(cols):
+                continue
+            axis_tuple = tuple(cols[i] for i in axis_col_indices)
+            matrix_axis_tuples.append((cell_n, axis_tuple))
+
+        fall_through_cells: list[tuple[int, tuple[str, ...]]] = []
+        for cell_n, axis_tuple in matrix_axis_tuples:
+            if axis_tuple not in arm_tuples:
+                fall_through_cells.append((cell_n, axis_tuple))
+
+        if has_wildcard and fall_through_cells:
+            details = ", ".join(
+                f"cell {n} (axis-tuple {t})" for n, t in fall_through_cells
+            )
+            violations.append(
+                f"{prd_path.name}: v4-1 violation: matrix cell(s) fall through "
+                f"to `_` arm (semantic axis-tuple ↔ arm pattern mismatch): "
+                f"{details}。explicit arms 必須 for spec→impl 1-to-1 verify"
+            )
+    else:
+        # Count-based fallback (= axis columns not identifiable in matrix header)
+        active_cells = len(re.findall(r"^\|\s*\d+\s*\|", cm_section, re.MULTILINE))
+        if (
+            has_wildcard
+            and active_cells > 0
+            and active_cells > explicit_arms
+        ):
+            violations.append(
+                f"{prd_path.name}: v4-1 violation: matrix has {active_cells} "
+                f"active cells but dispatch tree pseudocode covers only "
+                f"{explicit_arms} explicit match arms (+ `_` wildcard "
+                f"fallback)。{active_cells - explicit_arms} cells potentially "
+                f"fall through to `unreachable!()` (count-based fallback、axis "
+                f"columns 不在 header)、explicit arms 必須 for spec→impl 1-to-1 "
+                f"verify"
+            )
+    return violations
+
+
+def verify_dispatch_arm_mapping_table(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-6 (cell 9 / v4-3): Spec→Impl Dispatch Arm Mapping table 1-to-1 completeness
+    (framework v1.10、PRD I-D-main Implementation T1-6 で establish)。
+
+    `### Spec→Impl Dispatch Arm Mapping` sub-section 内 mapping table と
+    `### 組合せマトリクス` matrix table の cell # 1-to-1 correspondence を verify。
+    Mapping table 内 duplicate cell # (= 1-to-1 invariant 違反) + matrix cells が
+    mapping から missing (= dispatch 不在) を detect。
+
+    Verification logic:
+      1. `### Spec→Impl Dispatch Arm Mapping` heading 検索 (= 本 sub-section
+         がない PRD では trivially PASS = framework PRD typical 状態)
+      2. Mapping table cell # 列 extract (= `| <int> | ... |` rows)
+      3. Duplicate detection (= 1-to-1 invariant)
+      4. `### 組合せマトリクス` 内 matrix cells と cross-reference (= matrix
+         cells が全 mapping にあるか verify、MIGRATED rows は mapping 側 only
+         で legitimate exception)
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    mapping_match = re.search(
+        r"^###\s+Spec→Impl Dispatch Arm Mapping\b", content, re.MULTILINE
+    )
+    if not mapping_match:
+        return violations  # No mapping table = trivially PASS
+
+    section_start = mapping_match.end()
+    next_h = re.search(r"^(###|##)\s", content[section_start:], re.MULTILINE)
+    mapping_section = (
+        content[section_start : section_start + next_h.start()]
+        if next_h
+        else content[section_start:]
+    )
+
+    mapping_cell_strs = re.findall(
+        r"^\|\s*(\d+)\s*\|", mapping_section, re.MULTILINE
+    )
+    mapping_cells_list = [int(c) for c in mapping_cell_strs]
+    mapping_cells_set = set(mapping_cells_list)
+
+    # 1-to-1 invariant (duplicate detection)
+    if len(mapping_cells_list) != len(mapping_cells_set):
+        counter: dict[int, int] = {}
+        for c in mapping_cells_list:
+            counter[c] = counter.get(c, 0) + 1
+        dups = sorted(c for c, n in counter.items() if n > 1)
+        violations.append(
+            f"{prd_path.name}: v4-3 violation: Spec→Impl Mapping table has "
+            f"duplicate cell #(s) {dups}、1-to-1 invariant violated"
+        )
+
+    # Matrix cells cross-reference
+    ps_section = get_section(content, r"^##\s+Problem Space\s*$")
+    if ps_section is None:
+        return violations
+    cm_match = re.search(r"^###\s+組合せマトリクス\b", ps_section, re.MULTILINE)
+    if not cm_match:
+        return violations
+    cm_start = cm_match.end()
+    cm_next_h = re.search(r"^(###|##)\s", ps_section[cm_start:], re.MULTILINE)
+    cm_section = (
+        ps_section[cm_start : cm_start + cm_next_h.start()]
+        if cm_next_h
+        else ps_section[cm_start:]
+    )
+    matrix_cells = {
+        int(m.group(1))
+        for m in re.finditer(r"^\|\s*(\d+)\s*\|", cm_section, re.MULTILINE)
+    }
+
+    missing_in_mapping = sorted(matrix_cells - mapping_cells_set)
+    if missing_in_mapping:
+        violations.append(
+            f"{prd_path.name}: v4-3 violation: matrix cells {missing_in_mapping} "
+            f"absent from Spec→Impl Mapping table (1-to-1 mapping incomplete、"
+            f"dispatch 不在 cells)"
+        )
+    return violations
+
+
+def verify_pseudocode_underscore_arm_self_applied(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-8 (cell 12 / v6-1): PRD doc 内 Rust pseudocode の `_` arm self-applied
+    compliance check (framework v1.10、PRD I-D-main Implementation T1-8 で
+    establish)。
+
+    `## Design` section 内 ```rust pseudocode block の各 match arm を scan、
+    `_ =>` arm (= Rule 11 (11-1) `_` arm prohibition 違反) を syntactic detect。
+
+    Verification logic:
+      1. `## Design` section 抽出
+      2. ```rust pseudocode blocks 全 extract
+      3. 各 block line scan、`^_\\s*=>` pattern を violation report
+
+    Rule 11 (11-1) rationale:
+      Spec pseudocode が `_` arm を許容すると Implementation level の `_` arm
+      全廃 enforcement と乖離、framework rule self-applied integrity 失墜。
+      Spec wording 段階で `_` arm 不在を mandate することで Implementation
+      level dispatch arm exhaustiveness を structurally derive 可能化。
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    design_section = get_section(content, r"^##\s+Design\s*$")
+    if design_section is None:
+        return violations
+
+    rust_block_pattern = re.compile(r"```rust\s*\n(.*?)\n```", re.DOTALL)
+    underscore_arm_pattern = re.compile(r"^\s*_\s*=>")
+    for block_idx, block in enumerate(
+        rust_block_pattern.findall(design_section), start=1
+    ):
+        for line_idx, line in enumerate(block.splitlines(), start=1):
+            if underscore_arm_pattern.match(line):
+                stripped = line.strip()
+                violations.append(
+                    f"{prd_path.name}: v6-1 violation: Rule 11 (11-1) `_` arm "
+                    f"detected in `## Design` pseudocode block #{block_idx} "
+                    f"line {line_idx}: `{stripped}`。`_` arm 全廃 self-applied "
+                    f"compliance 違反"
+                )
+    return violations
+
+
+def verify_invariant_cell_coverage_double_partition(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-9 (cell 13 / v6-2 part): INV entries の `全 N cells/candidates` claim と
+    actual matrix active cells count の cross-reference consistency verify
+    (framework v1.10、PRD I-D-main Implementation T1-9 で establish)。
+
+    Existing `verify_invariants_test_contracts` の strengthening として、INV-N
+    body 内 "全 N cells" / "全 N candidates" / "全 N variants" claim を抽出、
+    `### 組合せマトリクス` matrix table の active cells count と一致するか
+    verify。
+
+    Verification logic:
+      1. `## Invariants` section 内 各 INV-N entry body を抽出
+      2. `全 N (cells|candidates|variants)` pattern match
+      3. matrix active cells count と diff、不一致で violation report
+
+    Single-partition / dual-partition both supported (= 各 INV entry 独立 verify、
+    library mode + executable mode の dual claim 両方が actual cells と一致する
+    場合は OK)。
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    section = get_section(content, r"^##\s+Invariants\b.*$")
+    if section is None:
+        return violations
+
+    ps_section = get_section(content, r"^##\s+Problem Space\s*$")
+    actual_cells = 0
+    if ps_section is not None:
+        cm_match = re.search(r"^###\s+組合せマトリクス\b", ps_section, re.MULTILINE)
+        if cm_match:
+            cm_start = cm_match.end()
+            cm_next_h = re.search(
+                r"^(###|##)\s", ps_section[cm_start:], re.MULTILINE
+            )
+            cm_section = (
+                ps_section[cm_start : cm_start + cm_next_h.start()]
+                if cm_next_h
+                else ps_section[cm_start:]
+            )
+            actual_cells = len(
+                re.findall(r"^\|\s*\d+\s*\|", cm_section, re.MULTILINE)
+            )
+    if actual_cells == 0:
+        return violations
+
+    inv_pattern = re.compile(
+        r"^###\s+INV-(\d+)\b"
+        r"(?P<body>(?:(?!^###\s+INV-\d+|^##\s+(?!#)).)*)",
+        re.MULTILINE | re.DOTALL,
+    )
+    claim_pattern = re.compile(
+        r"全\s*(\d+)\s*(?:cells|candidates|variants)"
+    )
+    for inv_m in inv_pattern.finditer(section):
+        inv_num = inv_m.group(1)
+        body = inv_m.group(0)
+        for claim_m in claim_pattern.finditer(body):
+            claimed = int(claim_m.group(1))
+            if claimed != actual_cells:
+                violations.append(
+                    f"{prd_path.name}: v6-2 violation: INV-{inv_num} claims "
+                    f"'全 {claimed}' but actual matrix has {actual_cells} "
+                    f"active cells (cross-reference inconsistency)"
+                )
+    return violations
+
+
+def verify_pending_verdict_severity_default(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-11 (cell 20 / v11-8): Pending verdict severity default = Critical
+    declaration check (framework v1.10、PRD I-D-main Implementation T1-11 で
+    establish)。
+
+    Spec Review Iteration Log の各 Iteration entry で `Pending verdict N`
+    (N > 0) wording がある場合、severity default = Critical declaration が
+    body 内に存在することを syntactic verify。
+
+    Verification logic:
+      1. `## Spec Review Iteration Log` section 抽出
+      2. 各 `### Iteration v<num>` entry body 抽出
+      3. `Pending verdict <N>` / `Pending <N>` wording 検索 (N > 0)
+      4. body 内 `severity (default)? = Critical` / `Critical default`
+         declaration 検索
+      5. declaration 不在で violation report (= Rule 13 (v11-8) violation)
+
+    Rationale:
+      Pending verdict は Spec stage 移行 block する severity = Critical default
+      適用が Rule 13 (v11-8) で確立。declaration 不在 = severity default 適用
+      不在 = pending verdict が implicit に Medium/Low severity と誤分類される
+      risk、Critical default 明示で structural enforcement。
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    section = get_section(content, r"^##\s+Spec Review Iteration Log\b.*$")
+    if section is None:
+        return violations
+
+    iter_pattern = re.compile(
+        r"^###\s+Iteration v(\d+)\b"
+        r"(?P<body>(?:(?!^###\s+Iteration v\d+|^##\s+(?!#)).)*)",
+        re.MULTILINE | re.DOTALL,
+    )
+    severity_decl_pattern = re.compile(
+        r"severity\s+default\s*=?\s*Critical|severity\s+Critical\s+default|Critical\s+default",
+        re.IGNORECASE,
+    )
+    pv_pattern = re.compile(
+        r"Pending\s+verdict\s+(\d+)|(?<!Critical\s)Pending\s+(\d+)"
+    )
+
+    for m in iter_pattern.finditer(section):
+        iter_num = m.group(1)
+        body = m.group(0)
+        for pv_m in pv_pattern.finditer(body):
+            pv_count = int(pv_m.group(1) or pv_m.group(2) or 0)
+            if pv_count > 0 and not severity_decl_pattern.search(body):
+                violations.append(
+                    f"{prd_path.name}: v11-8 violation: Iteration v{iter_num} "
+                    f"has 'Pending verdict {pv_count}' but lacks 'severity "
+                    f"default = Critical' declaration (Rule 13 sub-rule "
+                    f"violation、Spec stage 移行 block default 適用必須)"
+                )
+                break  # 1 violation per iteration 十分
+    return violations
+
+
+def verify_completion_criteria_probe_pattern(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-12 (cell 26 / v13-1 audit part): Completion Criteria に empirical probe
+    pattern (= cargo / python3 / audit function / file path reference) 存在
+    verify (framework v1.10、PRD I-D-main Implementation T1-12 で establish)。
+
+    `## Completion Criteria` section の各 numbered criterion (`1. **Title**: ...`)
+    body 内に empirical probe signature が存在することを syntactic verify。
+    probe signature 不在 = manual cross-check 依存 = structural enforcement
+    不在 = violation。
+
+    Probe signatures (= structural enforcement evidence):
+      - `cargo (test|clippy|fmt)` invocation
+      - `python3 scripts/...` invocation
+      - `./scripts/...` shell script invocation
+      - `.github/workflows/` CI reference
+      - `grep` / `verify_<name>` audit function reference
+      - File path reference (`<path>.{py,sh,toml,md,yml}`)
+      - `exit code 0` / numeric exit code probe
+
+    Rationale:
+      Completion criterion が "manual review" / "developer 確認" wording のみで
+      probe command 不在の場合、completion verify が developer 主観依存 →
+      structural enforcement 不在。各 criterion に CLI command / file path /
+      audit function reference 形式で probe pattern を embed することで
+      mechanical verification を constructional に保証。
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    section = get_section(content, r"^##\s+Completion Criteria\b.*$")
+    if section is None:
+        return violations
+
+    # Limit scope to numbered criteria block (= `1.` 〜 next `###` heading or
+    # section end)
+    body_until_subheading = re.split(r"^###\s", section, maxsplit=1, flags=re.MULTILINE)[
+        0
+    ]
+
+    criterion_pattern = re.compile(
+        r"^(\d+)\.\s+\*\*([^*]+)\*\*:\s*(.+?)(?=^\d+\.\s\*\*|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+
+    probe_signatures = [
+        r"cargo\s+test",
+        r"cargo\s+clippy",
+        r"cargo\s+fmt",
+        r"python3\s+scripts/",
+        r"\./scripts/",
+        r"\.github/workflows/",
+        r"\bgrep\b",
+        r"verify_\w+",
+        r"`[^`]*\.(?:py|sh|toml|md|yml)`",
+        r"exit\s+code\s+\d+",
+    ]
+    probe_regex = re.compile("|".join(probe_signatures), re.IGNORECASE)
+
+    for m in criterion_pattern.finditer(body_until_subheading):
+        crit_num = m.group(1)
+        crit_title = m.group(2).strip()
+        crit_body = m.group(3)
+        if not probe_regex.search(crit_body):
+            violations.append(
+                f"{prd_path.name}: v13-1 violation: Completion Criterion "
+                f"{crit_num} ('{crit_title[:50]}...') lacks empirical probe "
+                f"pattern (= cargo / python3 / audit function reference / "
+                f"file path)。manual cross-check 依存、structural enforcement "
+                f"不在"
+            )
+    return violations
+
+
+def verify_fixture_oracle_byte_consistency(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-14 (cell 29 / v13-6 audit part): Oracle Observations 内 TS fixture path
+    の file existence + byte-level consistency verify (framework v1.10、PRD
+    I-D-main Implementation T1-14 で establish)。
+
+    `## Oracle Observations` section 内 `tests/...\\.(ts|tsx)` path references
+    を抽出、各 path file 存在を verify。実 file 不在 = Oracle re-grounding gap
+    = violation report (= `spec-first-prd.md` 「Spec への逆戻り」 procedure
+    step 5-a 適用 required)。
+
+    Future enhancement: 近接 ```typescript fenced code block の embedded content
+    と file content byte-level compare (= 現実装 = path existence のみ verify、
+    content divergence は future audit extension で coordinated implement)。
+
+    Repo root resolution = `BACKLOG_DIR.parent` (= `BACKLOG_DIR` is `backlog/`,
+    parent = repo root)。`tests/...` paths are relative to repo root.
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    section = get_section(content, r"^##\s+Oracle Observations\b.*$")
+    if section is None:
+        return violations
+
+    repo_root = BACKLOG_DIR.parent
+    fixture_path_pattern = re.compile(r"`(tests/[\w/.\-]+\.(?:ts|tsx))`")
+    seen_paths: set[str] = set()
+    for m in fixture_path_pattern.finditer(section):
+        rel_path = m.group(1)
+        if rel_path in seen_paths:
+            continue  # Same path mentioned multiple times、1 violation per path
+        seen_paths.add(rel_path)
+        abs_path = repo_root / rel_path
+        if not abs_path.exists():
+            violations.append(
+                f"{prd_path.name}: v13-6 violation: Oracle Observations "
+                f"references `{rel_path}` but file does not exist。Oracle "
+                f"re-grounding gap (= `spec-first-prd.md` 「Spec への逆戻り」 "
+                f"procedure step 5-a mandatory: fixture content 変更時 Oracle "
+                f"Observations section 更新必須)"
+            )
+    return violations
+
+
+def verify_cartesian_product_completeness(
+    prd_path: Path, content: str
+) -> list[str]:
+    """T1-1 (cell 1 / R-1): Cartesian product completeness audit (framework v1.10、
+    PRD I-D-main Implementation T1-1 で establish)。
+
+    yaml `## Rule 10 Application` block 内の optional `Cartesian product completeness:`
+    mapping field (= `Expected cell count:` int + `Documented gaps:` list[int]) を
+    canonical source として、Problem Space matrix table の actual cell # 集合との
+    integrity を verify。implicit omission (= expected_active から absent) + range
+    overflow (= expected_total を超える cell # 出現) を detect。
+
+    Optional field design rationale: 既存 PRDs (= I-050 legacy / I-205 retroactive
+    cell numbering pending) は本 field 不在で audit out-of-scope に自動分類、INV-4
+    3-tuple post-close baseline preserve。本 field 宣言は self-applied integration
+    evidence として I-D-main / 後続 PRDs で adopt。
+
+    Verification logic:
+      1. Rule 10 yaml dict から `Cartesian product completeness:` 取得
+      2. expected_total = `Expected cell count` (positive int)
+      3. documented_gaps_set = `Documented gaps` (list[int]) を set 化
+      4. expected_active = {1..expected_total} - documented_gaps_set
+      5. Problem Space section matrix table から actual cell # 集合 (= 1..expected_total
+         範囲内) を抽出
+      6. implicit_omitted = expected_active - actual = violation if non-empty
+      7. extra_cells = {n in actual where n > expected_total} = violation if non-empty
+    """
+    violations: list[str] = []
+    if not has_cell_numbering_convention_section(content):
+        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+    data, _err = parse_rule10_section(content)
+    if data is None:
+        return violations  # Rule 10 section 不在は別 audit で detect
+
+    cp = data.get("Cartesian product completeness")
+    if cp is None:
+        return violations  # Optional field: 不在で skip (backward compatible)
+
+    if not isinstance(cp, dict):
+        violations.append(
+            f"{prd_path.name}: Cartesian product completeness violation: "
+            f"`Cartesian product completeness` must be a yaml mapping, "
+            f"got {type(cp).__name__}"
+        )
+        return violations
+
+    expected_total = cp.get("Expected cell count")
+    if not isinstance(expected_total, int) or expected_total < 1:
+        violations.append(
+            f"{prd_path.name}: Cartesian product completeness violation: "
+            f"`Expected cell count` must be a positive integer, "
+            f"got {expected_total!r}"
+        )
+        return violations
+
+    documented_gaps = cp.get("Documented gaps", [])
+    if not isinstance(documented_gaps, list) or not all(
+        isinstance(g, int) for g in documented_gaps
+    ):
+        violations.append(
+            f"{prd_path.name}: Cartesian product completeness violation: "
+            f"`Documented gaps` must be a list of integers, "
+            f"got {documented_gaps!r}"
+        )
+        return violations
+
+    documented_gaps_set = set(documented_gaps)
+    expected_active = set(range(1, expected_total + 1)) - documented_gaps_set
+
+    ps_section = get_section(content, r"^##\s+Problem Space\s*$")
+    if ps_section is None:
+        violations.append(
+            f"{prd_path.name}: Cartesian product completeness violation: "
+            f"`## Problem Space` section missing for matrix table parsing"
+        )
+        return violations
+
+    # Matrix table の最初 column (= cell #) を抽出。Header row (`| # | ... |`) と
+    # separator (`|---| ... |`) は数値 column ではないため自動除外。
+    actual_cells: set[int] = set()
+    for m in re.finditer(r"^\|\s*(\d+)\s*\|", ps_section, re.MULTILINE):
+        n = int(m.group(1))
+        if 1 <= n <= expected_total:
+            actual_cells.add(n)
+
+    implicit_omitted = sorted(expected_active - actual_cells)
+    if implicit_omitted:
+        violations.append(
+            f"{prd_path.name}: Cartesian product completeness violation: "
+            f"implicit omission detected, cells {implicit_omitted} expected "
+            f"(Expected cell count={expected_total}, "
+            f"Documented gaps={sorted(documented_gaps_set)}) "
+            f"but absent from matrix table"
+        )
+
+    # Range overflow detection (= matrix に Expected cell count 超過 cell # が出現)
+    # `actual_cells` は既に 1..expected_total 範囲で filter 済のため、別途 raw scan
+    raw_cells: set[int] = set()
+    for m in re.finditer(r"^\|\s*(\d+)\s*\|", ps_section, re.MULTILINE):
+        raw_cells.add(int(m.group(1)))
+    overflow_cells = sorted(c for c in raw_cells if c > expected_total)
+    if overflow_cells:
+        violations.append(
+            f"{prd_path.name}: Cartesian product completeness violation: "
+            f"unexpected cells {overflow_cells} in matrix table beyond "
+            f"Expected cell count={expected_total}"
+        )
+
+    return violations
+
+
 def verify_invariants_test_contracts(prd_path: Path, content: str) -> list[str]:
     """Rule 8 (8-c) Invariants verification test contracts audit auto-verify
     (framework v1.6、F-deep-deep-2 fix)。
@@ -971,6 +1714,41 @@ def audit_prd(prd_path: Path) -> list[str]:
         violations.extend(verify_rule11_d6_relevance_compliance(prd_path, content))
         violations.extend(verify_invariants_test_contracts(prd_path, content))
         violations.extend(verify_rule13_spec_review_iteration_log(prd_path, content))
+        # PRD I-D-main T1-1 (cell 1 / R-1): Cartesian product completeness audit
+        # Optional field、未宣言 PRD は skip (= existing PRDs backward compatible)
+        violations.extend(verify_cartesian_product_completeness(prd_path, content))
+        # PRD I-D-main T1-2 (cell 4 / v3-4): Duplicate top-level matrix detection
+        violations.extend(verify_no_duplicate_top_level_matrix(prd_path, content))
+        # PRD I-D-main T1-3 (cell 5 / v3-5): Dispatch tree pseudocode syntactic validation
+        violations.extend(
+            verify_dispatch_tree_pseudocode_syntactic(prd_path, content)
+        )
+        # PRD I-D-main T1-5 (cell 7 / v4-1): Dispatch tree axis-tuple consistency
+        violations.extend(
+            verify_dispatch_tree_axis_tuple_consistency(prd_path, content)
+        )
+        # PRD I-D-main T1-6 (cell 9 / v4-3): Spec→Impl Mapping table 1-to-1 completeness
+        violations.extend(verify_dispatch_arm_mapping_table(prd_path, content))
+        # PRD I-D-main T1-8 (cell 12 / v6-1): Pseudocode `_` arm self-applied compliance
+        violations.extend(
+            verify_pseudocode_underscore_arm_self_applied(prd_path, content)
+        )
+        # PRD I-D-main T1-9 (cell 13 / v6-2 part): INV cell coverage double-partition
+        violations.extend(
+            verify_invariant_cell_coverage_double_partition(prd_path, content)
+        )
+        # PRD I-D-main T1-11 (cell 20 / v11-8): Pending verdict severity default check
+        violations.extend(
+            verify_pending_verdict_severity_default(prd_path, content)
+        )
+        # PRD I-D-main T1-12 (cell 26 / v13-1 audit part): Completion Criteria probe pattern
+        violations.extend(
+            verify_completion_criteria_probe_pattern(prd_path, content)
+        )
+        # PRD I-D-main T1-14 (cell 29 / v13-6 audit part): Oracle fixture byte consistency
+        violations.extend(
+            verify_fixture_oracle_byte_consistency(prd_path, content)
+        )
         # PRD I-D-pre Phase 3 audit script extensions (T1-pre-1 + T1-pre-2 + T1-pre-4)
         # Option α auto-detect で I-205 等 retroactive compliance 未達 PRD を early-return
         violations.extend(verify_pending_verdict_findings_consistency(prd_path, content))

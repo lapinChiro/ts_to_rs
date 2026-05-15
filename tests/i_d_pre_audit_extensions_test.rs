@@ -15,61 +15,13 @@
 //! 各 test fn name は backlog/I-D-pre-audit-mechanism-bootstrap.md
 //! `## Spec→Impl Dispatch Arm Mapping` table の Test contract path と 1-to-1 sync。
 
-use std::process::Command;
+//! Test helpers (`run_audit`, `count_violations_for_task_id`, `path_e_total_drifts`)
+//! は `tests/common/mod.rs` で共有 (= /check_job T1 phase review Action Item #5
+//! DRY refactor 由来、i_d_pre + i_d_main test files で 同一 helpers を leverage)。
 
-/// Helper: run audit-prd-rule10-compliance.py on a fixture path, return (exit_code, stderr).
-fn run_audit(fixture: &str) -> (i32, String) {
-    let output = Command::new("python3")
-        .arg("scripts/audit-prd-rule10-compliance.py")
-        .arg(fixture)
-        .output()
-        .unwrap_or_else(|e| {
-            panic!(
-                "python3 audit-prd-rule10-compliance.py failed for {}: {}",
-                fixture, e
-            )
-        });
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let exit = output.status.code().expect("exit code present");
-    (exit, stderr)
-}
-
-/// Helper: count audit violations for a specific T1-pre task ID in stderr.
-fn count_violations(stderr: &str, t_id: &str) -> usize {
-    let pattern = format!("{} violation", t_id);
-    stderr.matches(&pattern).count()
-}
-
-/// Helper: run Path E utility on a fixture, return total drift count from stdout.
-/// Used for dual-verify tests confirming fixture violation pattern presence.
-fn path_e_total_drifts(fixture: &str) -> usize {
-    let output = Command::new("python3")
-        .arg("scripts/verify_prd_self_audits.py")
-        .arg(fixture)
-        .output()
-        .unwrap_or_else(|e| {
-            panic!(
-                "python3 verify_prd_self_audits.py failed for {}: {}",
-                fixture, e
-            )
-        });
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    // Parse line: "Total drifts (...): N"
-    for line in stdout.lines() {
-        if let Some(rest) = line.strip_prefix("Total drifts") {
-            // Extract trailing integer after final ":"
-            if let Some(n_str) = rest.rsplit(':').next() {
-                if let Ok(n) = n_str.trim().parse::<usize>() {
-                    return n;
-                }
-            }
-        }
-    }
-    panic!(
-        "could not parse 'Total drifts' line from Path E stdout:\n{}",
-        stdout
-    )
-}
+#[path = "common/mod.rs"]
+mod common;
+use common::{count_violations_for_task_id as count_violations, path_e_total_drifts, run_audit};
 
 /// Dual verify (Option α skip correctness empirical proof): `audit_out_of_scope_skip`
 /// fixture が "3 violation patterns 含む" claim を **Path E utility 経由で direct verify**。

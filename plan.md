@@ -9,36 +9,36 @@
 
 ---
 
-## 現在の状態 (2026-05-15、**PRD I-D-main Spec stage CONVERGED + framework v1.9 Path E Axes 5/6/7 cohesive batch 完成 + bootstrap utility correctness ceiling 4-step structural absorption fully validated、Implementation stage 着手 ready**)
+## 現在の状態 (2026-05-15、**PRD I-D-main Implementation stage T1 phase 完了 + /check_job Round 1+2 review 反復で 12 Action Items 処理 (= 9 即時 fix + 3 deferred = T7 task scope coordinate / TODO C3 既存 entry)、T2 phase rule wording strengthening 13 sub-tasks 着手 ready**)
 
-**進行中**: なし (案 γ Phase 0 = PRD I-D-main spec stage CONVERGED 完了)。**次着手** = 案 γ Phase 0 = **PRD I-D-main Implementation stage 着手** (= 24 active cells の structural lock-in + lock-in test fill in + CI integration、Hybrid 4-条件 final rule satisfy 達成済)。
+**進行中**: PRD I-D-main Implementation stage (= 案 γ Phase 0 残 work)、T1 phase (audit script extensions) 完了済、T2 phase (rule wording strengthening、13 sub-tasks) 着手 ready。**次着手** = T2-1〜T2-15 (T2-9/T2-14 = I-D-pre migration excluded) = `.claude/rules/spec-stage-adversarial-checklist.md` + `.claude/rules/check-job-review-layers.md` 8 rules sub-rule 拡張 + 各 sub-task に対応 grep-based test。
 
-**最新の完了** (2026-05-15、本 session): **PRD I-D-main Spec stage 7 rounds 連続 third-party adversarial review chain で CONVERGED 達成 + framework v1.9 Path E Axes 5/6/7 cohesive batch 実装 + bootstrap utility correctness ceiling 4-step structural absorption fully validated + /check_job 4-layer Round 1+2 + /check_problem in-session-fix 完了 (= L1-1 Axes 5/6/7 functional regression tests + 6 synthetic fixtures + axis6_loc_reference + L1-6 TODO C8 IMPLEMENTED sync + C9 framework v2.0 candidate + C10 reduced library API stability 起票 + L1-7 F4 over-claim wording correction + L1-8 Axis 5 test assertion tighten + L1-9 metadata test markers framework v1.9 拡張 + L1-3 LAYER_DECLARATION/PAIRING regex `(\d)` → `(\d+)` multi-digit Layer 番号 future-proof) + Round 2 /check_problem investigation で新発見 = Path E `expand_cell_list` Pattern 2/4 hardcoded `<= 30` filter bug (= I-205 cells 31-81 silently skipped、I-D-pre Cell 2 v5-1 audit function 実装時 latent limit、Pattern 1/3 `<= 999` と consistency violation) を TODO `[I-D-future-audit-extensions-hardening]` C11 として詳細起票 = **案 γ Phase 2 (I-205 T14-T16) 着手前 fix 必要 = highest priority active TODO item**、user directive 「妥協絶対不可」satisfy 達成** = 本日 5 phases (= Iteration v19→v20→v21→v22→v23→v24→v25) で **strict monotone -100% cumulative finding reduction (v19:12 → v21:7 → v23:3 → v25:0)** + **C-1 (Critical=0) history first time PASS + C-2 (High=0) history first time PASS + C-3 trajectory diminishing PASS + C-4 Meta ratio PASS = Hybrid 4-条件 final rule 全 PASS = CONVERGED**。**framework v1.9 Path E Axes 5/6/7 (= wording staleness detection structural prevention)** = (Axis 5: matrix count claim consistency / Axis 6: baseline LOC claim cross-section consistency / Axis 7: cross-cutting Layer symmetry) を `scripts/verify_prd_self_audits.py` (645→1083 lines、+438 lines) に embed、9-round 連続 "cross-cutting wording staleness" class structural absorption + bootstrap utility correctness ceiling 4-step layered defense (= Method A line refs → Path E Axes 1-4 → Path E Axes 5-7 → third-party adversarial review complementary mechanism) fully validated。Spec stage close ready、Implementation stage T1-T8 着手 ready (= 24 active cells × structural lock-in + lock-in test fill in + CI integration)。詳細 = `backlog/I-D-main-framework-rule-integration-cohesive-batch.md` `## Spec Review Iteration Log` v19-v25 entries (= PRD 1750 lines、framework v1.9 + bootstrap step 4 empirical proof embedded)。
+**最新の完了** (2026-05-15、本 session): **PRD I-D-main Implementation stage T1 phase 完了 + /check_job Round 1+2 review 反復で 12 Action Items 処理 (= 9 即時 fix + 3 deferred = T7 task scope coordinate / TODO C3 既存 entry)** = (a) T1-1〜T1-14 = 10 NEW verify functions in `scripts/audit-prd-rule10-compliance.py` (1033 → 1802 行 / 16 → 26 verify_* functions、cumulative +769 行) + (b) Option α auto-detect gate (`has_cell_numbering_convention_section()` early-return) 全 10 functions に適用で I-205 等 retroactive compliance pending PRDs を audit out-of-scope 自動分類、INV-4 3-tuple baseline preserve (I-050 FAIL preserve / I-205 PASS / I-D-main PASS) + (c) `tests/i_d_main_audit_extensions_test.rs` 新規 28 tests (= 10 positive + 10 boundary/specific via cartesian_complete.md shared fixture + 7 specific PASS path via distinct fixtures + 1 Option α gate direct test = 3 directions of coverage achievement) + (d) `tests/common/mod.rs` 新規 DRY refactor (= shared helpers run_audit / count_violations_containing / count_violations_for_task_id / path_e_total_drifts、i_d_main + i_d_pre test files で leverage) + (e) `tests/fixtures/i_d_main/` 新規 10 positive + 8 negative fixtures + README + (f) T1-5 verify_dispatch_tree_axis_tuple_consistency を count-based → axis-tuple semantic verify upgrade (Matrix Axis columns identify → set inclusion check、count-based fallback も保持) + (g) 既存 i_d_pre fixtures probe pattern embed (= T1-12 v13-1 false positive 解消)。empirical state: cargo test 全 PASS (i_d_main 28 + i_d_pre 6 + 全 integration/lib) / clippy 0 warnings / fmt 0 diffs / Path E 7 axes 0 drifts / Handoff audit 0 drifts。**Spec stage v25 CONVERGED + framework v1.9 完成 = pre-Implementation state**: PRD I-D-main Spec stage 7 rounds 連続 third-party adversarial review chain で CONVERGED 達成 + framework v1.9 Path E Axes 5/6/7 cohesive batch 実装 + bootstrap utility correctness ceiling 4-step structural absorption fully validated + /check_job 4-layer Round 1+2 + /check_problem in-session-fix 完了 (= L1-1 Axes 5/6/7 functional regression tests + 6 synthetic fixtures + axis6_loc_reference + L1-6 TODO C8 IMPLEMENTED sync + C9 framework v2.0 candidate + C10 reduced library API stability 起票 + L1-7 F4 over-claim wording correction + L1-8 Axis 5 test assertion tighten + L1-9 metadata test markers framework v1.9 拡張 + L1-3 LAYER_DECLARATION/PAIRING regex `(\d)` → `(\d+)` multi-digit Layer 番号 future-proof) + Round 2 /check_problem investigation で新発見 = Path E `expand_cell_list` Pattern 2/4 hardcoded `<= 30` filter bug (= I-205 cells 31-81 silently skipped、I-D-pre Cell 2 v5-1 audit function 実装時 latent limit、Pattern 1/3 `<= 999` と consistency violation) を TODO `[I-D-future-audit-extensions-hardening]` C11 として詳細起票 = **案 γ Phase 2 (I-205 T14-T16) 着手前 fix 必要 = highest priority active TODO item**、user directive 「妥協絶対不可」satisfy 達成** = 本日 5 phases (= Iteration v19→v20→v21→v22→v23→v24→v25) で **strict monotone -100% cumulative finding reduction (v19:12 → v21:7 → v23:3 → v25:0)** + **C-1 (Critical=0) history first time PASS + C-2 (High=0) history first time PASS + C-3 trajectory diminishing PASS + C-4 Meta ratio PASS = Hybrid 4-条件 final rule 全 PASS = CONVERGED**。**framework v1.9 Path E Axes 5/6/7 (= wording staleness detection structural prevention)** = (Axis 5: matrix count claim consistency / Axis 6: baseline LOC claim cross-section consistency / Axis 7: cross-cutting Layer symmetry) を `scripts/verify_prd_self_audits.py` (645→1083 lines、+438 lines) に embed、9-round 連続 "cross-cutting wording staleness" class structural absorption + bootstrap utility correctness ceiling 4-step layered defense (= Method A line refs → Path E Axes 1-4 → Path E Axes 5-7 → third-party adversarial review complementary mechanism) fully validated。Spec stage close ready、Implementation stage T1-T8 着手 ready (= 24 active cells × structural lock-in + lock-in test fill in + CI integration)。詳細 = `backlog/I-D-main-framework-rule-integration-cohesive-batch.md` `## Spec Review Iteration Log` v19-v25 entries (= PRD 1750 lines、framework v1.9 + bootstrap step 4 empirical proof embedded)。
 
 **前回完了** (2026-05-15、本 session 開始時): **post Rules 改善 batch coordinate sync drift 解消 + procedure gap structural fix 完了 + /check_job 4-layer review F1 + F2 + sister skill symmetry fix 同時 bundle** = (a) I-D-main PRD doc 6 rule files (spec-stage-adversarial-checklist / spec-first-prd / check-job-review-layers / prd-completion / problem-space-analysis / post-implementation-defect-classification) の 2026-05-12 Rules 改善 batch 由来 byte/mtime/rationale drift sync + audit-handoff-doc-line-refs.py NOT EXISTS claim を I-D-pre Cell 3 完了 post-state に sync (= 9773 bytes / 260 lines)、(b) `pre-commit-doc-sync.md` Constraint 3 拡張 = `.claude/rules/*.md` / `.claude/skills/*/SKILL.md` / `.claude/commands/*.md` / `scripts/*.py` modification 後の active backlog/ PRD doc empirical anchor sync mandatory 5-step procedure embed、(c) sister skills (/rule-maintenance + /skill-writing + /command-writing) symmetry 達成 + Path E re-run procedure step 追加、(d) /check_job + /check_problem review で TODO C7 (Path E CI integration) + C8 (Path E Axis 5/6/7 NEW deferred) 起票。詳細 = § 直近の完了作業。
 
 **前々回完了** (2026-05-12): **Rules 徹底レビュー + 改善 batch 完了** = `rule_review_list.md` (8 group / 24 観点) を `.claude/rules/*.md` 全 file + cross-system files (`CLAUDE.md` / `commands/*.md` / `skills/*/SKILL.md` / `plan.md`) に適用。Cross-cutting violation matrix を構築、cross-system inter-file relationship verify。詳細 = § 直近の完了作業。それ以前の完了作業 (= 2026-05-11 PRD I-D-pre close 等) は § 直近の完了作業 table 参照。
 
-**次着手** = **(a) PRD I-D-main Implementation stage 着手** (= Spec stage v25 CONVERGED 達成済、Hybrid 4-条件 全 PASS、T1-T8 implementation = 24 active cells × structural lock-in + lock-in test fill in + CI integration、Implementation 完了時 `/check_job` 4-layer review 適用)、または **(b) 案 γ Phase 1.5 = TODO C11 fix 直接着手** (= Path E `expand_cell_list` Pattern 2/4 hardcoded `<= 30` filter bug、I-205 T14-T16 prerequisite、highest priority active TODO item)。両 option どちらでも開始可、user judgment for I-D-main Implementation stage immediate vs C11 preempt。
+**次着手** = **PRD I-D-main Implementation stage T2 phase = rule wording strengthening 13 sub-tasks** (= T2-1/T2-2/T2-3/T2-4/T2-5/T2-6/T2-7/T2-8/T2-10/T2-11/T2-12/T2-13/T2-15、T2-9 + T2-14 = I-D-pre migration excluded、`.claude/rules/spec-stage-adversarial-checklist.md` Rule 5/6/8/9/10/13 sub-rule 拡張 + `.claude/rules/check-job-review-layers.md` Layer 3/4 sub-rule 拡張 = 6 + 2 = 8 rules 改修、各 sub-task に対応 grep-based test in `tests/i_d_main_rule_wording_test.rs`)。T2 phase 完了後 T3 (procedure step additions 5 sub-tasks) → T4 (skill workflow 1) → T5 (command workflow 2) → T6 (INV-4 baseline maintenance) → T7 (self-applied integration final verify) → T8 (PRD close)。
 
 **開発順序**: 案 γ (= **[完了] I-D-pre → I-D-main → I-225 → I-162 → I-205 T14-T16**、Path B split で I-D を 2 PRD serial sequence に展開、I-D-pre 完了で bootstrap utility 完成 base 確立)。詳細 = 下記「実行順序」section。
 
 ---
 
-## /start 再開時の手順 (= PRD I-D-main Implementation stage 着手 ready、Spec stage v25 CONVERGED 達成済)
+## /start 再開時の手順 (= PRD I-D-main Implementation stage T1 phase 完了、T2 phase rule wording strengthening 着手 ready)
 
-### Step 1: Empirical sanity check (= post v25 CONVERGED + framework v1.9 + /check_job Round 1+2 + /check_problem fix state preservation verify)
+### Step 1: Empirical sanity check (= post T1 phase + /check_job Round 1+2 + /check_problem G-1 fix state preservation verify)
 
 ```bash
-# 1. INV-4 post-close baseline (3-tuple、I-D-pre は close で audit out-of-scope)
+# 1. INV-4 3-tuple baseline (I-050 FAIL preserve / I-205 PASS / I-D-main PASS)
 for prd in backlog/I-050-any-coercion-umbrella.md backlog/I-205-getter-setter-dispatch-framework.md backlog/I-D-main-framework-rule-integration-cohesive-batch.md; do
     python3 scripts/audit-prd-rule10-compliance.py "$prd" 2>&1 | head -1
 done
 # Expected: I-050 FAIL (preserve baseline) / I-205 PASS / I-D-main PASS
 
-# 2. Path E 0 drifts (strict byte-exact mode)
+# 2. Path E 0 drifts (strict byte-exact mode、7 axes 全 PASS)
 python3 scripts/verify_prd_self_audits.py backlog/I-D-main-framework-rule-integration-cohesive-batch.md
-# Expected: Total drifts: 0
+# Expected: Total drifts: 0 / 全 7 axes 0 drifts
 
 # 3. Handoff audit 0 drifts
 python3 scripts/audit-handoff-doc-line-refs.py doc/handoff/
@@ -48,49 +48,53 @@ python3 scripts/audit-handoff-doc-line-refs.py doc/handoff/
 cargo test --tests --no-fail-fast 2>&1 | grep "test result" | tail -5
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --all --check
-# Expected: tests/i_d_pre_path_e_test 11 passed / 0 ignored (= Axes 1-7 functional regression tests post-CONVERGED state)
+./scripts/check-file-lines.sh
+# Expected: i_d_main_audit_extensions_test 29 passed / i_d_pre_audit_extensions_test 6 passed
+#           + 全 integration/lib/e2e 0 failed (e2e 201 active + 80 ignored = pre-existing state)
+#           + clippy 0 warnings / fmt 0 diffs / file-line check OK
 ```
 
-### Step 2: Primary references for next action (= Implementation stage T1-T8 着手 or C11 fix preempt)
+### Step 2: Primary references for next action (= T2 phase rule wording strengthening 着手 or C11 fix preempt)
 
-1. **[`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md)** = 24 active cells PRD doc (~1760 行)、**Spec stage Iteration v25 CONVERGED** state、`## Spec Review Iteration Log` 末尾 = Iteration v25 entry (= post v24 fix での 0 findings 達成 + Hybrid 4-条件 final rule 全 PASS + bootstrap utility correctness ceiling 4-step structural absorption fully validated)。Implementation Stage Tasks T1-T8 着手 ready
-2. **[`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)** `## I-D-pre: Audit mechanism bootstrap` section = bootstrap utility formal lock-in 完成 + framework v1.8 self-applied integration evidence + Path B split rationale empirical proof
-3. **[`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)** `## I-224: ...` section = 12 度 v12-2 pattern recurrence chain evidence + 9 framework 改善 candidates table
-4. **TODO entries (= 本 session 最新化、C8 IMPLEMENTED + C9/C10 reduced/C11 NEW 追加 reflected)**:
-   - `[I-D-main]` = 24 active cells + iteration v1-v25 history + Spec stage CONVERGED state
-   - `[I-D-future-vocab-fork]` = broader vocabulary fork detection deferred (L4 latent、I-D-pre Cell 5 scope 分離由来)
-   - **`[I-D-future-audit-extensions-hardening]` C11 (NEW、案 γ Phase 1.5 active priority = highest priority active TODO item)** = Path E `expand_cell_list` Pattern 2/4 hardcoded `<= 30` filter bug fix (= I-205 T14-T16 prerequisite)
-   - `[I-D-future-audit-extensions-hardening]` 残 candidates (C1-C7 + C9 + C10 reduced R4) = L4 latent (= C8 IMPLEMENTED via I-D-main v20 cohesive batch、C10 R1+R2+R3 done via L1-1 in-session-fix)
+1. **[`backlog/I-D-main-framework-rule-integration-cohesive-batch.md`](backlog/I-D-main-framework-rule-integration-cohesive-batch.md)** = 24 active cells PRD doc、**Spec stage v25 CONVERGED 達成済 + Implementation stage T1 phase 完了状態**。`## Implementation Stage Tasks` section T2-T8 = 残 sub-tasks。T1 phase 内容 = 10 NEW verify functions in `scripts/audit-prd-rule10-compliance.py` (1033 → 1811 行、16 → 26 verify_*) + Option α auto-detect gate 全 functions 適用 + T1-5 semantic verify upgrade + count-based fallback path coverage
+2. **`tests/i_d_main_audit_extensions_test.rs`** = T1 phase test infrastructure (735 行 / 29 tests = 10 positive + 10 boundary/specific via cartesian_complete.md shared + 7 specific PASS via distinct fixtures + 1 count-based fallback + 1 Option α gate)。後続 T2 phase は `tests/i_d_main_rule_wording_test.rs` に grep-based assertion を新規 author
+3. **`tests/common/mod.rs`** = T1 phase 由来 DRY shared helpers (= run_audit / count_violations_containing / count_violations_for_task_id / path_e_total_drifts)、後続 test files で leverage 推奨
+4. **`tests/fixtures/i_d_main/README.md`** = T1 phase Fixture inventory + Test coverage matrix
+5. **[`doc/handoff/design-decisions.md`](doc/handoff/design-decisions.md)** `## I-D-pre: Audit mechanism bootstrap` section + `## I-224: ...` section
+6. **TODO entries (= 本 session 最新化、C12 + C13 NEW 追加 reflected)**:
+   - `[I-D-main]` = 24 active cells、Spec stage CONVERGED + Implementation stage T1 phase 完了状態
+   - `[I-D-future-vocab-fork]` = broader vocabulary fork detection deferred (L4 latent)
+   - **`[I-D-future-audit-extensions-hardening]` C11 (案 γ Phase 1.5 active priority、I-205 T14-T16 prerequisite)** = Path E `expand_cell_list` Pattern 2/4 hardcoded `<= 30` filter bug fix
+   - **`[I-D-future-audit-extensions-hardening]` C12 NEW (/check_problem G-4 由来)** = T1-2 verify_no_duplicate_top_level_matrix Japanese-specific naming dependence (L4 latent)
+   - **`[I-D-future-audit-extensions-hardening]` C13 NEW (/check_problem G-5 由来)** = T1-6 verify_dispatch_arm_mapping_table first-column-cell# format dependence (L4 latent)
+   - `[I-D-future-audit-extensions-hardening]` 残 candidates (C1-C7 + C9 + C10 reduced R4) = L4 latent
    - `[I-D-future-self-applied-symmetry-audit]` = framework v1.9 candidate (L4 latent)
-   - `[I-205-retroactive-cell-numbering-section]` = 案 γ Phase 2 T15 batch 化、I-205 PRD doc に `## Cell Numbering Convention` + `## Spec→Impl Mapping` section 追加 (= C11 fix と同 batch 候補)
-5. **Bootstrap utilities (= post-CONVERGED state、framework v1.9 Axes 5/6/7 含む 7 axes full leverage)**:
-   - [`scripts/verify_line_refs.py`](scripts/verify_line_refs.py) (Method A、PRD doc heading-based line-ref drift detection)
-   - [`scripts/verify_prd_self_audits.py`](scripts/verify_prd_self_audits.py) (Path E、**7 axes** post framework v1.9 = strict byte-exact + matrix count + baseline LOC + cross-cutting Layer symmetry、~1092 行、11 functional regression tests in `tests/i_d_pre_path_e_test.rs`)
-   - [`scripts/audit-handoff-doc-line-refs.py`](scripts/audit-handoff-doc-line-refs.py) (handoff doc 4 drift categories、CI step PR merge gate active)
-6. **Framework v1.8 + v1.9 (= I-D-pre + I-D-main v20 cohesive batch 完成 self-applied integration)**:
-   - [`.claude/rules/check-job-review-layers.md`](.claude/rules/check-job-review-layers.md) Layer 1 sub-step (4) factual accuracy semantic check
-   - [`.claude/rules/spec-stage-adversarial-checklist.md`](.claude/rules/spec-stage-adversarial-checklist.md) Rule 9 sub-rule (d) + Rule 13 sub-rule (13-6) cell numbering convention
-   - **framework v1.9 (= I-D-main Iteration v20)**: Path E Axes 5/6/7 = wording staleness detection structural prevention、9-round recurring class absorption empirical proof
+   - `[I-205-retroactive-cell-numbering-section]` = 案 γ Phase 2 T15 batch 化候補
+7. **Bootstrap utilities (= post-T1 phase state、framework v1.9 Axes 5/6/7 含む 7 axes full leverage)**:
+   - [`scripts/verify_line_refs.py`](scripts/verify_line_refs.py) (Method A)
+   - [`scripts/verify_prd_self_audits.py`](scripts/verify_prd_self_audits.py) (Path E、7 axes、11 functional regression tests in `tests/i_d_pre_path_e_test.rs`)
+   - [`scripts/audit-handoff-doc-line-refs.py`](scripts/audit-handoff-doc-line-refs.py) (CI merge gate active)
+   - [`scripts/audit-prd-rule10-compliance.py`](scripts/audit-prd-rule10-compliance.py) (post T1 phase = 1811 行 / 26 verify_*、T1-1〜T1-14 = 10 NEW functions、Option α auto-detect gate 全適用)
 
-### Step 3: 次 action options (= I-D-main Implementation stage 着手 or 案 γ Phase 1.5 C11 fix preempt)
+### Step 3: 次 action options (= T2 phase 着手 or 案 γ Phase 1.5 C11 fix preempt)
 
-**Option (a): PRD I-D-main Implementation stage T1-T8 着手 (= 案 γ Phase 0 残 work、Spec stage CONVERGED 後 standard path)**:
+**Option (a): PRD I-D-main Implementation stage T2 phase = rule wording strengthening (13 sub-tasks、案 γ Phase 0 残 work、recommended next step)**:
 
-1. PRD doc `## Implementation Stage Tasks` section (T1-T8) 参照、各 task の sub-tasks empirical execute
-2. 24 active cells × structural lock-in (= rule file / audit script / skill / command embed) + lock-in test fill in (`tests/i_d_main_*` 系列)
-3. CI integration (`.github/workflows/ci.yml` step 追加、PR merge gate active)
-4. Implementation 完了時 `/check_job` 4-layer review 初回 default 全実施 = framework rule level structural compliance verify
+1. PRD doc `## Implementation Stage Tasks` section T2 参照 (= T2-1/T2-2/T2-3/T2-4/T2-5/T2-6/T2-7/T2-8/T2-10/T2-11/T2-12/T2-13/T2-15、T2-9 + T2-14 = I-D-pre migration excluded)
+2. `.claude/rules/spec-stage-adversarial-checklist.md` Rule 5/6/8/9/10/13 sub-rule 拡張 + `.claude/rules/check-job-review-layers.md` Layer 3/4 sub-rule 拡張 = 6 + 2 = 8 rules 改修
+3. 各 sub-task に対応 grep-based assertion test を `tests/i_d_main_rule_wording_test.rs` (= NEW、未作成) に author、`tests/common/mod.rs` shared helpers leverage
+4. T2 phase 完了後 `/check_job` 4-layer review 適用 → T3 (procedure step additions 5) → T4 (skill workflow 1) → T5 (command workflow 2) → T6 (INV-4 baseline maintenance) → T7 (Self-applied integration final verify) → T8 (PRD close + plan.md update + doc/handoff archive)
 
 **Option (b): 案 γ Phase 1.5 = TODO C11 fix 直接着手 (= I-205 T14-T16 prerequisite preempt)**:
 
 1. TODO `[I-D-future-audit-extensions-hardening]` C11 entry 参照、Resolution direction R1 (= Pattern 2/4 `<= 30` filter を `<= 99` に修正で Pattern 1/3 consistency 確立) 実施
 2. `scripts/verify_prd_self_audits.py` `expand_cell_list` 関数 Pattern 2/4 filter修正 + 新 fixtures (cells N > 30 case)
-3. I-205 PRD audit baseline 更新 coordinated implementation (= `backlog/I-205-getter-setter-dispatch-framework.md` Axis 1 drift count baseline 更新 + INV-4 baseline declaration update)
+3. I-205 PRD audit baseline 更新 coordinated implementation
 4. Path E utility own correctness improvement = I-D-pre Cell 2 v5-1 latent limit 解消
 
 ### Step 4: 後続 prerequisite chain (案 γ Phase 1〜、option (a) 採用時)
 
-PRD I-D-main Implementation stage 完了後、案 γ Phase 1 (= I-225 → I-162) → 案 γ Phase 1.5 (= C11 fix) → 案 γ Phase 2 (= I-205 T14-T16) chain 着手。詳細 = 下記「実行順序」section + 「次の作業 table」。**Note**: C11 fix は I-205 T14-T16 着手前 mandatory prerequisite、I-225/I-162 完了 OR I-D-main Implementation stage 完了 後 immediate 着手 candidate。
+PRD I-D-main close 完了後、案 γ Phase 1 (= I-225 → I-162) → 案 γ Phase 1.5 (= C11 fix) → 案 γ Phase 2 (= I-205 T14-T16) chain 着手。詳細 = 下記「実行順序」section + 「次の作業 table」。**Note**: C11 fix は I-205 T14-T16 着手前 mandatory prerequisite、I-225/I-162 完了 OR I-D-main close 後 immediate 着手 candidate。
 
 ---
 
