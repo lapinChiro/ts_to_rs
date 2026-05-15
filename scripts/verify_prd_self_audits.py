@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""verify_prd_self_audits.py — Path E formal lock-in utility (PRD I-D-pre Cells 1, 2, 5)
+"""verify_prd_self_audits.py — Path E formal lock-in utility (PRD I-D-pre Cells 1, 2, 5 + framework v1.9 Axes 5/6/7)
 
 ================================================================================
-Formal lock-in metadata (PRD I-D-pre Cells 1, 2, 5、Path B split adoption 2026-05-11)
+Formal lock-in metadata (PRD I-D-pre Cells 1, 2, 5、Path B split adoption 2026-05-11
++ framework v1.9 wording staleness detection axes 2026-05-15 = PRD I-D-main Iteration v20)
 ================================================================================
 
 **Status**: Formal regression-tested utility lock-in via PRD I-D-pre Implementation
 Phase 2 T1-pre-6 (= Path B split 2026-05-11、Iteration v16 bootstrap origin promoted to
-formal utility status with F6 fix + F7 fix + Axis 3 extension integrated)。
+formal utility status with F6 fix + F7 fix + Axis 3 extension integrated)、
++ framework v1.9 Axes 5/6/7 (= PRD I-D-main Iteration v20 拡張、9-round recurring
+"cross-cutting wording staleness" class structural absorption)。
 
 **Purpose**: Multi-axis self-applied audit utility that detects PRD doc structural drifts
-across 4 axes (cross-reference consistency / status pending verdict / label namespace
-collision / external file drift)、complement `verify_line_refs.py` (Method A = Cell 19
-v11-7) for multi-axis bootstrap of v12-2 / v11-7 / v13-5 / v3-6 / v4-2 / v5-1 / v11-5
-self-applied gap classes。
+across 7 axes (cross-reference consistency / status pending verdict / label namespace
+collision / external file drift / matrix count claim consistency / baseline LOC claim
+cross-section consistency / cross-cutting cells enumeration cross-Layer consistency)、
+complement `verify_line_refs.py` (Method A = Cell 19 v11-7) for multi-axis bootstrap of
+v12-2 / v11-7 / v13-5 / v3-6 / v4-2 / v5-1 / v11-5 self-applied gap classes + framework
+v1.9 wording staleness class structural prevention.
 
 **Coverage scope (regression-tested)**:
 1. **Axis 1 (Cell 2 / v5-1)**: verify_cross_reference_cell_consistency
@@ -54,6 +59,22 @@ self-applied gap classes。
      PRD-internal Impact Area table coverage のみ)
    - **A7 fix integrated (Path B split 2026-05-11、/check_job L1-4 由来)**:
      IMPACT_AREA_BYTES_RE byte count 9-digit → 12-digit (~ 1 TB) 拡張
+5. **Axis 5 (framework v1.9、PRD I-D-main Iteration v20)**: verify_matrix_count_claim_consistency
+   = "N cells / N candidates / N variants / N rows" wording vs actual matrix table row count
+   structural consistency。**9-round recurring "cross-cutting wording staleness" class** の
+   matrix count claim sub-class を auto-detect。Documented gaps (= Path B split 後 cell #
+   gaps {6, 8, 10, 17, 19, 28} 等) は cell numbering convention single-source-of-truth で
+   actual matrix size と consistent。Allow-list で I-D parent historical references (=
+   "I-D parent 30 cells から ... migration" 等の transitional context) を legitimate に許容
+6. **Axis 6 (framework v1.9、PRD I-D-main Iteration v20)**: verify_baseline_loc_claim_consistency
+   = Design section "<file>: N 行" wording vs Impact Area table claim vs actual `wc -l`
+   triple cross-check。9-round recurring class の baseline LOC sub-class structural
+   absorption (= Iteration v17 F8 / v19 F2 直接対応)
+7. **Axis 7 (framework v1.9、PRD I-D-main Iteration v20)**: verify_cross_cutting_layer_symmetry
+   = Design section Layer 1/2/3/4 cross-cutting cells enumeration claims vs computed Layer
+   membership graph symmetric consistency。9-round recurring class の cross-cutting wording
+   sub-class structural absorption (= 8 rounds 連続 検出 = v3-F9 / v5-F1 / v7-F6 / v9-F1 /
+   v11-F8 / v13-F1 / v15-F5 / v17-F1 / v19-F5 trajectory の structural 防止)
 
 **PRD I-D-pre binding**:
 - Cell 1 (v3-6+v4-2): consolidated `verify_pending_verdict_findings_consistency` audit
@@ -73,6 +94,13 @@ self-applied gap classes。
 - Path B split adoption (2026-05-11): formal regression-tested utility lock-in via PRD
   I-D-pre Cells 1+2+5 with F6/F7/Axis 3 fix integrated (= bootstrapping circularity
   構造的解消、Iteration v17 plateau bootstrap utility correctness ceiling resolution)
+- Iteration v19 third-party adversarial review (2026-05-15、PRD I-D-main first review
+  post Path B split): empirical identification of **"cross-cutting wording staleness"
+  class 9 rounds 連続 recurring** (= v3-F9 / v5-F1 / v7-F6 / v9-F1 / v11-F8 / v13-F1 /
+  v15-F5 / v17-F1 / v19-F5 chain)、bootstrap utilities (Method A / Path E Axes 1-4) と
+  orthogonal な wording semantic staleness class が依然 dominant = framework v1.9
+  Axes 5/6/7 拡張で structural absorption (= PRD I-D-main Iteration v20 cohesive batch
+  実装、user 確定 2026-05-15)
 
 ================================================================================
 Usage
@@ -96,7 +124,7 @@ Cross-PRD verification matrix (= INV-4 4-tuple baseline post Path B split)
 | backlog/I-050-...md             | (not target)  | I-050 lacks Rule 10 Application section     |
 | backlog/I-205-...md             | 0 (PASS)      | Pre-existing baseline preserve              |
 | backlog/I-D-pre-...md           | 0 (PASS)      | Self-applied target post F6/F7/Axis 3 fix   |
-| backlog/I-D-main-...md          | 0 (PASS)      | Path B split scope                          |
+| backlog/I-D-main-...md          | 0 (PASS) post-v20 | Path B split scope + framework v1.9 Axes 5/6/7 self-applied integration |
 """
 
 from __future__ import annotations
@@ -597,6 +625,420 @@ def verify_external_file_drift(
 
 
 # ---------------------------------------------------------------------------
+# Axis 5: verify_matrix_count_claim_consistency (framework v1.9、PRD I-D-main Iteration v20)
+# ---------------------------------------------------------------------------
+
+# Pattern: "N cells" / "N candidates" / "N variants" / "N rows" / "N 個別 sub-section"
+# count claim wording = matrix size assertion (CURRENT spec sections のみ scope)
+MATRIX_COUNT_CLAIM_RE = re.compile(
+    r"\b(\d{1,3})\s+(cells?|candidates?|variants?|rows?|個別\s*(?:sub-section|cells?))\b"
+)
+# Matrix table heading regex: `### 組合せマトリクス (N cells)` or `### 組合せマトリクス (N cells、annotation...)`
+# F7 fix (Iteration v22): loosen regex to allow annotated headings (= `(N cells、Path B split 後 ...)` form)
+# = require close-paren OR Japanese/English comma OR whitespace immediately after `cells`
+MATRIX_TABLE_HEADING_RE = re.compile(r"^###\s+組合せマトリクス\s*\((\d{1,3})\s*cells?(?:[、,)]|\s)")
+# Allowance context = transitional historical references that legitimately reference
+# pre-split / parent PRD count (= "I-D parent 30 cells から" / "原 30 candidates" 等)
+# Within ~120 chars before/after match, presence of any allowance keyword permits the claim
+HISTORICAL_ALLOWANCE_KEYWORDS = (
+    "I-D parent",
+    "I-D-parent",
+    "pre-split",
+    "before Path B split",
+    "before Path-B split",
+    "Path B split で",
+    "Path B split 由来",
+    "Path B split 後",
+    "Path B split 前",
+    "Path B split 適用前",
+    "Path B split 以降",
+    "Path B split を経て",
+    "Path B split 経て",
+    "原 PRD",
+    "原 30",
+    "from which",
+    "documented gaps",
+    "from 30",
+    "I-D parent から",
+    "migration",
+    "MIGRATED",
+    "renumber",
+    "累積",
+    "cumulative",
+    "post Path B split",
+    "post-Path-B-split",
+    # F5 fix (Iteration v22): Japanese-only historical reference variants
+    "I-D-pre Cell",
+    "I-D-pre scope",
+    "I-D-pre migration",
+    "I-D parent total",
+    "intermediate state",
+    "post-close",
+    "close で audit out-of-scope",
+)
+
+
+def collect_matrix_table_rows(
+    lines: list[str],
+) -> tuple[set[int], set[int]]:
+    """Collect (active_cells, migrated_cells) from the canonical `### 組合せマトリクス` table.
+
+    Distinguishes active rows (= in-scope cells) from MIGRATED rows (= Path B split で
+    別 PRD に migration された cells、documented gaps preservation pattern)。
+    """
+    active: set[int] = set()
+    migrated: set[int] = set()
+    # Find `### 組合せマトリクス` heading
+    matrix_heading_line: int | None = None
+    for i, line in enumerate(lines, start=1):
+        if MATRIX_TABLE_HEADING_RE.match(line):
+            matrix_heading_line = i
+            break
+    # Fallback: search for "組合せマトリクス" without parentheses (= unannotated form)
+    if matrix_heading_line is None:
+        for i, line in enumerate(lines, start=1):
+            if re.match(r"^###\s+組合せマトリクス\b", line):
+                matrix_heading_line = i
+                break
+    if matrix_heading_line is None:
+        return (active, migrated)
+
+    # Iterate from heading until next heading (= section end)
+    in_table = False
+    for i in range(matrix_heading_line + 1, len(lines) + 1):
+        line = lines[i - 1] if i - 1 < len(lines) else ""
+        if line.startswith("#"):
+            break  # next heading = table section ended
+        if line.startswith("|"):
+            in_table = True
+            m = re.match(r"\|\s*(\d{1,2})\s*\|", line)
+            if m:
+                n = int(m.group(1))
+                if 1 <= n <= 99:
+                    if "MIGRATED" in line.upper():
+                        migrated.add(n)
+                    else:
+                        active.add(n)
+        elif in_table and not line.strip():
+            # Empty line after table content = table block ended
+            break
+    return (active, migrated)
+
+
+def verify_matrix_count_claim_consistency(
+    lines: list[str], headings: list[HeadingEntry]
+) -> list[str]:
+    """Axis 5 (framework v1.9): matrix count claim wording consistency check.
+
+    Detects "N cells" / "N candidates" / "N variants" / "N rows" / "N 個別 sub-section"
+    wording in CURRENT spec sections where N is matrix-size-related (= equals active /
+    migrated / total enumerated count) but mismatches current scope ground truth (=
+    active count), EXCEPT when surrounded by historical allowance context (= I-D parent
+    migration narrative).
+
+    Algorithm:
+    1. Parse `### 組合せマトリクス` table to compute (active, migrated, total) counts
+    2. For each "N <unit>" claim outside Iteration log:
+       - N == active → OK (= current scope)
+       - N == migrated → OK (= documented gaps count, legitimate)
+       - N == total AND historical allowance → OK (= transitional reference to I-D parent)
+       - N == total AND no historical allowance → drift (= F1 / F6 class)
+       - N not in matrix-size set → skip (= Layer-specific / sub-counts, not matrix-wide)
+
+    Empirical origin: PRD I-D-main Iteration v19 F1 (= Path B split 30 → 24 wording
+    sync が CURRENT spec で ~20 location partial-scope) + F6 (= Background heading
+    "累積 30 candidates" wording disambiguate)。9-round recurring "cross-cutting
+    wording staleness" class の matrix count sub-class structural absorption。
+    """
+    drifts: list[str] = []
+    active, migrated = collect_matrix_table_rows(lines)
+    if not active:
+        return drifts  # no matrix table = N/A (e.g., I-050 missing Rule 10 Application)
+    active_count = len(active)
+    migrated_count = len(migrated)
+    total_count = active_count + migrated_count
+
+    # Matrix-size-related values = numbers that potentially refer to whole matrix
+    matrix_size_values = {active_count, migrated_count, total_count}
+
+    # Also verify the matrix heading itself
+    for i, line in enumerate(lines, start=1):
+        m_head = MATRIX_TABLE_HEADING_RE.match(line)
+        if m_head:
+            heading_claim = int(m_head.group(1))
+            if heading_claim != active_count and heading_claim != total_count:
+                drifts.append(
+                    f"verify_matrix_count_claim_consistency (Axis 5、heading): line {i} "
+                    f"heading claims '({heading_claim} cells)' but actual active={active_count} "
+                    f"(MIGRATED={migrated_count}, total enumerated={total_count})"
+                )
+            elif heading_claim == total_count and active_count != total_count:
+                # heading still includes migrated rows in count; Path B split scope should be active only
+                drifts.append(
+                    f"verify_matrix_count_claim_consistency (Axis 5、heading): line {i} "
+                    f"heading claims '({heading_claim} cells)' = total enumerated but Path B split "
+                    f"scope = active only ({active_count} cells, MIGRATED={migrated_count} documented gaps)"
+                )
+            break
+
+    for i, line in enumerate(lines, start=1):
+        if is_historical_iteration_log_line(i, headings, total_lines=len(lines)):
+            continue  # preservation policy
+        # Skip the matrix heading itself (= already handled above)
+        if MATRIX_TABLE_HEADING_RE.match(line):
+            continue
+        for m in MATRIX_COUNT_CLAIM_RE.finditer(line):
+            claimed = int(m.group(1))
+            unit = m.group(2)
+            # Skip values NOT in matrix-size-related set (= Layer-specific / sub-counts)
+            if claimed not in matrix_size_values:
+                continue
+            # Skip claims matching current scope ground truth (= active count) or
+            # migrated count (= legitimate documented gaps reference)
+            if claimed == active_count or claimed == migrated_count:
+                continue
+            # claimed == total_count: check historical allowance context within ±120 chars
+            start = max(0, m.start() - 120)
+            end = min(len(line), m.end() + 120)
+            context = line[start:end]
+            if any(kw in context for kw in HISTORICAL_ALLOWANCE_KEYWORDS):
+                continue  # legitimate historical reference
+            # Also check adjacent lines (= multi-line context, ±2 lines)
+            adj_start = max(1, i - 2)
+            adj_end = min(len(lines), i + 2)
+            adj_context = "\n".join(lines[adj_start - 1 : adj_end])
+            if any(kw in adj_context for kw in HISTORICAL_ALLOWANCE_KEYWORDS):
+                continue
+            drifts.append(
+                f"verify_matrix_count_claim_consistency (Axis 5): line {i} claims "
+                f"'{claimed} {unit}' (= total enumerated incl. MIGRATED) but current scope = "
+                f"{active_count} active cells (no historical allowance context within ±120 chars / ±2 lines)"
+            )
+    return drifts
+
+
+# ---------------------------------------------------------------------------
+# Axis 6: verify_baseline_loc_claim_consistency (framework v1.9、PRD I-D-main Iteration v20)
+# ---------------------------------------------------------------------------
+
+# Pattern: "<file_path>: N 行" or "`<file>` (N 行)" or "`<file>` N 行"
+# CURRENT spec sections の Design section の "File structure changes" 配下 wording 主 target
+DESIGN_FILE_LOC_CLAIM_RE = re.compile(
+    r"`([A-Za-z0-9_./-]+\.(?:md|py|rs|yml|yaml|sh|toml|json))`"
+    r"\s*[:(\s]\s*(\d{2,5})\s*行"
+)
+
+
+def verify_baseline_loc_claim_consistency(
+    lines: list[str], headings: list[HeadingEntry], prd_path: Path
+) -> list[str]:
+    """Axis 6 (framework v1.9): baseline LOC claim cross-section consistency check.
+
+    Detects "<file>: N 行" wording in Design / Goal / Approach sections (excluding
+    Impact Area = Axis 4 scope + Iteration log = preservation policy) where N != actual
+    `wc -l` value of the referenced file。
+
+    Empirical origin: PRD I-D-main Iteration v19 F2 (= Design section LOC anchor が
+    9 file 全て stale: spec-stage-adversarial 518→461 / check-job-review 338→346 /
+    spec-first 194→183 / prd-completion 101→105 / check_job 77→78 / audit script
+    906→1033 / handoff-doc-line-refs ~150→260)。9-round recurring class の baseline
+    LOC sub-class structural absorption。
+    """
+    drifts: list[str] = []
+    repo_root = find_repo_root(prd_path)
+
+    # Exclude Impact Area Audit Findings section (= Axis 4 scope) + Iteration Log
+    impact_section = find_section_range(
+        headings, r"^Impact Area Audit Findings", level=2, total_lines=len(lines)
+    )
+
+    for i, line in enumerate(lines, start=1):
+        if is_historical_iteration_log_line(i, headings, total_lines=len(lines)):
+            continue  # preservation policy
+        # Skip Impact Area Audit Findings (= Axis 4 territory, byte-level claims live there)
+        if impact_section and impact_section.start <= i < impact_section.end:
+            continue
+        for m in DESIGN_FILE_LOC_CLAIM_RE.finditer(line):
+            file_rel = m.group(1)
+            claimed_loc = int(m.group(2))
+            # Skip claims that include future projection wording (= "→ ~290 行見込み" etc.)
+            # by looking ahead within match for "見込み" / "→ ~" markers
+            tail = line[m.end() : m.end() + 30]
+            if "見込み" in tail or "estimated" in tail:
+                continue
+            # Also skip when line itself includes "→ <claim>" projection (= "194 行 → ~290 行")
+            # = first claim is current LOC (target of audit), trailing is projection
+            file_path = repo_root / file_rel
+            if not file_path.exists():
+                continue  # file moved/renamed; out of scope for LOC drift detection
+            try:
+                actual_loc = sum(1 for _ in file_path.open(encoding="utf-8"))
+            except OSError:
+                continue
+            if actual_loc != claimed_loc:
+                drifts.append(
+                    f"verify_baseline_loc_claim_consistency (Axis 6): line {i} '{file_rel}' "
+                    f"claims {claimed_loc} 行, actual {actual_loc} 行 "
+                    f"(drift {actual_loc - claimed_loc:+d})"
+                )
+    return drifts
+
+
+# ---------------------------------------------------------------------------
+# Axis 7: verify_cross_cutting_layer_symmetry (framework v1.9、PRD I-D-main Iteration v20)
+# ---------------------------------------------------------------------------
+
+# Pattern: Layer N declaration in two forms:
+#   - "#### Layer 1: <name>" (= Design section sub-heading, level-4)
+#   - "- **Layer 1:** <name>" / "- **Layer 1: <name>**" (= Scope section bullet item)
+# L1-3 fix (Round 1 → /check_problem 解消 2026-05-15): `(\d)` → `(\d+)` で multi-digit Layer
+# 番号 future-proof (= Layer 10+ accept、defensive coding 強化)
+LAYER_DECLARATION_RE = re.compile(r"(?:^####\s+|^-\s+\*\*)Layer\s+(\d+)\s*:")
+
+# Pattern: "Cross-cutting cells: <cell-list> = Layer A+B dual-slot / <cell> = Layer C+D / ..."
+# Two-layer pairing forms:
+#   - "X = Layer A+B" / "X, Y, Z = Layer A+B dual-slot" (= concise form, Layer 1/4 use)
+#   - "X = Layer A / Layer B" (= verbose form, Layer 2/3 v19-pre wording stale class)
+#   - "cell X = Layer A+B" (= prefixed form within parentheses, Layer 4 alternate)
+# L1-3 fix (Round 1 → /check_problem 解消 2026-05-15): `(\d)` → `(\d+)` で multi-digit
+# Layer 番号 future-proof (= Layer 10+ pairing accept、defensive coding 強化、Round 1 L1-3 finding 由来)
+LAYER_PAIRING_PLUS_RE = re.compile(
+    r"(?:cell\s+)?([\d,\s\-–]+?)\s*=\s*Layer\s+(\d+)\s*\+\s*(\d+)"
+)
+LAYER_PAIRING_SLASH_RE = re.compile(
+    r"([\d,\s\-–]+?)\s*=\s*Layer\s+(\d+)\s*/\s*Layer\s+(\d+)"
+)
+
+# Pattern: "cells N, M, K = **NN cell-slots**" (= Scope section bullet form) or
+# "cells N, M, K = NN candidates" (= Design section sub-heading form, without ** boilerplate)
+# F4 fix (Iteration v22、v21 finding 由来): Axis 7 Phase 1 data source partial extension
+# = Design section `#### Layer N:` sub-headings のうち "(cells X, Y, Z = N candidates...)"
+# form を持つ Layers (= typically Layer 2/3/4) は parse して layer_main_cells collection に
+# embed、Scope-only から Scope + Design **partial** dual-source に拡張。
+# **Known partial coverage** (= Iteration v23 F4 acknowledgment + Round 2 /check_problem L1-7 fix):
+# - Design Layer 1 heading は典型的に `(T1 = N sub-tasks total)` form (= task-count、cell-list 不在)
+#   のため本 regex は **non-match** → Layer 1 main_cells data は Scope bullet からのみ flow
+# - Design Layer 2/3/4 heading は `(cells X = N candidates)` form のため match → dual-source data
+# **Practical correctness preserved**: Layer 1 data 依然 Scope bullet で覆われる、symmetry verify は
+# functional (= positive fixtures で Layer 1 asymmetric claim も Scope-side membership で detect)
+# Architectural narrative: framework v2.0 candidate で "Design Layer 1 task-count form parse" 拡張可能、
+# 現状 Layer 1 task-count vs cell-list は semantic mismatch のため本 regex scope outside
+LAYER_MAIN_CELLS_RE = re.compile(
+    r"\(cells?\s+([\d,\s\-–]+?)\s*=\s*(?:\*\*\d+\s*cell-slots?\*\*|\d+\s*candidates?\b)"
+)
+
+
+def _parse_cell_list_from_pairing_lhs(text: str) -> set[int]:
+    """Parse LHS of 'X, Y = Layer A+B' = comma-separated cell list, returning {X, Y}."""
+    cells: set[int] = set()
+    # First handle ranges
+    for r in CELL_NUM_RANGE_RE.finditer(text):
+        lo, hi = int(r.group(1)), int(r.group(2))
+        if 1 <= lo <= hi <= 99:
+            cells.update(range(lo, hi + 1))
+    body_no_range = CELL_NUM_RANGE_RE.sub(" ", text)
+    for m in re.finditer(r"\b(\d{1,2})\b", body_no_range):
+        n = int(m.group(1))
+        if 1 <= n <= 99:
+            cells.add(n)
+    return cells
+
+
+def verify_cross_cutting_layer_symmetry(
+    lines: list[str], headings: list[HeadingEntry]
+) -> list[str]:
+    """Axis 7 (framework v1.9): cross-cutting cells enumeration cross-Layer symmetry check.
+
+    Detects asymmetric cross-cutting cells claims across Design section Layer 1/2/3/4
+    sub-sections. For each Layer N's "Cross-cutting cells: <cells> = Layer A+B" claim:
+    - Verify N is one of {A, B} (= self-reference consistency)
+    - Verify each claimed cell appears in Layer A's main cells AND Layer B's main cells
+
+    Empirical origin: PRD I-D-main Iteration v19 F5 (= Layer 2/3 cross-cutting wording
+    で Layer 4 view を copy-paste した cascade-sync gap)。**9-round recurring "cross-cutting
+    wording staleness" class** の direct structural absorption (= 8 rounds 連続検出 = v3-F9
+    / v5-F1 / v7-F6 / v9-F1 / v11-F8 / v13-F1 / v15-F5 / v17-F1 / v19-F5 trajectory の
+    structural 防止)。
+    """
+    drifts: list[str] = []
+
+    # Phase 1: Scan entire document for Layer N declarations (= Design `#### Layer N:` AND
+    # Scope `- **Layer N:** ...` bullet items) and extract main cells per Layer
+    # (Iteration log lines excluded per preservation policy)
+    layer_main_cells: dict[int, set[int]] = {}
+    layer_declaration_lines: list[tuple[int, int]] = []  # (line_num, layer_n)
+    for i, line in enumerate(lines, start=1):
+        if is_historical_iteration_log_line(i, headings, total_lines=len(lines)):
+            continue
+        m_decl = LAYER_DECLARATION_RE.match(line)
+        if m_decl:
+            layer_n = int(m_decl.group(1))
+            layer_declaration_lines.append((i, layer_n))
+            # Extract main cells from declaration line itself (= "Layer 1: ... (cells 1, 4, 5, ...")
+            main_match = LAYER_MAIN_CELLS_RE.search(line)
+            if main_match:
+                # Merge into existing set if Layer N declared multiple times (= Scope + Design)
+                if layer_n not in layer_main_cells:
+                    layer_main_cells[layer_n] = set()
+                layer_main_cells[layer_n] |= _parse_cell_list_from_pairing_lhs(
+                    main_match.group(1)
+                )
+
+    if not layer_main_cells:
+        return drifts  # no Layer N declarations found = N/A
+
+    # Phase 2: For each Layer N declaration line, find Cross-cutting wording on the SAME line
+    # (= Scope section bullets are single-line declarations; Design section sub-headings have
+    # cross-cutting wording on the heading line itself or N/A). Verify pairing claims against
+    # the computed Layer membership graph from Phase 1
+    for decl_line, layer_n in layer_declaration_lines:
+        # Scan ONLY the declaration line itself = avoid over-fire on adjacent Layer declarations
+        for j in [decl_line]:
+            line = lines[j - 1] if j - 1 < len(lines) else ""
+            if "Cross-cutting cells" not in line and "cross-cutting" not in line and "全 cells が cross-cutting" not in line:
+                continue
+            # Extract pairings: both concise "X = Layer A+B" and verbose "X = Layer A / Layer B" forms
+            pairings: list[tuple[str, int, int, int]] = []  # (lhs, layer_a, layer_b, match_pos)
+            for m_pair in LAYER_PAIRING_PLUS_RE.finditer(line):
+                pairings.append(
+                    (m_pair.group(1).strip().rstrip(",").rstrip(),
+                     int(m_pair.group(2)), int(m_pair.group(3)), m_pair.start())
+                )
+            for m_pair in LAYER_PAIRING_SLASH_RE.finditer(line):
+                pairings.append(
+                    (m_pair.group(1).strip().rstrip(",").rstrip(),
+                     int(m_pair.group(2)), int(m_pair.group(3)), m_pair.start())
+                )
+            # Sort by match position so drifts appear in document order
+            pairings.sort(key=lambda x: x[3])
+            for lhs, layer_a, layer_b, _pos in pairings:
+                claimed_cells = _parse_cell_list_from_pairing_lhs(lhs)
+                # Verify self-reference: current Layer N is one of {A, B}
+                if layer_n not in {layer_a, layer_b}:
+                    drifts.append(
+                        f"verify_cross_cutting_layer_symmetry (Axis 7): Layer {layer_n} "
+                        f"line {j} claims '{lhs} = Layer {layer_a} / Layer {layer_b}' but "
+                        f"Layer {layer_n} not in pairing (self-reference inconsistency)"
+                    )
+                # Verify each claimed cell appears in both Layer A and Layer B
+                for cell in claimed_cells:
+                    a_membership = cell in layer_main_cells.get(layer_a, set())
+                    b_membership = cell in layer_main_cells.get(layer_b, set())
+                    if not (a_membership and b_membership):
+                        missing_layers = []
+                        if not a_membership:
+                            missing_layers.append(layer_a)
+                        if not b_membership:
+                            missing_layers.append(layer_b)
+                        drifts.append(
+                            f"verify_cross_cutting_layer_symmetry (Axis 7): Layer {layer_n} "
+                            f"line {j} claims cell {cell} in 'Layer {layer_a} / Layer {layer_b}' "
+                            f"but cell {cell} not in main cells of Layer(s) {missing_layers}"
+                        )
+    return drifts
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -626,6 +1068,15 @@ def main() -> int:
     # Axis 4 needs prd_path
     drifts = verify_external_file_drift(lines, headings, prd_path)
     all_drifts.append(("Axis 4 (Cell 17 external file drift)", drifts))
+    # Axis 5 (framework v1.9): matrix count claim consistency
+    drifts = verify_matrix_count_claim_consistency(lines, headings)
+    all_drifts.append(("Axis 5 (framework v1.9 matrix count claim consistency)", drifts))
+    # Axis 6 (framework v1.9): baseline LOC claim cross-section consistency
+    drifts = verify_baseline_loc_claim_consistency(lines, headings, prd_path)
+    all_drifts.append(("Axis 6 (framework v1.9 baseline LOC claim consistency)", drifts))
+    # Axis 7 (framework v1.9): cross-cutting cells enumeration cross-Layer symmetry
+    drifts = verify_cross_cutting_layer_symmetry(lines, headings)
+    all_drifts.append(("Axis 7 (framework v1.9 cross-cutting Layer symmetry)", drifts))
 
     total = sum(len(d) for _, d in all_drifts)
     print(f"PRD: {prd_path}")
