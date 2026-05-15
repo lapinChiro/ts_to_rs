@@ -425,14 +425,14 @@ framework PRD として、上記 audit script では replace できない以下 
 
 | File | Status | Size (bytes) | Last modified | Empirical verify |
 |------|--------|--------------|---------------|------------------|
-| `.claude/rules/spec-stage-adversarial-checklist.md` | exists | 50544 | 2026-05-11 (I-D-pre Phase 5 T2-pre-2 完了 = Rule 9 sub-rule (9-4) + Rule 13 sub-rule (13-6) 追加 + Versioning v1.8 entry + /check_job structural placement fix で (d) を (c) 直後に re-group) | ✓ verified |
-| `.claude/rules/spec-first-prd.md` | exists | 11913 | 2026-04-27 22:17 | ✓ verified |
-| `.claude/rules/check-job-review-layers.md` | exists | 21482 | 2026-05-11 (I-D-pre Phase 5 T2-pre-1 完了 = Layer 1 sub-step (4) factual accuracy semantic check 追加 + Versioning v1.8 entry + /check_job aliasing line refactor で canonical 名を definition bullet 内に inline 化 = DRY 達成 + /check_job deep deep B fix で v1.8 entry に spec-stage-adversarial-checklist.md cross-reference 追加 = Versioning symmetry restore) | ✓ verified |
-| `.claude/rules/prd-completion.md` | exists | 6138 | 2026-05-08 02:26 | ✓ verified |
-| `.claude/rules/problem-space-analysis.md` | exists | 12024 | 2026-04-27 22:17 | ✓ verified |
-| `.claude/rules/post-implementation-defect-classification.md` | exists | 6450 | 2026-04-27 22:17 | ✓ verified |
+| `.claude/rules/spec-stage-adversarial-checklist.md` | exists | 35068 | 2026-05-12 (Rules 徹底レビュー + 改善 batch = commit 657fc8f 大幅整理 = 5 段階 cleanup [Versioning section 削除 + PRD-agnostic 化 + Tier 1+2+4 fixes + sub-rule 命名 (N-N) numeric 全 rule 統一 (Rule 11 (d-6) triple-nesting → 2-level flatten 含む) + paths frontmatter 追加] で 50544 → 35068 bytes -31% reduction、commit f11313a で rule_review_list.md 24 観点適用 cross-cutting verification) | ✓ verified |
+| `.claude/rules/spec-first-prd.md` | exists | 10519 | 2026-05-12 (Rules 徹底レビュー + 改善 batch = commit f11313a で rule_review_list.md 24 観点適用 = A2 Versioning section 削除 + B1+B2 instance/temporal citation 抽象 pattern essence 化 + H2 paths frontmatter 追加 = 11913 → 10519 bytes -1394) | ✓ verified |
+| `.claude/rules/check-job-review-layers.md` | exists | 18916 | 2026-05-12 (Rules 徹底レビュー + 改善 batch = commit f11313a で rule_review_list.md 24 観点適用 = A2 Versioning section 削除 + B1+B2 instance/temporal citation 抽象 pattern essence 化 + H2 paths frontmatter 追加 = 21482 → 18916 bytes -2566) | ✓ verified |
+| `.claude/rules/prd-completion.md` | exists | 6364 | 2026-05-12 (Rules 徹底レビュー + 改善 batch = commit f11313a で rule_review_list.md 24 観点適用 = A2 Versioning section 削除 + F1 terminology uniformity (Recurring problem rationale 統一) + H2 paths frontmatter 追加 = 6138 → 6364 bytes +226) | ✓ verified |
+| `.claude/rules/problem-space-analysis.md` | exists | 12191 | 2026-05-12 (Rules 徹底レビュー + 改善 batch = commit f11313a で rule_review_list.md 24 観点適用 = F1 terminology uniformity (Recurring problem rationale 統一) + H2 paths frontmatter 追加 = 12024 → 12191 bytes +167) | ✓ verified |
+| `.claude/rules/post-implementation-defect-classification.md` | exists | 6359 | 2026-05-12 (Rules 徹底レビュー + 改善 batch = commit f11313a で rule_review_list.md 24 観点適用 = A2 Versioning section 削除 + B1+B2 instance/temporal citation 抽象 pattern essence 化 = 6450 → 6359 bytes -91) | ✓ verified |
 | `scripts/audit-prd-rule10-compliance.py` | exists | 44451 (~1033 行) | 2026-05-11 (I-D-pre Phase 3 + /check_job deep deep review fix で +7141 bytes drift sync = T1-pre-1 + T1-pre-2 + T1-pre-4 audit script extensions、3 NEW verify functions + helper + formatter 追加 + sys.path.insert + `# noqa: E402` 排除 = proper top-level import、`verify_prd_self_audits.py` Axis 4 detect、Cell 17 v11-5 bootstrap empirical 動作) | ✓ verified (29 functions enumerated post I-D-pre Phase 3) |
-| `scripts/audit-handoff-doc-line-refs.py` | NOT EXISTS | — | — | ✗ to be created (v11-5) |
+| `scripts/audit-handoff-doc-line-refs.py` | exists | 9773 | 2026-05-11 (I-D-pre Cell 3 / T1-pre-3a 完了 = scripts/audit-handoff-doc-line-refs.py 新設 = handoff doc 4 drift categories (file existence / line bound / ambiguous bare basename / line ref drift) detect、CI step PR merge gate 化、260 行) | ✓ verified |
 | `.claude/skills/prd-template/SKILL.md` | exists | — | — | ✓ verified |
 | `.claude/skills/tdd/SKILL.md` | exists | — | — | ✓ verified |
 | `.claude/commands/check_job.md` | exists | — | — | ✓ verified |

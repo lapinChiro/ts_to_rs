@@ -113,6 +113,7 @@ user-invocable: true|false
 - `## Related Rules / Skills / Commands` table が存在し ≥1 entry
 - CLAUDE.md Workflow table に登録済 (user-invocable=true の場合)
 - 関連 rule / skill / command で bidirectional reference 確立
+- 既存 SKILL.md modify (= 新規 ではなく significant modification) trigger 時、active backlog/ PRD doc empirical anchor sync を実施 (= [`pre-commit-doc-sync.md`](../../rules/pre-commit-doc-sync.md) Constraint 3 適用、grep referencing PRDs → Path E Axis 4 inspect → drift 検出時 sync)
 
 ## Related Rules / Skills / Commands
 
@@ -121,6 +122,7 @@ user-invocable: true|false
 | Skill | [rule-writing](../rule-writing/SKILL.md) | rule 作成 procedure (本 skill の sibling、structure 原則を共有) |
 | Skill | [command-writing](../command-writing/SKILL.md) | command 作成 procedure (本 skill と complementary) |
 | Skill | [rule-maintenance](../rule-maintenance/SKILL.md) | rule corpus maintenance (skill 追加時の cross-rule reference 更新で適用) |
+| Rule | [pre-commit-doc-sync.md](../../rules/pre-commit-doc-sync.md) | skill modification 後の active PRD doc empirical anchor sync (Constraint 3) prerequisite |
 
 ## Versioning
 

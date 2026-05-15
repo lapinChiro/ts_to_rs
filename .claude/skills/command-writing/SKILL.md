@@ -83,6 +83,7 @@ Slash command は user が `/<name>` で起動する prompt entry point。本質
 - `CLAUDE.md` Workflow table の "Commands" section に登録済
 - Variant note (該当する場合) が選択基準を明示
 - 関連 skill / rule / command で bidirectional reference 確立
+- 既存 command md modify (= 新規 ではなく significant modification) trigger 時、active backlog/ PRD doc empirical anchor sync を実施 (= [`pre-commit-doc-sync.md`](../../rules/pre-commit-doc-sync.md) Constraint 3 適用、grep referencing PRDs → Path E Axis 4 inspect → drift 検出時 sync)
 
 ## Related Rules / Skills / Commands
 
@@ -91,6 +92,7 @@ Slash command は user が `/<name>` で起動する prompt entry point。本質
 | Skill | [skill-writing](../skill-writing/SKILL.md) | skill 作成 procedure (本 skill の sibling、structure 原則を共有) |
 | Skill | [rule-writing](../rule-writing/SKILL.md) | rule 作成 procedure (top-level instruction primacy 原則を共有) |
 | Skill | [rule-maintenance](../rule-maintenance/SKILL.md) | corpus maintenance (command 追加時の bidirectional reference 更新で適用) |
+| Rule | [pre-commit-doc-sync.md](../../rules/pre-commit-doc-sync.md) | command modification 後の active PRD doc empirical anchor sync (Constraint 3) prerequisite |
 
 ## Versioning
 

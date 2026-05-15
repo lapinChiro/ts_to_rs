@@ -113,7 +113,7 @@ Coverage threshold ratchet: when measured coverage exceeds threshold by 2+ point
 - **Strict PRD completion criteria** — see `.claude/rules/prd-completion.md`
 - **PRD design review**: PRD の設計セクション作成後、凝集度・責務分離・DRY の 3 観点で第三者目線のレビューを行う — see `.claude/rules/prd-design-review.md`
 - **Incremental commits**: Commit at each phase completion for multi-phase work — see `.claude/rules/incremental-commit.md`
-- **Pre-commit doc sync**: Update tasks.md / plan.md before commit messages — see `.claude/rules/pre-commit-doc-sync.md`
+- **Pre-commit doc sync**: Update tasks.md / plan.md and sync active backlog/ PRD doc empirical anchors (= byte / mtime / line / function-count claims) before commit messages — applies to any modification of `.claude/rules/*.md` / `.claude/skills/*/SKILL.md` / `.claude/commands/*.md` / `scripts/*.py` files. See `.claude/rules/pre-commit-doc-sync.md` Constraint 3
 - **Bulk edit safety**: Script bulk replacements follow dry run → review → execute — see `.claude/rules/bulk-edit-safety.md`
 - **Git operation restrictions**: Only the user performs `git commit` / `push` / `merge`. Claude only proposes commit messages
 - **Questions with decision criteria**: Present options, pros/cons, and recommendations. No vague "Is this OK?" questions. Decide yourself when possible
