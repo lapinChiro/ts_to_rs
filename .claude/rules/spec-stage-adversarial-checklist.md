@@ -124,6 +124,18 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
         (`src/` 修正) を含めること禁止 (= stage boundary 違反)。
       - **(5-4)** Audit verify: matrix-driven PRD で `## Spec Stage Tasks` /
         `## Implementation Stage Tasks` のいずれか不在 → audit fail
+      - **(5-5) Fixture tsx runtime empirical observation**: 各 ✗ cell の E2E fixture は
+        **fixture 自体の tsx runtime empirical observation** で fixture content 正当性を
+        verify する (= `scripts/observe-tsc.sh` で fixture を実行、stdout / stderr / exit_code を
+        Spec stage で formal record + Oracle Observations section に embed)。
+        test harness 制約 (= cjs vs ESM mode の selection / `--esm` / `--no-auto-main` flag /
+        top-level `await` の executable mode requirement 等) を **Spec stage で前倒し検出**
+        するため、tsc parse 通過のみではなく runtime probe を mandatory step 化。
+        **Recurring problem rationale**: tsc が fixture を parse 通過する一方で tsx runtime
+        実行時に harness 制約 (= cjs vs ESM 等) で fail する pattern が、Implementation stage
+        T-task 着手後に発覚し Spec stage 逆戻り cost が累積する。Spec stage で fixture
+        tsx runtime probe を mandatory 化することで harness 制約由来 defect class を
+        structural prevent する (= test harness 制約 を fixture spec の一部に embed)。
 - [ ] **Matrix/Design integrity + Scope 3-tier consistency**:
       - **(6-1)** matrix Ideal output 列と Design section emission strategy が
         **token-level に一致**。乖離 1 例でも存在すれば (a) どちらが正規 spec か明記、
@@ -142,6 +154,19 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
         consistency を audit script で verify (Scope 列に "本 PRD" cell が In Scope に
         記述されていること、Tier 2 honest error reclassify cell が同 section に
         記述されていること、等)
+      - **(6-5) Dense matrix density limit + spec-table-driven generator recommendation**:
+        matrix-driven PRD で **80+ cells × 6+ cross-reference contexts** の dense matrix が
+        **manual-tracking density limit** を超える場合、**spec-table-driven generator**
+        (= matrix を **single source-of-truth** として他 sections (= Spec→Impl Mapping table /
+        Implementation Stage Tasks task list / Test contract path enumeration / Invariants
+        cell list 等) を機械的 derive する utility) を使用必須。手動 sync は cross-reference
+        defect class (= manual-tracking density limit を超えた状態での反復的 sync drift) を
+        累積する pattern が再発するため、density limit を超えた dense matrix では generator
+        utility 経由の machine-derived sync が prerequisite。
+        **Recurring problem rationale**: dense matrix では手動 cross-reference sync が
+        cognitively unscalable で、Iteration の都度 cross-reference defects が新規発生する。
+        density limit を numeric criteria (= 80 cells × 6 contexts) で明確化することで
+        generator utility 採用判断を spec-traceable に固定し、reviewer の主観判断依存を排除する。
 - [ ] **Control-flow exit sub-case completeness**:
       - **(7-1) Dimension trigger**: Matrix cell の dimension に "body shape" /
         "branch shape" が含まれる場合、各 branch の **exit-or-fallthrough 状態** を
@@ -164,7 +189,15 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
         - (b) **Justification**: なぜこの invariant が必要か
               (この invariant 違反でどんな defect class が発生するか)
         - (c) **Verification method**: 実装後に invariant 成立を verify する具体手順
-              (probe / test / static analysis のどれを使うか)
+              (probe / test / static analysis のどれを使うか)。**Multi-dispatch flow
+              empirical probe coverage** (Rule 8 (c) sub-rule): 対象 PRD の architectural
+              mechanism が **複数 dispatch flow** を持つ場合 (例: single-file vs multi-file /
+              sync vs async / library vs executable mode 等の orthogonal flow split)、
+              **全 flow を prototype probe で empirical cover** することを **Verification method 必須要件** として明示化 (= partial coverage = prototype が single
+              flow のみ probe、production T-task で multi-flow を初めて verify する
+              pattern を structural prevent)。Single-flow probe で済ます場合は "多 dispatch
+              flow 不在" を spec-traceable に明示 (= dispatch flow enumeration の zero
+              count を declared state として treat)。
         - (d) **Failure detectability**: invariant 違反が compile error / runtime error /
               silent semantic change のどれで顕在化するか
 
@@ -173,6 +206,20 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
         scope boundary preservation / mutability propagation。
       - **(8-2) Audit verify mechanism**: matrix-driven PRD で `## Invariants` section
         不在 or 空 (4 項目 (a)(b)(c)(d) のいずれか missing) → audit fail
+      - **(8-3) Invariant verification cell coverage double-partition symmetric verify**:
+        各 invariant entry の **verification cell list (= invariant が holds する scope を
+        指定する cell enumeration)** は **本 PRD scope の Axis X 全 cells** claim と
+        **Cartesian product cells** の cross-reference で **exhaustive coverage** を
+        auto verify。**library mode vs executable mode** 両 partition (= 機能 emission を
+        determine する orthogonal partition、Rule 10 の dispatch flow axis に派生する
+        symmetric pair) の coverage gap を syntactic detect する **double-partition
+        symmetric verify** を audit script (= `verify_invariant_cell_coverage_double_partition`
+        function) で hard-code。**Recurring problem rationale**: invariant verification cell
+        list が "library mode `fn main directly emit` cells 漏れ" 等の **partition
+        asymmetry** を持つ pattern は manual review で latent 化しやすく (= reviewer が
+        single partition のみ confirm して PASS 判定する pattern が再発)、framework rule
+        level での Cartesian product cells の cross-reference 必須化が structural
+        prevention prerequisite。
 - [ ] **Dispatch-arm sub-case alignment**: Matrix の各 type-dimension は、実装側で
       **branch / dispatch / pattern-match を分けるあらゆる sub-classifier** と一対一の
       粒度で enumerate する。具体例: `Named` を単一 cell として記述する代わりに、実装が
@@ -257,6 +304,40 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
             confusion (= 同名異物による誤読) を生じる。個別 patch 対応のみでは再発
             防止できず、framework rule level での single-source-of-truth enforcement
             (= 本 sub-rule + audit script auto-detect) が必須。
+      - **(9-5) Spec→Impl Dispatch Arm Mapping table embed mandatory**:
+            matrix-driven PRD は `## Spec→Impl Dispatch Arm Mapping` heading section を
+            **独立 sub-section として hard-code**、各 in-scope matrix cell ↔ dispatch
+            tree leaf (= Implementation Stage Tasks T-N 系列の leaf-level task) の
+            **1-to-1 correspondence** を table 形式で record。table 構造 minimum
+            columns: (i) Cell # / (ii) Candidate ID or Cell label / (iii) Implementation
+            Task ID / (iv) Test contract path / (v) Audit verify mechanism。
+            **Verification mechanism**: `audit-prd-rule10-compliance.py` に
+            `verify_dispatch_arm_mapping_table` function (= 本 sub-rule (9-5) に対応
+            する audit auto-verify、cell 9 v4-3 candidate 由来) を hard-code、本 table の
+            **completeness + 1-to-1 invariant** (= 全 in-scope matrix cell が exactly
+            one task に dispatch + 全 task が exactly one cell から dispatch、no
+            double-claim + no fall-through) を auto verify。
+            **Recurring problem rationale**: dense matrix の cross-reference contexts
+            (matrix table cell # ↔ task list ↔ test contracts) が複数存在する PRD で
+            cell ↔ task mapping を informal narrative 内に scatter すると 1-to-1
+            mapping invariant の verify が manual 化し、reviewer の review iteration
+            毎に partial mapping drift が defect として露呈する pattern が再発する。
+            structured table としての hard-code + audit auto-verify で structural
+            prevention prerequisite。
+      - **(9-6) Substitute / rewrite logic dispatch arm symmetric application**:
+            Rule 9 (Dispatch-arm sub-case alignment) を **substitute / rewrite logic** の
+            dispatch arm にも symmetric 適用。具体: PRD が **rewrite-time** に user
+            source の AST を substitute / inject する logic を含む場合 (例: `__ts_main()`
+            substitute call の async wrap、`await` injection 等)、dispatch arm の
+            symmetric coverage = **sync substitute / async substitute / no substitute**
+            の **3 arm 全てが test cell coverage を持つ** verify mechanism を Spec stage
+            で mandatory 確立。
+            **Recurring problem rationale**: substitute / rewrite logic の dispatch arm は
+            "現状の rewrite logic は async substitute のみ" claim が無 enumerate のまま
+            spec に embed され、sync substitute / no substitute arm に対する test cell
+            coverage gap が Tier 1 silent semantic loss として latent 化する pattern が
+            再発する。Rule 9 symmetric application で 3 arm 全 coverage を framework rule
+            level で enforce する structural prevention prerequisite。
       実装の dispatch arms と PRD matrix cell が乖離する場合は **Spec gap signal**:
       PRD 起草時に問題空間を網羅していなかった証拠であり、現 PRD scope の rework または
       別 PRD 切り出しを判断する。
@@ -279,7 +360,41 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
          を dispatch する場合、両 layer を独立 cell として matrix 化。parent enum を
          child enum と混在記述すると dispatch arm completeness が破綻し ast-variants.md
          single source of truth 違反となる)。
-         機能依存で必要な axis を追加するが、上記 9 候補は default check 対象とする。
+         **caller-supplied wrap context awareness extension (cell 15 / v11-3 由来)**:
+         axis (i) AST dispatch hierarchy wording は **rewrite / substitute / IR-injection logic の caller-supplied wrap context awareness** にも extend する。具体: PRD が
+         **substitute-time** に AST node を injection / rewrite する logic を含む場合、
+         同 AST node が **outer caller context** で wrap される可能性 (= 例: substitute
+         時 `.await` wrap + outer `Expr::Await` の二重作用 = **double-await structural bug**) を axis (i) sub-dimension として enumerate 必須。caller-supplied wrap
+         context を axis (i) で enumerate しない場合、Layer 3 cross-axis review で
+         latent defect として後発検出される pattern が再発するため、Spec stage で axis
+         (i) を caller wrap context awareness にも extend した形で enumerate prerequisite。
+         (j) **double-source consistency (cell 18 / v11-6 由来)**: 解決軸の **同義 doc
+         surfaces** (= handoff doc + script comment + canonical source comment 等の
+         **double-source / triple-source surfaces**、同一 design decision を複数 doc /
+         comment surface で express する場合) が **token-level に accurate な双方 update** を verify する axis。double-source / triple-source surfaces が exists
+         する PRD では、各 source surface 間の wording sync 状態を spec-traceable に
+         enumerate + audit script で auto verify 必須。
+         **Test infra PRD 用 axis extension (cell 23 / v11-11 由来、Iteration v27 post-/check_job L3-1 fix で Axis F/G capital → (k)/(l) lowercase に scheme normalize で structural consistency 確立)**: **test infra defect PRD** では以下 axis を default check axis として enumerate 必須:
+         (k) **cargo profile = debug/release**: test 実行時 cargo profile variance が
+           defect repro / mitigation の dimension となる場合 (例: debug profile での
+           parallel test isolation defect が release profile で reproducibility 異なる
+           pattern) を axis として enumerate
+         (l) **rustc version variance**: rustc version (= MSRV / nightly /
+           specific stable) variance が defect repro / mitigation の dimension となる
+           場合 (例: rustc-version-specific の compile error / runtime behavior 差異) を
+           axis として enumerate
+         out-of-scope なら N/A justification (= "本 PRD は test infra defect ではなく
+         conversion mechanism PRD のため (k)/(l) applicable せず" 等の spec-traceable
+         declare) を `## Rule 10 Application` section 内に explicit declare 必須。
+         機能依存で必要な axis を追加するが、上記 axes (a)-(l) を default check 対象とする
+         (= 9 general purpose axes (a)-(i) + 1 cross-cutting double-source axis (j) +
+         2 test-infra-specific axes (k)/(l) = 12 total default、(k)/(l) は test infra PRD
+         でのみ relevant、その他 PRD では N/A justification で declare)。**Naming scheme
+         single-source-of-truth (post-Iteration v27 L3-1 fix)**: 全 default check axes を
+         **lowercase letter naming scheme** で uniform 化、Spec stage Oracle Observation
+         由来の旧 "Axis F / Axis G" capital wording は (k)/(l) に normalize、Rule 10 axis
+         enumeration の **structural consistency** 確立 (= dual naming scheme inconsistency
+         を structural prevention)。
       2. **Orthogonality verification**: 各 axis pair (A, B) について「A の variant 変化が
          B の variant 出力を変えるか」を自問し、yes なら独立 dimension として保持、
          no なら一つに統合 (NA cell を作る前にこの統合を実施)。
@@ -436,6 +551,25 @@ Matrix-driven PRD (`spec-first-prd.md` 適用対象) の **Spec stage 完了時*
           (= framework rule-audit symmetry principle = 全 rule に対応する audit
           auto-verification、verification deferral eliminate の cell numbering convention
           領域への適用)
+      - **(13-7) Pending verdict severity Critical default + audit auto-verify**:
+        13-rule self-applied verify table 内 sub-rule rows に **pending verdict** (=
+        verify-pending / 未確定 / TBD 等の non-confirmed state) が存在する場合、以下を
+        rule per default 適用:
+        - **(13-7-a) findings count を ≥1** (= pending verdict 1 entry = finding 1 件
+          として count、self-review が 0 findings claim する false-positive を structural
+          prevent)
+        - **(13-7-b) Severity default = Critical** (= Spec stage 移行 block する severity、
+          pending verdict が Spec stage 移行 blocker として treat される default)
+        - **(13-7-c) Audit auto-verify mechanism**: `audit-prd-rule10-compliance.py` 内
+          sub-check で 13-rule self-applied verify table を parse、pending verdict
+          patterns (= "verify pending" / "TBD" / "要確認" / 同義 wording) を detect、
+          findings count vs claimed Critical count の inconsistency を auto fail
+        **Recurring problem rationale**: PRD draft Iteration v1 self-review が Rule 1 等
+        の structural violation (= severity Spec stage 移行 block) を "High" / "Medium"
+        と self-classify する false-positive pattern (= severity blindness) が再発する。
+        Pending verdict severity default = Critical の rule per default 適用 + audit
+        auto-verify で severity assignment subjectivity を eliminate し、reviewer
+        independence の structural prevention prerequisite。
 ```
 
 ## Prohibited

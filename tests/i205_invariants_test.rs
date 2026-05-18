@@ -6,10 +6,16 @@
 //! - **INV-5 (Visibility consistency)**: T13 (13-c) で fill-in 完了、`#[ignore]` 解除済
 //!   (getter + setter symmetric counterpart 2 件 = Layer 3 cross-axis completeness)
 //! - **INV-1〜4 / INV-6**: T15 (`/check_job` 4-layer review + 13-rule self-applied verify)
-//!   で fill-in 予定、`#[ignore]` 状態維持
+//!   で fill-in 予定、`#[ignore]` 状態維持 (= **PRD I-205 close 2026-05-18** で T14-T16
+//!   は TODO `[I-205-T14-T16-followup]` entry に restore、案 γ Phase 2 着手 timing で
+//!   T15 fill-in 実施)
 //!
-//! 各 invariant の verification statement (a/b/c/d) は backlog/I-205-getter-setter-dispatch-framework.md
-//! `## Invariants` section 参照。
+//! 各 invariant の verification statement (a/b/c/d) は **PRD I-205 close 2026-05-18** で
+//! `doc/handoff/design-decisions.md` `## I-205: Class member access dispatch with
+//! getter/setter methodology framework (closed 2026-05-18、follow-up T14-T16 deferred to TODO)`
+//! section に archive (= 旧 backlog/I-205-getter-setter-dispatch-framework.md は close で
+//! file 削除、lesson source は archive section + TODO `[I-205-T14-T16-followup]` entry に
+//! preserved)。
 //!
 //! **Lesson source (deep deep review F-deep-deep-2)**: 当初 invariant verification
 //! tests を PRD `### Invariant verification tests` section の SPEC TEXT のみで record、

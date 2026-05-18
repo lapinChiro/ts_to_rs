@@ -1,8 +1,9 @@
 //! PRD I-D-pre Rule wording tests (= Layer 2 rule file 内 specific text pattern 存在
 //! grep-based assertion tests)。
 //!
-//! **Stub state (2026-05-11 post Spec stage v1)**: Implementation Phase 5 (T2-pre-1 +
-//! T2-pre-2) で fill in 予定、`#[ignore]` 状態維持。
+//! **State (2026-05-18 post I-D-main Iteration v26 Spec への逆戻り)**: T2-pre-1 +
+//! T2-pre-2 fully implemented + `body_before_versioning()` helper を `tests/common/mod.rs`
+//! に移動済 (= I-D-main rule wording tests と DRY 解消)。
 //!
 //! Test structure: 各 rule wording strengthening について
 //! - rule file 内 specific text pattern 存在を grep-based に assert
@@ -13,19 +14,10 @@
 //! 各 test fn name は backlog/I-D-pre-audit-mechanism-bootstrap.md
 //! `## Spec→Impl Dispatch Arm Mapping` table の Test contract path と 1-to-1 sync。
 
+#[path = "common/mod.rs"]
+mod common;
+use common::body_before_versioning;
 use std::fs;
-
-/// Extract the body section of a rule file (= content before `## Versioning`).
-/// Used to verify rule wording is present in the actual rule body, not just in
-/// the Versioning history section (= /check_job deep deep C/H fix: substring
-/// existence-only assertions can false-positive PASS when wording is moved to
-/// Versioning only).
-fn body_before_versioning(content: &str) -> &str {
-    content
-        .split_once("\n## Versioning")
-        .map(|(body, _)| body)
-        .unwrap_or(content)
-}
 
 /// Cell 4 / v11-7 / T2-pre-1: check-job-review-layers.md Layer 1 sub-step
 /// factual accuracy semantic check

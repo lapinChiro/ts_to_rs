@@ -116,15 +116,15 @@ Exit codes:
     2 = invocation error (missing argument / file not found)
 
 ================================================================================
-Cross-PRD verification matrix (= INV-4 4-tuple baseline post Path B split)
+Cross-PRD verification matrix (= INV-4 2-tuple post-close baseline post Path B split + I-D-pre close + I-205 close + I-D-c11 close 2026-05-18)
 ================================================================================
 
 | PRD doc                         | Expected exit | Notes                                       |
 |---------------------------------|---------------|---------------------------------------------|
 | backlog/I-050-...md             | (not target)  | I-050 lacks Rule 10 Application section     |
-| backlog/I-205-...md             | 0 (PASS)      | Pre-existing baseline preserve              |
-| backlog/I-D-pre-...md           | 0 (PASS)      | Self-applied target post F6/F7/Axis 3 fix   |
-| backlog/I-D-main-...md          | 0 (PASS) post-v20 | Path B split scope + framework v1.9 Axes 5/6/7 self-applied integration |
+| backlog/I-D-main-...md          | 0 (PASS) post-v20+v27 | Path B split scope + framework v1.9 Axes 5/6/7 self-applied integration + INV-4 2-tuple cascade sync |
+
+**Closed PRDs (audit out-of-scope post 2026-05-18)**: I-D-pre (closed 2026-05-11、Path E utility 自身 establishment source、archive = doc/handoff/design-decisions.md `## I-D-pre: ...` section)、I-D-c11 (closed 2026-05-18、`expand_cell_list` filter upper-bound `<= 99` uniform fix、archive = `## I-D-c11: ...` section)、I-205 (closed 2026-05-18、class member access dispatch framework T1-T13 完了、follow-up T14-T16 deferred to TODO `[I-205-T14-T16-followup]` entry、archive = `## I-205: ...` section)。
 """
 
 from __future__ import annotations

@@ -832,7 +832,7 @@ def verify_no_duplicate_top_level_matrix(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     ps_section = get_section(content, r"^##\s+Problem Space\s*$")
     if ps_section is None:
         return violations  # Problem Space 不在は別 audit で detect
@@ -871,7 +871,7 @@ def verify_dispatch_tree_pseudocode_syntactic(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     design_section = get_section(content, r"^##\s+Design\s*$")
     if design_section is None:
         return violations
@@ -950,7 +950,7 @@ def verify_dispatch_tree_axis_tuple_consistency(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     design_section = get_section(content, r"^##\s+Design\s*$")
     if design_section is None:
         return violations
@@ -1081,7 +1081,7 @@ def verify_dispatch_arm_mapping_table(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     mapping_match = re.search(
         r"^###\s+Spec→Impl Dispatch Arm Mapping\b", content, re.MULTILINE
     )
@@ -1165,7 +1165,7 @@ def verify_pseudocode_underscore_arm_self_applied(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     design_section = get_section(content, r"^##\s+Design\s*$")
     if design_section is None:
         return violations
@@ -1210,7 +1210,7 @@ def verify_invariant_cell_coverage_double_partition(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     section = get_section(content, r"^##\s+Invariants\b.*$")
     if section is None:
         return violations
@@ -1284,7 +1284,7 @@ def verify_pending_verdict_severity_default(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     section = get_section(content, r"^##\s+Spec Review Iteration Log\b.*$")
     if section is None:
         return violations
@@ -1348,7 +1348,7 @@ def verify_completion_criteria_probe_pattern(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     section = get_section(content, r"^##\s+Completion Criteria\b.*$")
     if section is None:
         return violations
@@ -1414,7 +1414,7 @@ def verify_fixture_oracle_byte_consistency(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     section = get_section(content, r"^##\s+Oracle Observations\b.*$")
     if section is None:
         return violations
@@ -1468,7 +1468,7 @@ def verify_cartesian_product_completeness(
     """
     violations: list[str] = []
     if not has_cell_numbering_convention_section(content):
-        return violations  # Retroactive compliance pending PRDs (= I-205 etc) audit out-of-scope
+        return violations  # Retroactive compliance pending PRDs (= `## Cell Numbering Convention` section 不在 PRDs; I-205 was a historical example pre-2026-05-18 close; post I-205 close 2026-05-18 = active backlog/ ではこの category 該当 PRD 不在、本 gate は legacy PRD への retroactive application defensive design として preserve) audit out-of-scope
     data, _err = parse_rule10_section(content)
     if data is None:
         return violations  # Rule 10 section 不在は別 audit で detect

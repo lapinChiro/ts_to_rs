@@ -60,6 +60,11 @@ default で全実施されるため、deep modifier による depth 制御は不
      - **(4-3) Cross-reference semantic accuracy** = `scripts/verify_prd_self_audits.py` (Path E utility) で PRD doc 内 cross-reference (= Scope / Invariants / Spec→Impl Mapping / Test Plan 等 sections) の cell # appearance consistency + status pending verdict + label namespace collision + external file drift の 4 axes auto-verify (strict byte-exact comparison)
    - **Failure mode (factual conflate)**: reference が文法的に正しい (= grep で hit する) が **意味論的 context が claim と矛盾** している pattern。例えば「Iteration v# で `<module>` 同居 cohesion 化」と claim する文で、実際には v# と `<module>` の作業が異 PRD の異 iteration に属していた場合、grep では reference 存在は確認できるが semantic context は破綻している。本 sub-step がなければ初回 review で通過し、後続 adversarial round で初めて発覚する recurring pattern。
    - **Recurring problem rationale**: 初回 review で固有名詞 reference を「grep hit すれば factual」と判定する pattern が再発し、後続 adversarial round で semantic context 矛盾が露呈する traceability cost が累積する。framework rule level での Layer 1 semantic check sub-step + structural enforcement (上記 (4-1)(4-2)(4-3) の 3 utility 自動化) が prerequisite。
+5. **Decision table cell direct unit test coverage**:
+   - **新 public API / dispatch table / decision table** を導入する PRD で、**decision table cell direct unit test** (= 各 decision table cell に対する直接 unit test) が存在することを Layer 1 で verify (= cell 16 / v11-4 由来 sub-rule)
+   - **indirect coverage のみ** (= integration test 経由で behaviorally cover されているが、decision table cell に対する direct unit assertion が不在) の状態は本 sub-rule 違反、Layer 1 で fail として treat
+   - **Verification**: PRD diff 内に新 enum / struct constructor / `from_dispatch` 等の **dispatch table constructor** が含まれる場合、`grep -rn "<ConstructorName>" tests/` で対応 unit test 存在を確認、各 decision table cell (= 各 enum variant / 各 constructor call site) に対し ≥1 direct unit assertion が存在することを verify
+   - **Recurring problem rationale**: `UserMainSubstitution` enum + `from_dispatch` constructor (10-cell decision table) 等の **dispatch table constructor** に対する **direct unit test missing** state が **indirect coverage** (= integration test 経由 behaviorally cover) のみで放置される pattern が、1st review iteration で発覚せず 2nd review で finding 化する traceability cost を累積する。Layer 1 sub-rule 追加で future PRD review iteration を **front-load** し、direct unit test coverage gap class を **structural prevent**。
 
 ### 必要 Artifacts
 
@@ -159,6 +164,11 @@ implementation stage 側 symmetric。
 3. **Spec gap detection**: 直交軸が PRD matrix で enumerate されていなかった場合、
    `post-implementation-defect-classification.md` の **Spec gap** category として記録
    (framework 失敗 signal)。
+4. **Spec wording vs 実体 infra work cross-check (cell 25 / v12-2 由来)**:
+   - **Spec wording と実体 infra work の cross-check** を **Layer 3 default check axis** に追加 (= Spec stage / Implementation stage transition 時点で **spec wording の実体整合性** を **第三者視点で empirical verify** する mechanism)
+   - **Procedure**: PRD doc 内 spec wording (= 各 T-task の Work / Completion criteria / Spec→Impl Mapping の Implementation Task 列 等の structural claims) を抽出、対応する **実体 infra work** (= scripts / rule files / CI workflow / harness / src/ etc. の current state) を empirical inspect、token-level (= file path / function name / line ref / behavior claim 等) で sync 状態を verify
+   - **Failure indication**: spec wording が実体と diverge (= 例: spec が "rust-runner tokio dep" を claim するが実体は no-tokio / spec が "ESM-mode runner template" を claim するが実体は cjs default / spec が "observe-tsc.sh CI invoke" を claim するが実体は CI 未 integrate) → Spec stage に戻り spec wording 更新 (`spec-first-prd.md` 「Spec への逆戻り」 procedure 発動)
+   - **Recurring problem rationale**: Spec stage iteration v3〜v11 self-review でも spec wording と実体 infra work の divergence が検出されず、Implementation stage `/start` prerequisite 調査で初めて発覚する pattern が再発する。Layer 3 default check axis として cross-check を hard-code することで Spec/Implementation transition boundary を **第三者視点 empirical verify** で trap、self-review subjectivity 由来の latent defect class を structural prevent。
 
 ### 必要 Artifacts
 
@@ -218,6 +228,18 @@ fix が trade-off を導入する場合、犠牲 cell が PRD scope 内か scope
 4. **Architectural rabbit hole detection**: fix が deep iteration で発見された場合
    (Layer 1-3 で見つからず Layer 4 で初めて見える)、それは architectural defect の
    patch 化を試みている signal の可能性 → structural fix を別 PRD で起票検討。
+5. **/check_job recursion convergence criterion (cell 30 / v13-7 由来)**:
+   `/check_job` invocation の recursion (= self-applied → third-party → self-applied chain) において、recursive iteration の **termination condition** を以下の **Hybrid 3 mechanisms (M-1 + M-2 + M-3) + 4-条件 final rule (C-1 + C-2 + C-3 + C-4)** で coordinated 確定する。
+   - **3 Hybrid mechanisms (mechanism axis)**:
+     - **M-1 (severity classification)**: 各 finding を Critical / High / Medium / Low に severity classification、Critical / High = recursive continue / Medium / Low = next-PRD-batch defer 可能 (= within-PRD scope では recursive 不要)
+     - **M-2 (diminishing returns detection)**: round N の findings count が round N-1 same-type-round (= same review side = self-applied / third-party) の findings count 以下になった場合 + Critical 0 達成 → convergence、type-stratified diminishing returns で false-convergence 防止
+     - **M-3 (Meta-finding tracking)**: round N の finding が round N-1 fix work 自体に対する場合 (= self-referential meta-defect、例: fix 自身が新 typo / inconsistency を introduce) は別 category に classify、Substantive findings vs Meta findings の ratio を track
+   - **4-条件 final rule (terminal state axis)**: 以下 **全条件 satisfy** で recursive iteration **terminal**:
+     - **C-1 (Critical=0)**: Critical findings が round N で 0
+     - **C-2 (High=0)**: High findings が round N で 0
+     - **C-3 (trajectory diminishing OR Critical 0)**: round N の total findings count が round N-1 same-type-round 以下 (= **trajectory diminishing** returns confirmed) OR Critical findings 0 達成 (= OR clause で C-1 PASS 時 independent satisfy)
+     - **C-4 (meta-finding ratio <= 50%)**: round N の Meta-findings count / Substantive-findings count <= 50% (= fix work 自身が新 defect を mass introduce していない、Substantive review が dominate)
+   **Recurring problem rationale**: `/check_job` recursive iteration において termination criterion の formal spec 不在状態では (a) 無限 loop (= 毎 iteration で新 defect class 露呈) / (b) arbitrary limit (= max round N で truncate、convergence 未確定) / (c) severity blindness (= Low findings で iteration 継続) / (d) convergence trigger 不在 のいずれかの failure mode で recursive iteration cost が累積する。Hybrid 3 mechanisms + 4-条件 final rule で全 failure mode を coordinated prevent し、recursive iteration の **terminal state empirical proof** を spec-traceable に確立する structural prevention prerequisite。
 
 ### 必要 Artifacts
 
