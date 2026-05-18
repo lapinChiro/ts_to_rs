@@ -1454,6 +1454,79 @@ v1.8 の coordinated self-applied integration (= 互いに cross-reference + 同
 
 ---
 
+## I-D-c11: Path E utility `expand_cell_list` Pattern 全 filter upper-bound uniform consistency (closed 2026-05-18)
+
+**TL;DR**: Path E utility (`scripts/verify_prd_self_audits.py`) の `expand_cell_list` 関数で **全 4 Pattern (CELL_LIST_RE / CELL_STANDALONE_RE / CELL_BRACKET_LIST_RE / TABLE_FIRST_COL_NUM_RE) の filter upper-bound を `<= 99` uniform** に統一、regex `\d{1,2}` upper-bound (= 99) と integral consistency 確立。Pre-PRD で Pattern 2/4 が `<= 30` hardcoded filter で cells 31-99 を silently skip していた bug を structural fix、I-205 PRD doc 内 cells 31-81 wording の Pattern 2/4 detection 復元 (= P2 で 19 new cells / P4 で 31 new cells empirical proof)。
+
+### 案 γ Phase 1.5 prerequisite chain
+
+本 PRD は **案 γ Phase 1.5** (= I-205 T14-T16 着手前 prerequisite) として位置付け、PRD I-D-pre Phase 3 Round 2 /check_problem (2026-05-15) post-fix in-session investigation で TODO `[I-D-future-audit-extensions-hardening]` C11 candidate として detection、Path E utility own correctness ceiling improvement (= bootstrap utility 自身の structural inconsistency 解消、ideal-implementation-primacy 直接 align)。
+
+### Resolution direction R2 採用 (user 確定 2026-05-18)
+
+3 candidates 評価:
+- **R1**: Pattern 2/4 のみ `<= 30` → `<= 99` 修正 (Pattern 1/3 既存 `<= 999` 維持) = minimal-invasive、ただし Pattern 1/3 vs 2/4 internal inconsistency 残存
+- **R2 (採用)**: 全 4 Pattern を `<= 99` uniform = most uniform structural fix、regex `\d{1,2}` upper-bound と integral consistency
+- **R3**: 全 4 Pattern を `<= 999` permissive + regex `\d{1,3}` 拡張 = future-proof、ただし empirical 不在 (= active backlog/ + doc/handoff/ に cells 100+ wording 不在 confirmed = YAGNI)
+
+R3 = empirical YAGNI elimination (= cells 100+ wording 不在 confirmed)、R1 vs R2 ideal-clean lens で R2 採用 (= 内部 inconsistency 完全 collapse、single axis uniform)。
+
+### INV-1〜INV-6 structural lock-in (本 PRD で確立)
+
+6 invariants empirical lock-in 達成:
+- **INV-1**: Filter upper-bound uniform consistency (= `expand_cell_list` 関数内全 6 occurrences filter literal == 99)、syntactic lock-in test (`test_path_e_id_c11_filter_uniform_99`) で source file scan + literal extract + 全 occurrence assert
+- **INV-2**: Regex unchanged (= `\d{1,2}` upper-bound preserve、本 PRD scope discipline strict)
+- **INV-3**: Cells 1-30 partition preservation (= Pre/Post effective behavior 不変、P1-P4 全 Pattern × R1)
+- **INV-4**: Cells 31-99 P2/P4 detection (= bug fix outcome、Pattern 2/4 silent skip → 正しい detection transition)
+- **INV-5**: Cells 100+ structural rejection (= regex word boundary fail、R3 NA preservation)
+- **INV-6**: R5 (negative) pattern-asymmetric handling preservation (= P1/P3 latent absorb / P2/P4 reject、Iteration v4 F6 で detection、structural future hardening は別 TODO `[I-D-future-audit-extensions-hardening]` C14 候補)
+
+### 4 Iteration cycle (Spec stage v1→v4)
+
+- **Iteration v1** (self-review、2026-05-18): 0 findings、Hybrid 4-条件 全 PASS、CONVERGED candidate
+- **Iteration v2** (third-party adversarial review via /check_job 13-rule re-verify、2026-05-18): 5 findings (Medium 1 + Low 4 = F1 TS-3 stage boundary 混乱 + F2 Scope 列 wording strict adherence + F3 framework rule reference stale + F4 axes enumerated scope 外 axis + F5 etc. abbreviation spirit) — self-review v1 で bias-blind だった findings を third-party adversarial で surface
+- **Iteration v3** (v2 fix + re-self-review、2026-05-18): 0 findings、Hybrid 4-条件 全 PASS、再 CONVERGED
+- **Iteration v4** (Implementation T2 test design 中 Spec gap 発見、2026-05-18): 1 Medium finding (F6 = R5 negative sign handling pattern-asymmetric latent behavior、self-review v3 で missed Spec gap) → R5 spec accurate narrow + INV-6 NEW + C14 NEW 起票 with v4 fix = CONVERGED
+
+### Bootstrap utility correctness ceiling improvement empirical proof
+
+Pre-PRD vs Post-PRD empirical simulation on I-205 PRD doc (2026-05-18):
+- **P2 (CELL_STANDALONE_RE)**: Pre = 20 cells (range 2-29) → Post = 39 cells (= 20 pre + 19 new: cells 36-78)
+- **P4 (TABLE_FIRST_COL_NUM_RE)**: Pre = cells 1-20 sample → Post = cells 1-81 (= +31 newly detected: 31-81 range)
+
+= bootstrap utility own correctness ceiling **4-step layered defense + step 5 NEW** (= I-D-pre で Method A → Path E Axes 1-4 → Path E Axes 5-7 → third-party adversarial review が established、本 PRD で **step 5 = filter upper-bound uniform consistency** が cells N>30 detection coverage の structural prevention として added)。
+
+### INV-4 baseline independence (PRD I-D-main 内 INV-4 (e) note 追加)
+
+本 PRD fix は I-D-main INV-4 3-tuple baseline (I-050 FAIL preserve / I-205 PASS / I-D-main PASS) に **direct 影響しない** (= INV-4 は `audit-prd-rule10-compliance.py` のみ track、Path E utility は別 utility、I-205 Path E result Axis 1 missing list は acknowledged pre-existing state を preserve、I-205 PRD doc 自身 update は別 TODO `[I-205-retroactive-cell-numbering-section]` per 案 γ Phase 2 T15 batch)。
+
+I-D-main PRD doc INV-4 (e) Path E utility own correctness independence note を本 PRD T4 で追加、empirical state final: I-D-main Path E 0 drifts on all 7 axes preserve、INV-4 3-tuple baseline preserve、handoff audit 0 drifts。
+
+### Test infrastructure final state
+
+`tests/i_d_pre_path_e_test.rs` total 20 tests (= existing 11 Axes 1-7 + metadata + 9 NEW I-D-c11 = INV-1〜INV-6 structural lock-in):
+- `test_path_e_id_c11_p1_preserves_cells_1_to_99`
+- `test_path_e_id_c11_p2_detects_cells_31_to_99` (= INV-4 bug fix outcome)
+- `test_path_e_id_c11_p3_preserves_cells_1_to_99`
+- `test_path_e_id_c11_p4_detects_cells_31_to_99` (= INV-4 bug fix outcome)
+- `test_path_e_id_c11_rejects_3digit_numbers` (= INV-5)
+- `test_path_e_id_c11_rejects_zero` (= R4)
+- `test_path_e_id_c11_p2_p4_reject_negative_individual` (= INV-6 P2/P4 reject)
+- `test_path_e_id_c11_p1_p3_latent_absorb_negative_sign` (= INV-6 P1/P3 latent)
+- `test_path_e_id_c11_filter_uniform_99` (= INV-1 syntactic lock-in)
+
+Helper functions (`invoke_expand_cell_list` / `invoke_pattern_regex`) は Python inline script + stdin pipe で direct unit test、`regex` crate dependency なし (= test self-contained、ideal-clean lens)。
+
+**Test invocation context axis (parallel safety)**: 各 test 独立 Python subprocess invocation (= `std::process::Command::new("python3")` spawn) + stdin pipe で input 渡し、subprocess output stdout を parse して assertion = **test 間 state shared なし、cargo test 並列実行で 20 tests parallel safe**。Cross-axis enumeration の implicit axis として post-close 1st `/check_job` deep adversarial review (F-Deep5、2026-05-18) で明示記録 = 本 PRD で empirical 確認済 (= cargo test --test i_d_pre_path_e_test で 1.92s / 20 tests / 0 failed)。
+
+8 NEW fixtures in `tests/fixtures/i_d_pre/{positive,negative}/path_e_expand_cell_list_*.md` で per-cell input contract lock-in (= future test extension reuse 可能)。
+
+### Lesson source preserved (削除禁止)
+
+PRD doc `backlog/I-D-c11-path-e-cell-list-pattern-consistency.md` は close で削除済、本 archive section が **single source of truth lesson preservation**。本 PRD 4 iteration cycle + INV-1〜INV-6 lock-in + bootstrap utility ceiling improvement empirical proof は将来の audit utility own correctness PRD (例: TODO C7/C9/C10 reduced/C12/C13/C14 等) 起票時の **mandatory reference**。
+
+---
+
 ## バージョン / 更新履歴
 
 本ドキュメントは design handoff のアーカイブ。各 section の対応 PRD は section 見出しで明記。

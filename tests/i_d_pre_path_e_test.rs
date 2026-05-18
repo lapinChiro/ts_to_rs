@@ -445,3 +445,355 @@ fn test_path_e_axis7_symmetric_cross_cutting_no_drift() {
         count, stdout
     );
 }
+
+// =========================================================================
+// PRD I-D-c11: expand_cell_list filter upper-bound uniform `<= 99` consistency
+//
+// Resolution direction R2 採用: 全 4 Pattern (CELL_LIST_RE / CELL_STANDALONE_RE /
+// CELL_BRACKET_LIST_RE / TABLE_FIRST_COL_NUM_RE) で filter `<= 99` uniform、regex
+// `\d{1,2}` upper-bound (= 99) と integral consistency 確立。
+//
+// INV-1 (filter uniform), INV-3 (cells 1-30 preservation), INV-4 (cells 31-99
+// P2/P4 detection = bug fix outcome), INV-5 (cells 100+ structural rejection),
+// INV-6 (R5 negative pattern-asymmetric preservation) を lock-in。
+// =========================================================================
+
+/// Helper: invoke `expand_cell_list` function directly via Python inline script + stdin pipe.
+/// Returns sorted Vec<u32> of detected cells.
+fn invoke_expand_cell_list(input: &str) -> Vec<u32> {
+    use std::io::Write;
+    let python_script = r#"
+import sys
+sys.path.insert(0, 'scripts')
+import importlib.util
+spec = importlib.util.spec_from_file_location('vpsa', 'scripts/verify_prd_self_audits.py')
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+text = sys.stdin.read()
+cells = m.expand_cell_list(text)
+print(','.join(str(n) for n in sorted(cells)))
+"#;
+    let mut cmd = Command::new("python3")
+        .args(["-c", python_script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn python3 for expand_cell_list");
+    {
+        let stdin = cmd.stdin.as_mut().expect("stdin pipe");
+        stdin
+            .write_all(input.as_bytes())
+            .expect("failed to write stdin");
+    }
+    let output = cmd.wait_with_output().expect("python3 wait failure");
+    assert!(
+        output.status.success(),
+        "python3 expand_cell_list invocation failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("non-utf-8 stdout");
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return vec![];
+    }
+    trimmed
+        .split(',')
+        .map(|s| s.parse::<u32>().expect("u32 parse"))
+        .collect()
+}
+
+/// Helper: invoke a specific regex pattern from verify_prd_self_audits.py + filter `<= 99`.
+/// Used for INV-6 individual regex test (P2 = CELL_STANDALONE_RE / P4 = TABLE_FIRST_COL_NUM_RE).
+fn invoke_pattern_regex(pattern_name: &str, input: &str) -> Vec<u32> {
+    use std::io::Write;
+    let python_script = format!(
+        r#"
+import sys
+sys.path.insert(0, 'scripts')
+import importlib.util
+spec = importlib.util.spec_from_file_location('vpsa', 'scripts/verify_prd_self_audits.py')
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+pattern = getattr(m, '{}')
+text = sys.stdin.read()
+cells = set()
+for match in pattern.finditer(text):
+    try:
+        n = int(match.group(1))
+        if 1 <= n <= 99:
+            cells.add(n)
+    except (ValueError, IndexError):
+        pass
+print(','.join(str(n) for n in sorted(cells)))
+"#,
+        pattern_name
+    );
+    let mut cmd = Command::new("python3")
+        .args(["-c", &python_script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn python3 for pattern regex test");
+    {
+        let stdin = cmd.stdin.as_mut().expect("stdin pipe");
+        stdin
+            .write_all(input.as_bytes())
+            .expect("failed to write stdin");
+    }
+    let output = cmd.wait_with_output().expect("python3 wait failure");
+    assert!(
+        output.status.success(),
+        "python3 pattern regex test failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("non-utf-8 stdout");
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return vec![];
+    }
+    trimmed
+        .split(',')
+        .map(|s| s.parse::<u32>().expect("u32 parse"))
+        .collect()
+}
+
+/// PRD I-D-c11 Cell # 1, # 2 (P1 × R1+R2 behavior preservation、INV-3)
+/// Pattern 1 (CELL_LIST_RE = "cells N, M, ..." lowercase form) で cells 1-99 全 detect、
+/// Pre/Post PRD で effective behavior 不変 (filter `<= 999` → `<= 99` uniform 化)。
+#[test]
+fn test_path_e_id_c11_p1_preserves_cells_1_to_99() {
+    let text =
+        fs::read_to_string("tests/fixtures/i_d_pre/positive/path_e_expand_cell_list_p1_n_gt_30.md")
+            .expect("read p1 fixture");
+    let cells = invoke_expand_cell_list(&text);
+    assert_eq!(
+        cells,
+        vec![5, 30, 31, 38, 70, 99],
+        "P1 fixture cells 1-99 detection failed: expected {{5, 30, 31, 38, 70, 99}}, got {:?}",
+        cells
+    );
+}
+
+/// PRD I-D-c11 Cell # 6 + Cell # 7 (P2 × R1+R2、primary intent = INV-4 bug fix outcome)
+/// Pattern 2 (CELL_STANDALONE_RE = "Cell N" capitalized standalone form) で cells 31-99
+/// detection (= Pre-PRD silent skip からの bug fix transition)。
+///
+/// **Test name rationale**: `_detects_cells_31_to_99` で **primary intent (= INV-4 bug fix
+/// outcome、cells 31-99 newly detected)** を強調。Assertion 内に cells 5, 30 (= Cell # 6 = R1
+/// partition behavior preservation = INV-3) も含み、本 test で R1 + R2 両 partition の coverage
+/// を 1-to-1 fixture-based assertion で達成。`_31_to_99` 名は test scope の literal range
+/// ではなく architectural concern (= bug fix outcome) の semantic label。
+#[test]
+fn test_path_e_id_c11_p2_detects_cells_31_to_99() {
+    let text =
+        fs::read_to_string("tests/fixtures/i_d_pre/positive/path_e_expand_cell_list_p2_n_gt_30.md")
+            .expect("read p2 fixture");
+    let cells = invoke_expand_cell_list(&text);
+    assert_eq!(
+        cells,
+        vec![5, 30, 31, 38, 70, 99],
+        "P2 fixture cells 31-99 detection failed (bug fix outcome): expected {{5, 30, 31, 38, 70, 99}}, got {:?}",
+        cells
+    );
+    // INV-4 explicit assert: cells 31, 38, 70, 99 (= newly detected via bug fix) must be present
+    for newly_detected in [31u32, 38, 70, 99] {
+        assert!(
+            cells.contains(&newly_detected),
+            "INV-4 bug fix outcome violated: cell {} should be newly detected via P2 filter `<= 30` → `<= 99` uniform 化, got cells={:?}",
+            newly_detected, cells
+        );
+    }
+}
+
+/// PRD I-D-c11 Cell # 11, # 12 (P3 × R1+R2 behavior preservation、INV-3)
+#[test]
+fn test_path_e_id_c11_p3_preserves_cells_1_to_99() {
+    let text =
+        fs::read_to_string("tests/fixtures/i_d_pre/positive/path_e_expand_cell_list_p3_n_gt_30.md")
+            .expect("read p3 fixture");
+    let cells = invoke_expand_cell_list(&text);
+    assert_eq!(
+        cells,
+        vec![5, 30, 31, 38, 70, 99],
+        "P3 fixture cells 1-99 detection failed: expected {{5, 30, 31, 38, 70, 99}}, got {:?}",
+        cells
+    );
+}
+
+/// PRD I-D-c11 Cell # 16 + Cell # 17 (P4 × R1+R2、primary intent = INV-4 bug fix outcome)
+/// Pattern 4 (TABLE_FIRST_COL_NUM_RE = markdown table first column `| N |`) で cells 31-99
+/// detection (= Pre-PRD silent skip からの bug fix transition)。
+///
+/// **Test name rationale**: `_detects_cells_31_to_99` で **primary intent (= INV-4 bug fix
+/// outcome)** 強調。Assertion 内に cells 5, 30 (= Cell # 16 = R1 partition behavior preservation
+/// = INV-3) も含み、R1 + R2 両 partition coverage を 1-to-1 fixture-based assertion で達成。
+#[test]
+fn test_path_e_id_c11_p4_detects_cells_31_to_99() {
+    let text =
+        fs::read_to_string("tests/fixtures/i_d_pre/positive/path_e_expand_cell_list_p4_n_gt_30.md")
+            .expect("read p4 fixture");
+    let cells = invoke_expand_cell_list(&text);
+    assert_eq!(
+        cells,
+        vec![5, 30, 31, 38, 70, 99],
+        "P4 fixture cells 31-99 detection failed (bug fix outcome): expected {{5, 30, 31, 38, 70, 99}}, got {:?}",
+        cells
+    );
+    // INV-4 explicit assert: cells 31, 38, 70, 99 (= newly detected via bug fix) must be present
+    for newly_detected in [31u32, 38, 70, 99] {
+        assert!(
+            cells.contains(&newly_detected),
+            "INV-4 bug fix outcome violated: cell {} should be newly detected via P4 filter `<= 30` → `<= 99` uniform 化, got cells={:?}",
+            newly_detected, cells
+        );
+    }
+}
+
+/// PRD I-D-c11 Cell # 3, # 8, # 13, # 18 (R3 cells 100+ structural rejection、INV-5)
+/// 4 Pattern × R3 fixtures で empty set return (regex `\d{1,2}` word boundary fail)。
+#[test]
+fn test_path_e_id_c11_rejects_3digit_numbers() {
+    let fixtures = [
+        "tests/fixtures/i_d_pre/negative/path_e_expand_cell_list_p1_overflow_100.md",
+        "tests/fixtures/i_d_pre/negative/path_e_expand_cell_list_p2_overflow_100.md",
+        "tests/fixtures/i_d_pre/negative/path_e_expand_cell_list_p3_overflow_100.md",
+        "tests/fixtures/i_d_pre/negative/path_e_expand_cell_list_p4_overflow_100.md",
+    ];
+    for fixture in fixtures {
+        let text = fs::read_to_string(fixture).expect("read overflow fixture");
+        let cells = invoke_expand_cell_list(&text);
+        assert!(
+            cells.is_empty(),
+            "INV-5 violated: fixture {} should return empty set (cells 100+ structural reject), got cells={:?}",
+            fixture, cells
+        );
+    }
+}
+
+/// PRD I-D-c11 Cell # 4, # 9, # 14, # 19 (R4 cell # 0 filter lower-bound reject)
+/// 全 4 Pattern で cell 0 を reject (filter `1 <= n`)。
+#[test]
+fn test_path_e_id_c11_rejects_zero() {
+    let inputs = [
+        ("P1", "cells 0"),
+        ("P2", "Cell 0"),
+        ("P3", "{0}"),
+        ("P4", "| 0 | invalid |"),
+    ];
+    for (label, input) in inputs {
+        let cells = invoke_expand_cell_list(input);
+        assert!(
+            cells.is_empty(),
+            "R4 violated for {}: input '{}' should return empty set (cell 0 filter lower-bound reject), got cells={:?}",
+            label, input, cells
+        );
+    }
+}
+
+/// PRD I-D-c11 Cell # 10, # 20 (P2/P4 × R5 individual regex digit-only reject、INV-6)
+/// Pattern 2 (CELL_STANDALONE_RE) + Pattern 4 (TABLE_FIRST_COL_NUM_RE) を **individual
+/// regex level** で test、negative sign を digit-only regex で reject。
+#[test]
+fn test_path_e_id_c11_p2_p4_reject_negative_individual() {
+    // P2 individual regex (CELL_STANDALONE_RE)
+    let p2_cells = invoke_pattern_regex("CELL_STANDALONE_RE", "Cell -5");
+    assert!(
+        p2_cells.is_empty(),
+        "INV-6 violated for P2 individual regex: input 'Cell -5' should match nothing via CELL_STANDALONE_RE (digit-only after \\s+), got cells={:?}",
+        p2_cells
+    );
+    // P4 individual regex (TABLE_FIRST_COL_NUM_RE)
+    let p4_cells = invoke_pattern_regex("TABLE_FIRST_COL_NUM_RE", "| -5 | invalid |");
+    assert!(
+        p4_cells.is_empty(),
+        "INV-6 violated for P4 individual regex: input '| -5 |' should match nothing via TABLE_FIRST_COL_NUM_RE (digit-only after `|\\s*`), got cells={:?}",
+        p4_cells
+    );
+}
+
+/// PRD I-D-c11 Cell # 5, # 15 (P1/P3 × R5 latent absorb behavior preservation、INV-6)
+/// Pattern 1 (CELL_LIST_RE) + Pattern 3 (CELL_BRACKET_LIST_RE) body regex set
+/// `[\d,\s\-–/]` で sign を range delimiter として absorb、後続 digit を cell # extract。
+/// 本 PRD で behavior 不変 (= INV-2 regex unchanged)、Future structural hardening は
+/// 別 TODO `[I-D-future-audit-extensions-hardening]` C14 候補。
+#[test]
+fn test_path_e_id_c11_p1_p3_latent_absorb_negative_sign() {
+    // P1 latent absorb: "cells -5" → cells={5} (sign absorbed in body range delimiter set)
+    let p1_cells = invoke_expand_cell_list("cells -5");
+    assert_eq!(
+        p1_cells,
+        vec![5],
+        "INV-6 P1 latent absorb behavior violated: input 'cells -5' should return cells={{5}} (sign absorbed via CELL_LIST_RE body set), got {:?}",
+        p1_cells
+    );
+    // P3 latent absorb: "{-5}" → cells={5} (sign absorbed in bracket-list body set)
+    let p3_cells = invoke_expand_cell_list("{-5}");
+    assert_eq!(
+        p3_cells,
+        vec![5],
+        "INV-6 P3 latent absorb behavior violated: input '{{-5}}' should return cells={{5}} (sign absorbed via CELL_BRACKET_LIST_RE body set), got {:?}",
+        p3_cells
+    );
+}
+
+/// PRD I-D-c11 INV-1 syntactic lock-in: source file scan で expand_cell_list 内 全 filter
+/// expression が `<= 99` uniform。`scripts/verify_prd_self_audits.py` の `expand_cell_list`
+/// 関数 body (def expand_cell_list ... return cells) を抽出、filter upper-bound literal を
+/// extract し、全 occurrences で literal == 99 assert。
+#[test]
+fn test_path_e_id_c11_filter_uniform_99() {
+    let source = fs::read_to_string("scripts/verify_prd_self_audits.py").expect("read source");
+
+    // Extract expand_cell_list function body (from "def expand_cell_list" to next top-level def or end)
+    let func_start = source
+        .find("def expand_cell_list(")
+        .expect("expand_cell_list function not found");
+    let after_func = &source[func_start..];
+    // Find end: next top-level "def " or end of file
+    let func_end_rel = after_func[1..]
+        .find("\ndef ")
+        .map(|i| i + 1)
+        .unwrap_or(after_func.len());
+    let func_body = &after_func[..func_end_rel];
+
+    // Extract all `if 1 <= ... <= N:` filter literals via manual string parse
+    // (= regex crate not added to dev-dependencies、test self-contained ideal-clean lens)
+    let mut filter_literals: Vec<String> = Vec::new();
+    for line in func_body.lines() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("if 1 <=") {
+            continue;
+        }
+        // Find colon position (end of filter expression)
+        let colon_pos = match trimmed.find(':') {
+            Some(p) => p,
+            None => continue,
+        };
+        let before_colon = &trimmed[..colon_pos];
+        // Find LAST "<=" before colon (handles "if 1 <= lo <= hi <= 99" + "if 1 <= n <= 99")
+        let last_le = match before_colon.rfind("<=") {
+            Some(p) => p,
+            None => continue,
+        };
+        let after_le = before_colon[last_le + 2..].trim();
+        if after_le.parse::<u32>().is_ok() {
+            filter_literals.push(after_le.to_string());
+        }
+    }
+
+    assert_eq!(
+        filter_literals.len(),
+        6,
+        "expected 6 filter expressions in expand_cell_list (4 Pattern × {{range + individual / single}} = 6), got {} (literals: {:?})",
+        filter_literals.len(), filter_literals
+    );
+    for literal in &filter_literals {
+        assert_eq!(
+            literal, "99",
+            "INV-1 syntactic lock-in violated: expand_cell_list filter literal expected '99' uniform, got '{}' (all literals: {:?})",
+            literal, filter_literals
+        );
+    }
+}

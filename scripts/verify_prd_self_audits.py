@@ -230,12 +230,17 @@ TABLE_FIRST_COL_NUM_RE = re.compile(r"^\|\s*(\d{1,2})\s*\|", re.MULTILINE)
 
 
 def expand_cell_list(text: str) -> set[int]:
-    """Extract cell numbers from common phrasings.
+    r"""Extract cell numbers from common phrasings.
 
     **Supported patterns (F6 fix integrated)**:
     - "cells 1, 4, 5, 6, 7-9, 12" (lowercase, original I-D parent form)
     - "**Cell 1**" / "Cell 12" (capitalized standalone, I-D-pre / I-D-main bullet list form)
     - "{1, 2, 3, ..., 30}" (bracket-list, explicit cell # set enumeration)
+
+    **Filter upper-bound invariant** (PRD I-D-c11、2026-05-18 R2 採用 cohesive batch):
+    全 4 Pattern の filter upper-bound は ``<= 99`` で uniform、regex ``\d{1,2}``
+    upper-bound (= 2 digit max = 99) と structural alignment 確立。Cells 100+ は
+    regex word boundary fail で structurally rejected (= INV-5 lock-in)。
     """
     cells: set[int] = set()
 
@@ -245,19 +250,19 @@ def expand_cell_list(text: str) -> set[int]:
         # Handle ranges
         for r in CELL_NUM_RANGE_RE.finditer(body):
             lo, hi = int(r.group(1)), int(r.group(2))
-            if 1 <= lo <= hi <= 999:
+            if 1 <= lo <= hi <= 99:
                 cells.update(range(lo, hi + 1))
         # Handle individual numbers (after stripping ranges)
         body_no_range = CELL_NUM_RANGE_RE.sub(" ", body)
         for num_match in re.finditer(r"\b(\d{1,2})\b", body_no_range):
             n = int(num_match.group(1))
-            if 1 <= n <= 999:
+            if 1 <= n <= 99:
                 cells.add(n)
 
     # Pattern 2: "Cell N" capitalized standalone
     for m in CELL_STANDALONE_RE.finditer(text):
         n = int(m.group(1))
-        if 1 <= n <= 30:
+        if 1 <= n <= 99:
             cells.add(n)
 
     # Pattern 3: "{N, M, ..., K}" bracket-list
@@ -265,18 +270,18 @@ def expand_cell_list(text: str) -> set[int]:
         body = m.group(1)
         for r in CELL_NUM_RANGE_RE.finditer(body):
             lo, hi = int(r.group(1)), int(r.group(2))
-            if 1 <= lo <= hi <= 999:
+            if 1 <= lo <= hi <= 99:
                 cells.update(range(lo, hi + 1))
         body_no_range = CELL_NUM_RANGE_RE.sub(" ", body)
         for num_match in re.finditer(r"\b(\d{1,2})\b", body_no_range):
             n = int(num_match.group(1))
-            if 1 <= n <= 999:
+            if 1 <= n <= 99:
                 cells.add(n)
 
     # Pattern 4: markdown table first column "| N |" (= Spec→Impl Mapping cell # 列)
     for m in TABLE_FIRST_COL_NUM_RE.finditer(text):
         n = int(m.group(1))
-        if 1 <= n <= 30:
+        if 1 <= n <= 99:
             cells.add(n)
 
     return cells
